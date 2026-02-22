@@ -850,7 +850,17 @@ public sealed class LinodeProvider
         var upstreams = resolver.ResolveCaddyUpstreams(caddy);
         var domain = caddy.Config.GetValueOrDefault("domain", "{$DOMAIN}");
 
-        var lines = new List<string> { $"{domain} {{" };
+        var lines = new List<string>
+        {
+            $"{domain} {{",
+            "  header {",
+            "    Strict-Transport-Security \"max-age=31536000; includeSubDomains; preload\"",
+            "    X-Content-Type-Options \"nosniff\"",
+            "    X-Frame-Options \"DENY\"",
+            "    Referrer-Policy \"strict-origin-when-cross-origin\"",
+            "    Permissions-Policy \"camera=(), microphone=(self), geolocation=(), payment=()\"",
+            "  }"
+        };
 
         foreach (var (image, upstreamPath) in upstreams)
         {

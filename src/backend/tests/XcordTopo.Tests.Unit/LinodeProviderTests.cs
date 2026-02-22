@@ -388,6 +388,13 @@ public class LinodeProviderTests
         Assert.Contains("caddy:2-alpine", provisioning);
         Assert.Contains("-p 80:80", provisioning);
         Assert.Contains("-p 443:443", provisioning);
+
+        // Verify security headers in generated Caddyfile
+        Assert.Contains("Strict-Transport-Security", provisioning);
+        Assert.Contains("X-Content-Type-Options", provisioning);
+        Assert.Contains("X-Frame-Options", provisioning);
+        Assert.Contains("Referrer-Policy", provisioning);
+        Assert.Contains("Permissions-Policy", provisioning);
     }
 
     [Fact]

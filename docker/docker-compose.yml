@@ -1,0 +1,8 @@
+services:
+  topo:
+    image: xcord-topo
+    ports:
+      - "8090:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Data__BasePath: /data

@@ -1,0 +1,4 @@
+# Only send what the Dockerfile needs: .build/ and docker/data/
+*
+!.build/
+!docker/data/

@@ -1,0 +1,39 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.pdb
+*.nupkg
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.local
+
+# Node
+node_modules/
+dist/
+
+# Build artifacts
+.build/
+
+# Secrets
+*.pfx
+*.key
+
+# Claude Code (local-only)
+.claude/
+CLAUDE.md

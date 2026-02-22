@@ -1,0 +1,163 @@
+{
+  "id": "00000000-0000-0000-0000-000000000002",
+  "name": "Single Host — Good Enough",
+  "description": "Minimal single-host deployment: everything on one server. Hub, Federation, PG, Redis, MinIO all singleton and shared. For multi-instance, wrap Fed/PG/Redis in a FederationGroup and leave MinIO at host level for shared storage.",
+  "provider": "linode",
+  "providerConfig": {},
+  "containers": [
+    {
+      "id": "a1000000-0000-0000-0000-000000000001",
+      "name": "server",
+      "kind": "Host",
+      "x": 60,
+      "y": 60,
+      "width": 500,
+      "height": 550,
+      "ports": [
+        { "id": "b1000000-0000-0000-0000-000000000001", "name": "ssh", "type": "Control", "direction": "In", "side": "Left", "offset": 0.5 },
+        { "id": "b1000000-0000-0000-0000-000000000002", "name": "public", "type": "Network", "direction": "InOut", "side": "Right", "offset": 0.3 },
+        { "id": "b1000000-0000-0000-0000-000000000003", "name": "private", "type": "Network", "direction": "InOut", "side": "Right", "offset": 0.7 }
+      ],
+      "images": [
+        {
+          "id": "c1000000-0000-0000-0000-000000000010",
+          "name": "PostgreSQL",
+          "kind": "PostgreSQL",
+          "x": 20,
+          "y": 300,
+          "width": 120,
+          "height": 50,
+          "ports": [
+            { "id": "d1000000-0000-0000-0000-000000000010", "name": "postgres", "type": "Database", "direction": "In", "side": "Top", "offset": 0.5 }
+          ],
+          "dockerImage": "postgres:17-alpine",
+          "config": { "replicas": "1", "volumeSize": "25" }
+        },
+        {
+          "id": "c1000000-0000-0000-0000-000000000011",
+          "name": "Redis",
+          "kind": "Redis",
+          "x": 160,
+          "y": 300,
+          "width": 120,
+          "height": 50,
+          "ports": [
+            { "id": "d1000000-0000-0000-0000-000000000020", "name": "redis", "type": "Database", "direction": "In", "side": "Top", "offset": 0.5 }
+          ],
+          "dockerImage": "redis:7-alpine",
+          "config": { "replicas": "1", "volumeSize": "10" }
+        },
+        {
+          "id": "c1000000-0000-0000-0000-000000000012",
+          "name": "MinIO",
+          "kind": "MinIO",
+          "x": 300,
+          "y": 300,
+          "width": 120,
+          "height": 50,
+          "ports": [
+            { "id": "d1000000-0000-0000-0000-000000000030", "name": "s3", "type": "Storage", "direction": "In", "side": "Top", "offset": 0.5 }
+          ],
+          "dockerImage": "minio/minio:latest",
+          "config": { "replicas": "1", "volumeSize": "50" }
+        }
+      ],
+      "children": [
+        {
+          "id": "a1000000-0000-0000-0000-000000000010",
+          "name": "Caddy",
+          "kind": "Caddy",
+          "x": 20,
+          "y": 20,
+          "width": 450,
+          "height": 230,
+          "ports": [
+            { "id": "b1000000-0000-0000-0000-000000000010", "name": "http_in", "type": "Network", "direction": "In", "side": "Top", "offset": 0.3 },
+            { "id": "b1000000-0000-0000-0000-000000000011", "name": "https_in", "type": "Network", "direction": "In", "side": "Top", "offset": 0.7 },
+            { "id": "b1000000-0000-0000-0000-000000000012", "name": "upstream", "type": "Network", "direction": "Out", "side": "Bottom", "offset": 0.5 }
+          ],
+          "images": [
+            {
+              "id": "c1000000-0000-0000-0000-000000000002",
+              "name": "Hub Server",
+              "kind": "HubServer",
+              "x": 20,
+              "y": 20,
+              "width": 140,
+              "height": 60,
+              "ports": [
+                { "id": "d1000000-0000-0000-0000-000000000040", "name": "http", "type": "Network", "direction": "In", "side": "Top", "offset": 0.5 },
+                { "id": "d1000000-0000-0000-0000-000000000041", "name": "pg_connection", "type": "Database", "direction": "Out", "side": "Bottom", "offset": 0.3 },
+                { "id": "d1000000-0000-0000-0000-000000000042", "name": "redis_connection", "type": "Database", "direction": "Out", "side": "Bottom", "offset": 0.7 }
+              ],
+              "dockerImage": "ghcr.io/xcord/hub:latest",
+              "config": { "replicas": "1", "upstreamPath": "/hub/*" }
+            },
+            {
+              "id": "c1000000-0000-0000-0000-000000000001",
+              "name": "Federation Server",
+              "kind": "FederationServer",
+              "x": 220,
+              "y": 20,
+              "width": 140,
+              "height": 60,
+              "ports": [
+                { "id": "d1000000-0000-0000-0000-000000000001", "name": "http", "type": "Network", "direction": "In", "side": "Top", "offset": 0.5 },
+                { "id": "d1000000-0000-0000-0000-000000000002", "name": "pg_connection", "type": "Database", "direction": "Out", "side": "Bottom", "offset": 0.2 },
+                { "id": "d1000000-0000-0000-0000-000000000003", "name": "redis_connection", "type": "Database", "direction": "Out", "side": "Bottom", "offset": 0.5 },
+                { "id": "d1000000-0000-0000-0000-000000000004", "name": "minio_connection", "type": "Storage", "direction": "Out", "side": "Bottom", "offset": 0.8 }
+              ],
+              "dockerImage": "ghcr.io/xcord/fed:latest",
+              "config": { "replicas": "1", "upstreamPath": "/*" }
+            }
+          ],
+          "children": [],
+          "config": {
+            "domain": "chat.example.com"
+          }
+        }
+      ],
+      "config": {}
+    }
+  ],
+  "wires": [
+    {
+      "id": "e1000000-0000-0000-0000-000000000001",
+      "fromNodeId": "c1000000-0000-0000-0000-000000000001",
+      "fromPortId": "d1000000-0000-0000-0000-000000000002",
+      "toNodeId": "c1000000-0000-0000-0000-000000000010",
+      "toPortId": "d1000000-0000-0000-0000-000000000010"
+    },
+    {
+      "id": "e1000000-0000-0000-0000-000000000002",
+      "fromNodeId": "c1000000-0000-0000-0000-000000000001",
+      "fromPortId": "d1000000-0000-0000-0000-000000000003",
+      "toNodeId": "c1000000-0000-0000-0000-000000000011",
+      "toPortId": "d1000000-0000-0000-0000-000000000020"
+    },
+    {
+      "id": "e1000000-0000-0000-0000-000000000003",
+      "fromNodeId": "c1000000-0000-0000-0000-000000000001",
+      "fromPortId": "d1000000-0000-0000-0000-000000000004",
+      "toNodeId": "c1000000-0000-0000-0000-000000000012",
+      "toPortId": "d1000000-0000-0000-0000-000000000030"
+    },
+    {
+      "id": "e1000000-0000-0000-0000-000000000004",
+      "fromNodeId": "c1000000-0000-0000-0000-000000000002",
+      "fromPortId": "d1000000-0000-0000-0000-000000000041",
+      "toNodeId": "c1000000-0000-0000-0000-000000000010",
+      "toPortId": "d1000000-0000-0000-0000-000000000010"
+    },
+    {
+      "id": "e1000000-0000-0000-0000-000000000005",
+      "fromNodeId": "c1000000-0000-0000-0000-000000000002",
+      "fromPortId": "d1000000-0000-0000-0000-000000000042",
+      "toNodeId": "c1000000-0000-0000-0000-000000000011",
+      "toPortId": "d1000000-0000-0000-0000-000000000020"
+    }
+  ],
+  "schemaVersion": 1,
+  "createdAt": "2026-02-20T00:00:00Z",
+  "updatedAt": "2026-02-20T00:00:00Z"
+}

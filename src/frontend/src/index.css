@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  --color-topo-bg-primary: #1a1b26;
+  --color-topo-bg-secondary: #24283b;
+  --color-topo-bg-tertiary: #1f2335;
+  --color-topo-bg-canvas: #16161e;
+  --color-topo-text-primary: #c0caf5;
+  --color-topo-text-secondary: #a9b1d6;
+  --color-topo-text-muted: #565f89;
+  --color-topo-brand: #7aa2f7;
+  --color-topo-brand-hover: #89b4fa;
+  --color-topo-border: #3b4261;
+  --color-topo-success: #9ece6a;
+  --color-topo-warning: #e0af68;
+  --color-topo-error: #f7768e;
+  --color-topo-port-network: #7aa2f7;
+  --color-topo-port-database: #bb9af7;
+  --color-topo-port-storage: #e0af68;
+  --color-topo-port-control: #9ece6a;
+  --color-topo-port-generic: #a9b1d6;
+}

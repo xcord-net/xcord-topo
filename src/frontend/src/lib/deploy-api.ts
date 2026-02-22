@@ -69,4 +69,4 @@ export function connectTerraformStream(
 // --- Re-exports from existing APIs ---
 
 export { generateHcl, executeTerraform, cancelTerraform, fetchTopologies } from './serialization';
-export { diffTopologies, createMigrationPlan, generateMigrationHcl } from './migration-api';
+export { diffTopologies, createMigrationPlan } from './migration-api';

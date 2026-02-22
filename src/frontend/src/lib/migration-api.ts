@@ -1,4 +1,4 @@
-import type { MigrationDecision, MigrationDiffResult, MigrationHclResult, MigrationPlan } from '../types/migration';
+import type { MigrationDecision, MigrationDiffResult, MigrationPlan } from '../types/migration';
 
 const API_BASE = '/api/v1';
 
@@ -23,17 +23,5 @@ export async function createMigrationPlan(
     body: JSON.stringify({ sourceTopologyId, targetTopologyId, decisions }),
   });
   if (!res.ok) throw new Error(`Failed to create migration plan: ${res.statusText}`);
-  return res.json();
-}
-
-export async function getMigrationPlan(id: string): Promise<MigrationPlan> {
-  const res = await fetch(`${API_BASE}/migrations/${id}`);
-  if (!res.ok) throw new Error(`Failed to fetch migration plan: ${res.statusText}`);
-  return res.json();
-}
-
-export async function generateMigrationHcl(id: string): Promise<MigrationHclResult> {
-  const res = await fetch(`${API_BASE}/migrations/${id}/hcl`, { method: 'POST' });
-  if (!res.ok) throw new Error(`Failed to generate migration HCL: ${res.statusText}`);
   return res.json();
 }

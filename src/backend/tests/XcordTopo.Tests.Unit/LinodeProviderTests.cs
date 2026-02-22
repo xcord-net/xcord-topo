@@ -115,8 +115,9 @@ public class LinodeProviderTests
 
         var files = _provider.GenerateHcl(topology);
 
-        // Should have nodebalancer
-        Assert.Contains("linode_nodebalancer", files["nodebalancers.tf"]);
+        // nodebalancers.tf is no longer generated; verify volumes are still present
+        Assert.DoesNotContain("nodebalancers.tf", files.Keys);
+        Assert.Contains("instances.tf", files.Keys);
     }
 
     [Fact]

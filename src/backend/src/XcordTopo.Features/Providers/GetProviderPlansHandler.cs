@@ -10,13 +10,12 @@ public sealed record GetProviderPlansRequest(string Key);
 
 public sealed record GetProviderPlansResponse(List<ComputePlan> Plans);
 
-public sealed class GetProviderPlansHandler(ProviderRegistry registry)
+public sealed class GetProviderPlansHandler(LinodeProvider provider)
     : IRequestHandler<GetProviderPlansRequest, Result<GetProviderPlansResponse>>
 {
     public Task<Result<GetProviderPlansResponse>> Handle(GetProviderPlansRequest request, CancellationToken ct)
     {
-        var provider = registry.Get(request.Key);
-        if (provider is null)
+        if (!string.Equals(provider.Key, request.Key, StringComparison.OrdinalIgnoreCase))
             return Task.FromResult<Result<GetProviderPlansResponse>>(
                 Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{request.Key}' not found"));
 

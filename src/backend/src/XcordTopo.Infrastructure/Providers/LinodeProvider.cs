@@ -3,7 +3,7 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Providers;
 
-public sealed class LinodeProvider : IInfrastructureProvider
+public sealed class LinodeProvider
 {
     public string Key => "linode";
 
@@ -51,7 +51,6 @@ public sealed class LinodeProvider : IInfrastructureProvider
         files["firewall.tf"] = GenerateFirewall(topology, hosts);
         files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology);
         files["volumes.tf"] = GenerateVolumes(hosts);
-        files["nodebalancers.tf"] = GenerateNodeBalancers(hosts);
         files["outputs.tf"] = GenerateOutputs(hosts);
 
         return files;
@@ -905,57 +904,6 @@ public sealed class LinodeProvider : IInfrastructureProvider
             }
         }
         return volumes.ToString();
-    }
-
-    private static string GenerateNodeBalancers(List<HostEntry> hosts)
-    {
-        var nb = new HclBuilder();
-        foreach (var entry in hosts)
-        {
-            var images = CollectImages(entry.Host);
-            foreach (var image in images)
-            {
-                var (literal, varRef) = ParseReplicas(image);
-                var needsLb = varRef != null || (literal.HasValue && literal.Value > 1);
-                if (!needsLb) continue;
-
-                var resourceName = $"{SanitizeName(entry.Host.Name)}_{SanitizeName(image.Name)}";
-
-                var isReplicated = IsReplicatedHost(entry);
-                nb.Block($"resource \"linode_nodebalancer\" \"{resourceName}_nb\"", b =>
-                {
-                    if (isReplicated)
-                    {
-                        var countExpr = GetHostCountExpression(entry);
-                        b.RawAttribute("count", countExpr!);
-                    }
-                    b.Attribute("label", $"{image.Name}-lb");
-                    b.RawAttribute("region", "var.region");
-                });
-                nb.Line();
-
-                nb.Block($"resource \"linode_nodebalancer_config\" \"{resourceName}_nb_config\"", b =>
-                {
-                    if (isReplicated)
-                    {
-                        var countExpr = GetHostCountExpression(entry);
-                        b.RawAttribute("count", countExpr!);
-                        b.RawAttribute("nodebalancer_id", $"linode_nodebalancer.{resourceName}_nb[count.index].id");
-                    }
-                    else
-                    {
-                        b.RawAttribute("nodebalancer_id", $"linode_nodebalancer.{resourceName}_nb.id");
-                    }
-                    b.Attribute("port", 80);
-                    b.Attribute("protocol", "http");
-                    b.Attribute("algorithm", "roundrobin");
-                    b.Attribute("check", "http");
-                    b.Attribute("check_path", "/");
-                });
-                nb.Line();
-            }
-        }
-        return nb.ToString();
     }
 
     private static string GenerateOutputs(List<HostEntry> hosts)

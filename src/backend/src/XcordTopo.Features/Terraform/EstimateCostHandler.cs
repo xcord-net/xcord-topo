@@ -15,7 +15,7 @@ public sealed record CostEstimateResponse(List<HostCostEntry> Hosts, decimal Tot
 
 public sealed class EstimateCostHandler(
     ITopologyStore topologyStore,
-    ProviderRegistry providerRegistry)
+    LinodeProvider provider)
     : IRequestHandler<CostEstimateRequest, Result<CostEstimateResponse>>
 {
     public async Task<Result<CostEstimateResponse>> Handle(CostEstimateRequest request, CancellationToken ct)
@@ -24,8 +24,7 @@ public sealed class EstimateCostHandler(
         if (topology is null)
             return Error.NotFound("TOPOLOGY_NOT_FOUND", "Topology not found");
 
-        var provider = providerRegistry.Get(topology.Provider);
-        if (provider is null)
+        if (!string.Equals(provider.Key, topology.Provider, StringComparison.OrdinalIgnoreCase))
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{topology.Provider}' not found");
 
         var hosts = LinodeProvider.CollectHosts(topology.Containers, null);

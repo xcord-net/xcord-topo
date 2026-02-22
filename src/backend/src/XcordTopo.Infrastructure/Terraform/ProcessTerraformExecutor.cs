@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Terraform;
@@ -9,13 +11,18 @@ namespace XcordTopo.Infrastructure.Terraform;
 public sealed class ProcessTerraformExecutor : ITerraformExecutor
 {
     private readonly IHclFileManager _hclFileManager;
+    private readonly string _credentialsBasePath;
     private readonly ILogger<ProcessTerraformExecutor> _logger;
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _runningProcesses = new();
     private readonly ConcurrentDictionary<Guid, ChannelReader<TerraformOutputLine>> _activeReaders = new();
 
-    public ProcessTerraformExecutor(IHclFileManager hclFileManager, ILogger<ProcessTerraformExecutor> logger)
+    public ProcessTerraformExecutor(
+        IHclFileManager hclFileManager,
+        IOptions<DataOptions> dataOptions,
+        ILogger<ProcessTerraformExecutor> logger)
     {
         _hclFileManager = hclFileManager;
+        _credentialsBasePath = Path.Combine(dataOptions.Value.BasePath, "credentials");
         _logger = logger;
     }
 
@@ -43,11 +50,10 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
             _ => throw new ArgumentOutOfRangeException(nameof(command))
         };
 
-        // Check for credentials file using dynamic provider key
-        var credentialsFile = Path.Combine(Path.GetDirectoryName(workDir)!, "..", "credentials", $"{providerKey}.tfvars");
+        var credentialsFile = Path.Combine(_credentialsBasePath, $"{providerKey}.tfvars");
         if (File.Exists(credentialsFile) && command != TerraformCommand.Init)
         {
-            args += $" -var-file=\"{Path.GetFullPath(credentialsFile)}\"";
+            args += $" -var-file=\"{credentialsFile}\"";
         }
 
         _ = Task.Run(async () =>

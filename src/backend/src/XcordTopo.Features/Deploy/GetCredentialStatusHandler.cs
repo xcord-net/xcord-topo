@@ -11,12 +11,12 @@ public sealed record GetCredentialStatusRequest(string ProviderKey);
 
 public sealed class GetCredentialStatusHandler(
     ICredentialStore credentialStore,
-    ProviderRegistry providerRegistry)
+    LinodeProvider provider)
     : IRequestHandler<GetCredentialStatusRequest, Result<CredentialStatus>>
 {
     public async Task<Result<CredentialStatus>> Handle(GetCredentialStatusRequest request, CancellationToken ct)
     {
-        if (providerRegistry.Get(request.ProviderKey) is null)
+        if (!string.Equals(provider.Key, request.ProviderKey, StringComparison.OrdinalIgnoreCase))
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{request.ProviderKey}' not found");
 
         return await credentialStore.GetStatusAsync(request.ProviderKey, ct);

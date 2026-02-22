@@ -31,8 +31,7 @@ builder.Services.AddSingleton<IHclFileManager, HclFileManager>();
 builder.Services.AddSingleton<ITerraformExecutor, ProcessTerraformExecutor>();
 
 // Providers
-builder.Services.AddSingleton<IInfrastructureProvider, LinodeProvider>();
-builder.Services.AddSingleton<ProviderRegistry>();
+builder.Services.AddSingleton<LinodeProvider>();
 
 // Credentials
 builder.Services.AddSingleton<ICredentialStore, FileCredentialStore>();

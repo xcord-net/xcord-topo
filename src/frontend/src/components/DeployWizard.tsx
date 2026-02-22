@@ -3,6 +3,7 @@ import { useTopology } from '../stores/topology.store';
 import * as deployApi from '../lib/deploy-api';
 import type { DeployStep, DeployMode, CredentialStatus, DeployedTopology, CostEstimate, TerraformOutputLine } from '../types/deploy';
 import type { MigrationDiffResult, MigrationDecision, MigrationPlan } from '../types/migration';
+import { PROVIDER_HELP_LINKS } from '../lib/provider-help-links';
 
 interface ProviderInfo {
   key: string;
@@ -482,6 +483,32 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                   onInput={(e) => setCredVal('ssh_public_key', e.currentTarget.value)}
                 />
               </div>
+
+              {/* Provider help links */}
+              <Show when={PROVIDER_HELP_LINKS[provider()]}>
+                <details class="mt-4">
+                  <summary class="text-xs font-medium text-topo-text-secondary cursor-pointer hover:text-topo-text-primary select-none">
+                    Platform setup guide
+                  </summary>
+                  <div class="mt-2 space-y-2 pl-1">
+                    <For each={PROVIDER_HELP_LINKS[provider()]}>
+                      {(link) => (
+                        <div>
+                          <a
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-xs text-topo-brand hover:underline"
+                          >
+                            {link.label}
+                          </a>
+                          <p class="text-[10px] text-topo-text-muted mt-0.5">{link.description}</p>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </details>
+              </Show>
             </div>
 
             {/* Cost estimate sidebar */}

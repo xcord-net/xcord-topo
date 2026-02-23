@@ -1,6 +1,6 @@
 # xcord-topo
 
-Topology designer module for [Xcord](https://github.com/xcord-net/xcord.net). A visual infrastructure editor and Terraform generator for planning and deploying Xcord infrastructure.
+Topology designer module for [Xcord](https://github.com/xcord-net). A visual infrastructure editor and Terraform generator for planning and deploying Xcord infrastructure.
 
 ## Structure
 

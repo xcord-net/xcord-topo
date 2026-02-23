@@ -13,7 +13,7 @@ public sealed record SaveCredentialsResponse(string Status);
 
 public sealed class SaveCredentialsHandler(
     ICredentialStore credentialStore,
-    LinodeProvider provider)
+    ProviderRegistry registry)
     : IRequestHandler<SaveCredentialsRequest, Result<SaveCredentialsResponse>>, IValidatable<SaveCredentialsRequest>
 {
     public Error? Validate(SaveCredentialsRequest request)
@@ -27,7 +27,7 @@ public sealed class SaveCredentialsHandler(
 
     public async Task<Result<SaveCredentialsResponse>> Handle(SaveCredentialsRequest request, CancellationToken ct)
     {
-        if (!string.Equals(provider.Key, request.ProviderKey, StringComparison.OrdinalIgnoreCase))
+        if (registry.Get(request.ProviderKey) is null)
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{request.ProviderKey}' not found");
 
         await credentialStore.SaveAsync(request.ProviderKey, request.Variables, ct);

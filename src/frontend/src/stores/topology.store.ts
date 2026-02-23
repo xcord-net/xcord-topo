@@ -1,6 +1,6 @@
 import { createRoot } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
-import type { Topology, Container, Image, Wire, Port } from '../types/topology';
+import type { Topology, Container, Image, Wire, Port, DeployStatus } from '../types/topology';
 
 const HEADER_HEIGHT = 32;
 
@@ -20,6 +20,7 @@ function createEmptyTopology(): Topology {
     schemaVersion: 1,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    deployedResourceCount: 0,
   };
 }
 
@@ -112,6 +113,13 @@ export function useTopology() {
       store.setTopology(produce(t => {
         t.name = name;
         t.description = description;
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    updateProvider(providerKey: string): void {
+      store.setTopology(produce(t => {
+        t.provider = providerKey;
         t.updatedAt = new Date().toISOString();
       }));
     },
@@ -351,6 +359,22 @@ export function useTopology() {
     removeWire(wireId: string): void {
       store.setTopology(produce(t => {
         t.wires = t.wires.filter(w => w.id !== wireId);
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    updateProviderConfig(config: Record<string, string>): void {
+      store.setTopology(produce(t => {
+        t.providerConfig = { ...config };
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    updateDeployStatus(status: DeployStatus | undefined, resourceCount: number): void {
+      store.setTopology(produce(t => {
+        t.lastDeployStatus = status;
+        t.lastDeployedAt = status ? new Date().toISOString() : undefined;
+        t.deployedResourceCount = resourceCount;
         t.updatedAt = new Date().toISOString();
       }));
     },

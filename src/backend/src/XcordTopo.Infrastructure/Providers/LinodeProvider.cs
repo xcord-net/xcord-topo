@@ -3,7 +3,7 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Providers;
 
-public sealed class LinodeProvider
+public sealed class LinodeProvider : ICloudProvider
 {
     public string Key => "linode";
 
@@ -36,6 +36,95 @@ public sealed class LinodeProvider
         new() { Id = "g6-standard-4", Label = "Linode 8GB", VCpus = 4, MemoryMb = 8192, DiskGb = 160, PriceMonthly = 48m },
         new() { Id = "g6-standard-6", Label = "Linode 16GB", VCpus = 6, MemoryMb = 16384, DiskGb = 320, PriceMonthly = 96m },
         new() { Id = "g6-standard-8", Label = "Linode 32GB", VCpus = 8, MemoryMb = 32768, DiskGb = 640, PriceMonthly = 192m },
+    ];
+
+    public List<CredentialField> GetCredentialSchema() =>
+    [
+        new()
+        {
+            Key = "linode_token",
+            Label = "API Token",
+            Type = "password",
+            Sensitive = true,
+            Required = true,
+            Placeholder = "Enter Linode API token",
+            Help = new()
+            {
+                Summary = "Personal Access Token from your Akamai/Linode account",
+                Steps =
+                [
+                    "Log in to cloud.linode.com",
+                    "Click your profile icon → API Tokens",
+                    "Click \"Create a Personal Access Token\"",
+                    "Set expiry and select scopes (see permissions below)",
+                    "Copy the token — it's only shown once"
+                ],
+                Permissions = "Linodes: Read/Write, Domains: Read/Write, Firewalls: Read/Write, Volumes: Read/Write",
+                Url = "https://cloud.linode.com/profile/tokens"
+            }
+        },
+        new()
+        {
+            Key = "region",
+            Label = "Region",
+            Type = "select",
+            Sensitive = false,
+            Required = true,
+            Placeholder = "Select region...",
+            Help = new()
+            {
+                Summary = "Linode data center region for your instances",
+                Steps =
+                [
+                    "Choose the region closest to your users",
+                    "All instances will be deployed in this region",
+                    "Consider data residency requirements for your domain"
+                ],
+                Url = "https://www.linode.com/global-infrastructure/"
+            }
+        },
+        new()
+        {
+            Key = "domain",
+            Label = "Domain",
+            Type = "text",
+            Sensitive = false,
+            Required = true,
+            Placeholder = "example.com",
+            Help = new()
+            {
+                Summary = "Primary domain for your deployment",
+                Steps =
+                [
+                    "Register a domain with any registrar",
+                    "Point the domain's nameservers to Linode (ns1-ns5.linode.com)",
+                    "Add the domain to Linode's DNS Manager",
+                    "Terraform will create the necessary DNS records"
+                ],
+                Url = "https://techdocs.akamai.com/cloud-computing/docs/dns-manager"
+            }
+        },
+        new()
+        {
+            Key = "ssh_public_key",
+            Label = "SSH Public Key",
+            Type = "textarea",
+            Sensitive = false,
+            Required = false,
+            Placeholder = "ssh-rsa AAAA...",
+            Help = new()
+            {
+                Summary = "SSH public key for instance access",
+                Steps =
+                [
+                    "Generate a key pair: ssh-keygen -t ed25519",
+                    "Copy the public key: cat ~/.ssh/id_ed25519.pub",
+                    "Paste the full public key here",
+                    "The key will be added to all provisioned instances"
+                ],
+                Url = "https://techdocs.akamai.com/cloud-computing/docs/use-public-key-authentication-with-ssh"
+            }
+        }
     ];
 
     public Dictionary<string, string> GenerateHcl(Topology topology)

@@ -1,4 +1,4 @@
-import type { CredentialStatus, CostEstimate, DeployedTopology, TerraformOutputLine } from '../types/deploy';
+import type { CredentialStatus, CredentialField, CostEstimate, DeployedTopology, TerraformOutputLine } from '../types/deploy';
 
 const API_BASE = '/api/v1';
 
@@ -17,6 +17,23 @@ export async function saveCredentials(providerKey: string, variables: Record<str
     body: JSON.stringify({ variables }),
   });
   if (!res.ok) throw new Error(`Failed to save credentials: ${res.statusText}`);
+}
+
+// --- Credential schema ---
+
+export async function getCredentialSchema(providerKey: string): Promise<CredentialField[]> {
+  const res = await fetch(`${API_BASE}/providers/${providerKey}/credential-schema`);
+  if (!res.ok) throw new Error(`Failed to get credential schema: ${res.statusText}`);
+  const data = await res.json();
+  return data.fields;
+}
+
+// --- SSH keypair ---
+
+export async function generateSshKeypair(): Promise<{ publicKey: string; privateKey: string }> {
+  const res = await fetch(`${API_BASE}/ssh/generate-keypair`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to generate SSH keypair: ${res.statusText}`);
+  return res.json();
 }
 
 // --- Deploy status ---

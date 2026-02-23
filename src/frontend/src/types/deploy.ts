@@ -32,3 +32,20 @@ export interface TerraformOutputLine {
   text: string;
   isError: boolean;
 }
+
+export interface CredentialFieldHelp {
+  summary: string;
+  steps: string[];
+  url?: string;
+  permissions?: string;
+}
+
+export interface CredentialField {
+  key: string;
+  label: string;
+  type: 'password' | 'text' | 'select' | 'textarea';
+  sensitive: boolean;
+  required: boolean;
+  placeholder?: string;
+  help?: CredentialFieldHelp;
+}

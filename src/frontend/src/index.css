@@ -1,5 +1,29 @@
 @import "tailwindcss";
 
+/* Scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3b4261 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #3b4261;
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #565f89;
+}
+
 @theme {
   --color-topo-bg-primary: #1a1b26;
   --color-topo-bg-secondary: #24283b;

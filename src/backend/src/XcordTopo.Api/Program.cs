@@ -32,6 +32,10 @@ builder.Services.AddSingleton<ITerraformExecutor, ProcessTerraformExecutor>();
 
 // Providers
 builder.Services.AddSingleton<LinodeProvider>();
+builder.Services.AddSingleton<AwsProvider>();
+builder.Services.AddSingleton<ICloudProvider>(sp => sp.GetRequiredService<LinodeProvider>());
+builder.Services.AddSingleton<ICloudProvider>(sp => sp.GetRequiredService<AwsProvider>());
+builder.Services.AddSingleton<ProviderRegistry>();
 
 // Credentials
 builder.Services.AddSingleton<ICredentialStore, FileCredentialStore>();

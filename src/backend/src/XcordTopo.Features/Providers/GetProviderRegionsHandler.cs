@@ -10,12 +10,13 @@ public sealed record GetProviderRegionsRequest(string Key);
 
 public sealed record GetProviderRegionsResponse(List<Region> Regions);
 
-public sealed class GetProviderRegionsHandler(LinodeProvider provider)
+public sealed class GetProviderRegionsHandler(ProviderRegistry registry)
     : IRequestHandler<GetProviderRegionsRequest, Result<GetProviderRegionsResponse>>
 {
     public Task<Result<GetProviderRegionsResponse>> Handle(GetProviderRegionsRequest request, CancellationToken ct)
     {
-        if (!string.Equals(provider.Key, request.Key, StringComparison.OrdinalIgnoreCase))
+        var provider = registry.Get(request.Key);
+        if (provider is null)
             return Task.FromResult<Result<GetProviderRegionsResponse>>(
                 Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{request.Key}' not found"));
 

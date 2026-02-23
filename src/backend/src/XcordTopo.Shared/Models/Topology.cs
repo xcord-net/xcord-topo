@@ -14,6 +14,16 @@ public sealed class Topology
     public int SchemaVersion { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DeployStatus? LastDeployStatus { get; set; }
+    public DateTimeOffset? LastDeployedAt { get; set; }
+    public int DeployedResourceCount { get; set; }
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum DeployStatus
+{
+    Succeeded,
+    Failed
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

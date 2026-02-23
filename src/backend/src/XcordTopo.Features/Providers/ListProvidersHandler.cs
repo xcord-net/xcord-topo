@@ -10,12 +10,12 @@ public sealed record ListProvidersRequest;
 
 public sealed record ListProvidersResponse(List<ProviderInfo> Providers);
 
-public sealed class ListProvidersHandler(LinodeProvider provider)
+public sealed class ListProvidersHandler(ProviderRegistry registry)
     : IRequestHandler<ListProvidersRequest, Result<ListProvidersResponse>>
 {
     public Task<Result<ListProvidersResponse>> Handle(ListProvidersRequest request, CancellationToken ct)
     {
-        var providers = new List<ProviderInfo> { provider.GetInfo() };
+        var providers = registry.GetAll().Select(p => p.GetInfo()).ToList();
         return Task.FromResult<Result<ListProvidersResponse>>(new ListProvidersResponse(providers));
     }
 

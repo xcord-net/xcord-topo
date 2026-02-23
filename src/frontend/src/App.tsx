@@ -15,21 +15,23 @@ const App: Component = () => {
   };
 
   return (
-    <div class="h-screen w-screen flex flex-col bg-topo-bg-primary text-topo-text-primary overflow-hidden">
-      <Toolbar onToggleDeploy={toggleDeploy} />
-      <div class="flex flex-1 overflow-hidden">
-        <Palette />
-        <div class="flex-1 relative">
-          <Canvas />
-          <Show when={showDeploy()}>
-            <DeployWizard onClose={() => setShowDeploy(false)} />
+    <>
+      <div class="h-screen w-screen flex flex-col bg-topo-bg-primary text-topo-text-primary overflow-hidden">
+        <Toolbar onToggleDeploy={toggleDeploy} />
+        <div class="flex flex-1 overflow-hidden">
+          <Palette />
+          <div class="flex-1 relative">
+            <Canvas />
+          </div>
+          <Show when={interaction.selectedNodeId !== null}>
+            <PropertiesPanel />
           </Show>
         </div>
-        <Show when={interaction.selectedNodeId !== null}>
-          <PropertiesPanel />
-        </Show>
       </div>
-    </div>
+      <Show when={showDeploy()}>
+        <DeployWizard onClose={() => setShowDeploy(false)} />
+      </Show>
+    </>
   );
 };
 

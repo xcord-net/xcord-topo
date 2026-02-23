@@ -61,6 +61,8 @@ export interface Wire {
   toPortId: string;
 }
 
+export type DeployStatus = 'Succeeded' | 'Failed';
+
 export interface Topology {
   id: string;
   name: string;
@@ -72,6 +74,9 @@ export interface Topology {
   schemaVersion: number;
   createdAt: string;
   updatedAt: string;
+  lastDeployStatus?: DeployStatus;
+  lastDeployedAt?: string;
+  deployedResourceCount: number;
 }
 
 export interface TopologySummary {

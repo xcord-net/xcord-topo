@@ -2,6 +2,7 @@ import { Component, createSignal, createEffect, For, Show, onCleanup } from 'sol
 import { useTopology } from '../stores/topology.store';
 import * as deployApi from '../lib/deploy-api';
 import { saveTopology } from '../lib/serialization';
+import { validateField, validateAllFields } from '../lib/credential-validation';
 import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, CostEstimate, TerraformOutputLine } from '../types/deploy';
 import type { MigrationDiffResult, MigrationDecision, MigrationPlan } from '../types/migration';
 
@@ -124,6 +125,8 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   const [deployMode, setDeployMode] = createSignal<DeployMode>('fresh');
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
+  const [fieldErrors, setFieldErrors] = createSignal<Record<string, string>>({});
+  const [touchedFields, setTouchedFields] = createSignal<Set<string>>(new Set());
 
   // Migration state
   const [migrationSourceId, setMigrationSourceId] = createSignal('');
@@ -212,9 +215,34 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   // --- Step 2: Configure ---
   const setCredVal = (key: string, value: string) => {
     setCredentialValues(prev => ({ ...prev, [key]: value }));
+    setFieldErrors(prev => { const next = { ...prev }; delete next[key]; return next; });
+  };
+
+  const handleFieldBlur = (field: CredentialField) => {
+    setTouchedFields(prev => new Set(prev).add(field.key));
+    const value = credentialValues()[field.key] ?? '';
+    const isSaved = credentialStatus()?.setVariables.includes(field.key) ?? false;
+    const err = validateField(field, value, isSaved);
+    setFieldErrors(prev => {
+      const next = { ...prev };
+      if (err) next[field.key] = err; else delete next[field.key];
+      return next;
+    });
   };
 
   const handleSaveAndNext = async () => {
+    // Mark all fields touched and validate
+    const schema = credentialSchema();
+    const allKeys = new Set(schema.map(f => f.key));
+    setTouchedFields(allKeys);
+    const savedKeys = new Set(credentialStatus()?.setVariables ?? []);
+    const errors = validateAllFields(schema, credentialValues(), savedKeys);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setError('Please fix the validation errors below');
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
@@ -503,6 +531,8 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   const renderField = (field: CredentialField) => {
     const isSaved = () => credentialStatus()?.setVariables.includes(field.key);
     const isSshKey = field.key === 'ssh_public_key';
+    const hasError = () => touchedFields().has(field.key) && fieldErrors()[field.key];
+    const borderClass = () => hasError() ? 'border-topo-error' : 'border-topo-border';
 
     return (
       <div>
@@ -530,9 +560,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         </label>
         {field.type === 'select' && field.key === 'region' ? (
           <select
-            class="w-full bg-topo-bg-primary border border-topo-border rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand"
+            class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand`}
             value={credentialValues()[field.key] ?? ''}
             onChange={(e) => setCredVal(field.key, e.currentTarget.value)}
+            onBlur={() => handleFieldBlur(field)}
           >
             <option value="">{field.placeholder || 'Select...'}</option>
             <For each={regions()}>
@@ -541,20 +572,25 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
           </select>
         ) : field.type === 'textarea' ? (
           <textarea
-            class="w-full bg-topo-bg-primary border border-topo-border rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand font-mono h-16 resize-none"
+            class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand font-mono h-16 resize-none`}
             placeholder={field.placeholder}
             value={credentialValues()[field.key] ?? ''}
             onInput={(e) => setCredVal(field.key, e.currentTarget.value)}
+            onBlur={() => handleFieldBlur(field)}
           />
         ) : (
           <input
             type={field.type === 'password' ? 'password' : 'text'}
-            class="w-full bg-topo-bg-primary border border-topo-border rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand"
+            class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand`}
             placeholder={isSaved() && field.sensitive ? '••••••••' : (field.placeholder ?? '')}
             value={credentialValues()[field.key] ?? ''}
             onInput={(e) => setCredVal(field.key, e.currentTarget.value)}
+            onBlur={() => handleFieldBlur(field)}
           />
         )}
+        <Show when={hasError()}>
+          <p class="text-xs text-topo-error mt-0.5">{fieldErrors()[field.key]}</p>
+        </Show>
       </div>
     );
   };

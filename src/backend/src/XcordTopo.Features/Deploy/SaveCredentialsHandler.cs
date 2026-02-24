@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using XcordTopo.Infrastructure.Credentials;
 using XcordTopo.Infrastructure.Providers;
+using XcordTopo.Infrastructure.Validation;
 using XcordTopo.Models;
 
 namespace XcordTopo.Features.Deploy;
@@ -27,8 +28,19 @@ public sealed class SaveCredentialsHandler(
 
     public async Task<Result<SaveCredentialsResponse>> Handle(SaveCredentialsRequest request, CancellationToken ct)
     {
-        if (registry.Get(request.ProviderKey) is null)
+        var provider = registry.Get(request.ProviderKey);
+        if (provider is null)
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{request.ProviderKey}' not found");
+
+        var schema = provider.GetCredentialSchema();
+        var status = await credentialStore.GetStatusAsync(request.ProviderKey, ct);
+        var alreadySaved = status.SetVariables.ToHashSet();
+        var errors = CredentialValidator.Validate(schema, request.Variables, alreadySaved);
+        if (errors.Count > 0)
+        {
+            var detail = string.Join("; ", errors.Select(e => $"{e.Key}: {e.Value}"));
+            return Error.Validation("CREDENTIAL_VALIDATION_FAILED", detail);
+        }
 
         await credentialStore.SaveAsync(request.ProviderKey, request.Variables, ct);
         return new SaveCredentialsResponse("saved");

@@ -62,7 +62,8 @@ public sealed class AwsProvider : ICloudProvider
                 ],
                 Permissions = "EC2 full access, VPC full access, Route53 full access (or AmazonEC2FullAccess + AmazonRoute53FullAccess managed policies)",
                 Url = "https://console.aws.amazon.com/iam/home#/users"
-            }
+            },
+            Validation = [new() { Type = "pattern", Value = @"^AKIA[A-Z0-9]{16}$", Message = "Must be a valid AWS access key ID (starts with AKIA, 20 characters)" }]
         },
         new()
         {
@@ -83,7 +84,8 @@ public sealed class AwsProvider : ICloudProvider
                 ],
                 Permissions = "Same as Access Key ID — they are a pair",
                 Url = "https://console.aws.amazon.com/iam/home#/users"
-            }
+            },
+            Validation = [new() { Type = "minLength", Value = "20", Message = "Secret access key must be at least 20 characters" }]
         },
         new()
         {
@@ -124,7 +126,8 @@ public sealed class AwsProvider : ICloudProvider
                     "Terraform will create the necessary DNS records"
                 ],
                 Url = "https://console.aws.amazon.com/route53/v2/hostedzones"
-            }
+            },
+            Validation = [new() { Type = "pattern", Value = @"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$", Message = "Enter a valid domain name (e.g. example.com)" }]
         },
         new()
         {
@@ -145,7 +148,8 @@ public sealed class AwsProvider : ICloudProvider
                     "The key will be imported as an AWS key pair"
                 ],
                 Url = "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html"
-            }
+            },
+            Validation = [new() { Type = "pattern", Value = @"^ssh-(rsa|ed25519|ecdsa)\s+[A-Za-z0-9+/=]+", Message = "Must be a valid SSH public key (ssh-rsa, ssh-ed25519, or ssh-ecdsa)" }]
         }
     ];
 

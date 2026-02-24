@@ -40,6 +40,12 @@ export interface CredentialFieldHelp {
   permissions?: string;
 }
 
+export interface ValidationRule {
+  type: 'minLength' | 'maxLength' | 'pattern';
+  value?: string;
+  message: string;
+}
+
 export interface CredentialField {
   key: string;
   label: string;
@@ -48,4 +54,5 @@ export interface CredentialField {
   required: boolean;
   placeholder?: string;
   help?: CredentialFieldHelp;
+  validation: ValidationRule[];
 }

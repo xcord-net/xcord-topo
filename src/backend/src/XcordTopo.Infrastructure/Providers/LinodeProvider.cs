@@ -61,7 +61,8 @@ public sealed class LinodeProvider : ICloudProvider
                 ],
                 Permissions = "Linodes: Read/Write, Domains: Read/Write, Firewalls: Read/Write, Volumes: Read/Write",
                 Url = "https://cloud.linode.com/profile/tokens"
-            }
+            },
+            Validation = [new() { Type = "minLength", Value = "10", Message = "API token must be at least 10 characters" }]
         },
         new()
         {
@@ -102,7 +103,8 @@ public sealed class LinodeProvider : ICloudProvider
                     "Terraform will create the necessary DNS records"
                 ],
                 Url = "https://techdocs.akamai.com/cloud-computing/docs/dns-manager"
-            }
+            },
+            Validation = [new() { Type = "pattern", Value = @"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$", Message = "Enter a valid domain name (e.g. example.com)" }]
         },
         new()
         {
@@ -123,7 +125,8 @@ public sealed class LinodeProvider : ICloudProvider
                     "The key will be added to all provisioned instances"
                 ],
                 Url = "https://techdocs.akamai.com/cloud-computing/docs/use-public-key-authentication-with-ssh"
-            }
+            },
+            Validation = [new() { Type = "pattern", Value = @"^ssh-(rsa|ed25519|ecdsa)\s+[A-Za-z0-9+/=]+", Message = "Must be a valid SSH public key (ssh-rsa, ssh-ed25519, or ssh-ecdsa)" }]
         }
     ];
 

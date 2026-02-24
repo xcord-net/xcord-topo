@@ -9,6 +9,14 @@ public sealed class CredentialField
     public bool Required { get; set; } = true;
     public string? Placeholder { get; set; }
     public CredentialFieldHelp? Help { get; set; }
+    public List<ValidationRule> Validation { get; set; } = [];
+}
+
+public sealed class ValidationRule
+{
+    public string Type { get; set; } = string.Empty; // "minLength" | "maxLength" | "pattern"
+    public string? Value { get; set; }
+    public string Message { get; set; } = string.Empty;
 }
 
 public sealed class CredentialFieldHelp

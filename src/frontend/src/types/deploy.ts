@@ -21,6 +21,9 @@ export interface HostCostEntry {
   ramMb: number;
   count: number;
   pricePerMonth: number;
+  tierProfileId?: string;
+  tenantsPerHost?: number;
+  targetTenants?: number;
 }
 
 export interface CostEstimate {

@@ -65,4 +65,20 @@ export const containerDefinitions: ContainerDefinition[] = [
     ],
     description: 'Group of federated xcord instances',
   },
+  {
+    kind: 'ComputePool',
+    label: 'Compute Pool',
+    color: '#e0af68',
+    defaultWidth: 500,
+    defaultHeight: 350,
+    defaultPorts: [
+      { id: '', name: 'public', type: 'Network', direction: 'InOut', side: 'Right', offset: 0.5 },
+      { id: '', name: 'control', type: 'Control', direction: 'In', side: 'Left', offset: 0.5 },
+    ],
+    configFields: [
+      { key: 'tierProfile', label: 'Tier Profile', placeholder: 'free' },
+      { key: 'targetTenants', label: 'Target Tenants', placeholder: '100' },
+    ],
+    description: 'Shared-infrastructure host pool with tier-based tenant packing',
+  },
 ];

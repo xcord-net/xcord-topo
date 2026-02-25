@@ -9,7 +9,9 @@ namespace XcordTopo.Features.Terraform;
 
 public sealed record CostEstimateRequest(Guid TopologyId);
 
-public sealed record HostCostEntry(string HostName, string PlanId, string PlanLabel, int RamMb, int Count, decimal PricePerMonth);
+public sealed record HostCostEntry(
+    string HostName, string PlanId, string PlanLabel, int RamMb, int Count, decimal PricePerMonth,
+    string? TierProfileId = null, int? TenantsPerHost = null, int? TargetTenants = null);
 
 public sealed record CostEstimateResponse(List<HostCostEntry> Hosts, decimal TotalMonthly);
 
@@ -29,6 +31,7 @@ public sealed class EstimateCostHandler(
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{topology.Provider}' not found");
 
         var hosts = LinodeProvider.CollectHosts(topology.Containers, null);
+        var pools = LinodeProvider.CollectComputePools(topology.Containers, topology);
         var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         var entries = new List<HostCostEntry>();
         var total = 0m;
@@ -59,6 +62,31 @@ public sealed class EstimateCostHandler(
                 requiredRam,
                 count,
                 lineTotal));
+            total += lineTotal;
+        }
+
+        // ComputePool cost estimation with tier-aware density
+        foreach (var pool in pools)
+        {
+            var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
+            var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
+            var minHostRam = sharedOverhead + fedMemory;
+            var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
+            var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile);
+            var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
+
+            var ramPerHost = sharedOverhead + (tenantsPerHost * fedMemory);
+            var lineTotal = selectedPlan.PriceMonthly * hostsRequired;
+            entries.Add(new HostCostEntry(
+                pool.Pool.Name,
+                selectedPlan.Id,
+                selectedPlan.Label,
+                ramPerHost,
+                hostsRequired,
+                lineTotal,
+                pool.TierProfile.Id,
+                tenantsPerHost,
+                pool.TargetTenants));
             total += lineTotal;
         }
 

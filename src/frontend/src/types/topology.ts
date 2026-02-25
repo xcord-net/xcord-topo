@@ -6,7 +6,8 @@ export type ContainerKind =
   | 'Host'
   | 'Network'
   | 'Caddy'
-  | 'FederationGroup';
+  | 'FederationGroup'
+  | 'ComputePool';
 
 export type ImageKind =
   | 'HubServer'
@@ -61,6 +62,18 @@ export interface Wire {
   toPortId: string;
 }
 
+export interface ImageResourceSpec {
+  memoryMb: number;
+  cpuMillicores: number;
+  diskMb: number;
+}
+
+export interface TierProfile {
+  id: string;
+  name: string;
+  imageSpecs: Record<string, ImageResourceSpec>;
+}
+
 export type DeployStatus = 'Succeeded' | 'Failed';
 
 export interface Topology {
@@ -71,6 +84,7 @@ export interface Topology {
   providerConfig: Record<string, string>;
   containers: Container[];
   wires: Wire[];
+  tierProfiles: TierProfile[];
   schemaVersion: number;
   createdAt: string;
   updatedAt: string;

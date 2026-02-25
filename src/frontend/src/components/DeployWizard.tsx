@@ -721,14 +721,21 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                       <div class="space-y-1.5">
                         <For each={cost().hosts}>
                           {(h) => (
-                            <div class="flex justify-between text-xs">
-                              <span class="text-topo-text-secondary truncate mr-2">
-                                {h.hostName}
-                                <Show when={h.count > 1}>
-                                  <span class="text-topo-text-muted"> x{h.count}</span>
-                                </Show>
-                              </span>
-                              <span class="text-topo-text-muted whitespace-nowrap">${h.pricePerMonth}/mo</span>
+                            <div class="text-xs">
+                              <div class="flex justify-between">
+                                <span class="text-topo-text-secondary truncate mr-2">
+                                  {h.hostName}
+                                  <Show when={h.count > 1}>
+                                    <span class="text-topo-text-muted"> x{h.count}</span>
+                                  </Show>
+                                </span>
+                                <span class="text-topo-text-muted whitespace-nowrap">${h.pricePerMonth}/mo</span>
+                              </div>
+                              <Show when={h.tierProfileId}>
+                                <div class="text-topo-text-muted text-[10px] mt-0.5">
+                                  {h.tierProfileId} tier &middot; {h.tenantsPerHost} tenants/host &middot; {h.targetTenants} total
+                                </div>
+                              </Show>
                             </div>
                           )}
                         </For>
@@ -796,13 +803,22 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                         <tbody>
                           <For each={cost().hosts}>
                             {(h) => (
-                              <tr class="border-b border-topo-border/50">
-                                <td class="py-1 px-2 text-topo-text-secondary">{h.hostName}</td>
-                                <td class="py-1 px-2 text-topo-text-muted">{h.planLabel}</td>
-                                <td class="py-1 px-2 text-topo-text-muted">{h.ramMb}MB</td>
-                                <td class="py-1 px-2 text-topo-text-muted">{h.count}</td>
-                                <td class="py-1 px-2 text-topo-text-secondary text-right">${h.pricePerMonth}</td>
-                              </tr>
+                              <>
+                                <tr class="border-b border-topo-border/50">
+                                  <td class="py-1 px-2 text-topo-text-secondary">{h.hostName}</td>
+                                  <td class="py-1 px-2 text-topo-text-muted">{h.planLabel}</td>
+                                  <td class="py-1 px-2 text-topo-text-muted">{h.ramMb}MB</td>
+                                  <td class="py-1 px-2 text-topo-text-muted">{h.count}</td>
+                                  <td class="py-1 px-2 text-topo-text-secondary text-right">${h.pricePerMonth}</td>
+                                </tr>
+                                <Show when={h.tierProfileId}>
+                                  <tr class="border-b border-topo-border/50">
+                                    <td colspan="5" class="py-0.5 px-2 text-[10px] text-topo-text-muted">
+                                      {h.tierProfileId} tier &middot; {h.tenantsPerHost} tenants/host &middot; {h.targetTenants} total tenants
+                                    </td>
+                                  </tr>
+                                </Show>
+                              </>
                             )}
                           </For>
                           <tr>

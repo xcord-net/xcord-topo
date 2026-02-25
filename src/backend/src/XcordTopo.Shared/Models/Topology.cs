@@ -11,6 +11,7 @@ public sealed class Topology
     public Dictionary<string, string> ProviderConfig { get; set; } = new();
     public List<Container> Containers { get; set; } = [];
     public List<Wire> Wires { get; set; } = [];
+    public List<TierProfile> TierProfiles { get; set; } = [];
     public int SchemaVersion { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -32,7 +33,8 @@ public enum ContainerKind
     Host,
     Network,
     Caddy,
-    FederationGroup
+    FederationGroup,
+    ComputePool
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

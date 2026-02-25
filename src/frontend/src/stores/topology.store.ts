@@ -17,6 +17,7 @@ function createEmptyTopology(): Topology {
     providerConfig: {},
     containers: [],
     wires: [],
+    tierProfiles: [],
     schemaVersion: 1,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

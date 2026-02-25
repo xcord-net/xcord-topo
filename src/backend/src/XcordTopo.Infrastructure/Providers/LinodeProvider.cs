@@ -12,7 +12,7 @@ public sealed class LinodeProvider : ICloudProvider
         Key = "linode",
         Name = "Linode (Akamai)",
         Description = "Akamai Connected Cloud (formerly Linode). Affordable VPS hosting with global regions.",
-        SupportedContainerKinds = ["Host", "Network", "Caddy", "FederationGroup"]
+        SupportedContainerKinds = ["Host", "Network", "Caddy", "FederationGroup", "ComputePool"]
     };
 
     public List<Region> GetRegions() =>
@@ -134,16 +134,17 @@ public sealed class LinodeProvider : ICloudProvider
     {
         var files = new Dictionary<string, string>();
         var hosts = CollectHosts(topology.Containers, null);
+        var pools = CollectComputePools(topology.Containers, topology);
         var resolver = new WireResolver(topology);
 
         files["main.tf"] = GenerateMain();
         files["secrets.tf"] = GenerateSecrets(hosts, resolver, topology);
-        files["variables.tf"] = GenerateVariables(topology);
-        files["instances.tf"] = GenerateInstances(topology, hosts);
+        files["variables.tf"] = GenerateVariables(topology, pools);
+        files["instances.tf"] = GenerateInstances(topology, hosts, pools);
         files["firewall.tf"] = GenerateFirewall(topology, hosts);
-        files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology);
+        files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology, pools);
         files["volumes.tf"] = GenerateVolumes(hosts);
-        files["outputs.tf"] = GenerateOutputs(hosts);
+        files["outputs.tf"] = GenerateOutputs(hosts, pools);
 
         return files;
     }
@@ -169,6 +170,37 @@ public sealed class LinodeProvider : ICloudProvider
             else if (container.Kind == ContainerKind.Network)
             {
                 result.AddRange(CollectHosts(container.Children, fedGroup));
+            }
+            // ComputePool containers are handled separately via CollectComputePools
+        }
+        return result;
+    }
+
+    internal record ComputePoolEntry(Container Pool, TierProfile TierProfile, int TargetTenants);
+
+    internal static List<ComputePoolEntry> CollectComputePools(List<Container> containers, Topology topology)
+    {
+        var result = new List<ComputePoolEntry>();
+        var tierProfiles = topology.TierProfiles.Count > 0
+            ? topology.TierProfiles
+            : ImageOperationalMetadata.DefaultTierProfiles;
+
+        foreach (var container in containers)
+        {
+            if (container.Kind == ContainerKind.ComputePool)
+            {
+                var tierProfileId = container.Config.GetValueOrDefault("tierProfile", "free");
+                var targetTenantsStr = container.Config.GetValueOrDefault("targetTenants", "10");
+                var targetTenants = int.TryParse(targetTenantsStr, out var n) ? n : 10;
+
+                var tierProfile = tierProfiles.FirstOrDefault(t => t.Id == tierProfileId)
+                    ?? tierProfiles.First();
+
+                result.Add(new ComputePoolEntry(container, tierProfile, targetTenants));
+            }
+            else if (container.Kind == ContainerKind.Network)
+            {
+                result.AddRange(CollectComputePools(container.Children, topology));
             }
         }
         return result;
@@ -387,7 +419,7 @@ public sealed class LinodeProvider : ICloudProvider
         return secrets.ToString();
     }
 
-    private static string GenerateVariables(Topology topology)
+    private string GenerateVariables(Topology topology, List<ComputePoolEntry> pools)
     {
         var vars = new HclBuilder();
         vars.Block("variable \"linode_token\"", b =>
@@ -423,6 +455,34 @@ public sealed class LinodeProvider : ICloudProvider
         // Host replica $VAR variables
         var hosts = CollectHosts(topology.Containers, null);
         CollectHostReplicaVariables(hosts, vars);
+
+        // ComputePool variables
+        var plans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
+        foreach (var pool in pools)
+        {
+            var poolName = SanitizeName(pool.Pool.Name);
+            var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
+            var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
+            var minHostRam = sharedOverhead + fedMemory;
+            var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
+            var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile);
+            var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
+
+            vars.Line();
+            vars.Block($"variable \"{poolName}_host_count\"", b =>
+            {
+                b.Attribute("type", "number");
+                b.Attribute("default", hostsRequired);
+                b.Attribute("description", $"Number of compute hosts for pool '{pool.Pool.Name}' ({pool.TierProfile.Name}, {pool.TargetTenants} tenants)");
+            });
+            vars.Line();
+            vars.Block($"variable \"{poolName}_tenants_per_host\"", b =>
+            {
+                b.Attribute("type", "number");
+                b.Attribute("default", tenantsPerHost > 0 ? tenantsPerHost : 1);
+                b.Attribute("description", $"Number of tenants per host in pool '{pool.Pool.Name}'");
+            });
+        }
 
         return vars.ToString();
     }
@@ -507,7 +567,7 @@ public sealed class LinodeProvider : ICloudProvider
         }
     }
 
-    private string GenerateInstances(Topology topology, List<HostEntry> hosts)
+    private string GenerateInstances(Topology topology, List<HostEntry> hosts, List<ComputePoolEntry> pools)
     {
         var instances = new HclBuilder();
         foreach (var entry in hosts)
@@ -534,6 +594,31 @@ public sealed class LinodeProvider : ICloudProvider
             });
             instances.Line();
         }
+
+        // ComputePool instances
+        var allPlans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
+        foreach (var pool in pools)
+        {
+            var poolName = SanitizeName(pool.Pool.Name);
+            var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
+            var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
+            var minHostRam = sharedOverhead + fedMemory;
+            var selectedPlan = allPlans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? allPlans.Last();
+
+            instances.Block($"resource \"linode_instance\" \"{poolName}\"", b =>
+            {
+                b.RawAttribute("count", $"var.{poolName}_host_count");
+                b.Attribute("label", $"{topology.Name}-{pool.Pool.Name}-${{count.index}}");
+                b.RawAttribute("region", "var.region");
+                b.Attribute("type", selectedPlan.Id);
+                b.Attribute("image", "linode/ubuntu24.04");
+                b.RawAttribute("authorized_keys", "[var.ssh_public_key]");
+                b.Line();
+                b.ListAttribute("tags", ["xcord-topo", topology.Name, "compute-pool"]);
+            });
+            instances.Line();
+        }
+
         return instances.ToString();
     }
 
@@ -623,7 +708,7 @@ public sealed class LinodeProvider : ICloudProvider
         return firewall.ToString();
     }
 
-    private string GenerateProvisioning(List<HostEntry> hosts, WireResolver resolver, Topology topology)
+    private string GenerateProvisioning(List<HostEntry> hosts, WireResolver resolver, Topology topology, List<ComputePoolEntry> pools)
     {
         var provisioning = new HclBuilder();
         foreach (var entry in hosts)
@@ -749,6 +834,52 @@ public sealed class LinodeProvider : ICloudProvider
             });
             provisioning.Line();
         }
+
+        // ComputePool provisioning — shared infra once per host, tenant containers loop
+        foreach (var pool in pools)
+        {
+            var poolName = SanitizeName(pool.Pool.Name);
+            var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
+            var fedCpuMillicores = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.CpuMillicores ?? 250;
+            var cpuLimit = fedCpuMillicores / 1000.0;
+
+            provisioning.Block($"resource \"null_resource\" \"provision_{poolName}\"", b =>
+            {
+                b.RawAttribute("count", $"var.{poolName}_host_count");
+                b.RawAttribute("depends_on", $"[linode_instance.{poolName}]");
+                b.Line();
+                b.Block("connection", cb =>
+                {
+                    cb.Attribute("type", "ssh");
+                    cb.RawAttribute("host", $"linode_instance.{poolName}[count.index].ip_address");
+                    cb.Attribute("user", "root");
+                });
+                b.Line();
+                b.Block("provisioner \"remote-exec\"", pb =>
+                {
+                    pb.RawAttribute("inline", "[");
+
+                    // Docker installation
+                    b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
+                    b.Line("  \"systemctl enable docker\",");
+                    b.Line("  \"systemctl start docker\",");
+                    b.Line("  \"docker network create xcord-bridge\",");
+
+                    // Shared infrastructure — one instance per host
+                    b.Line("  \"docker run -d --name shared-postgres --network xcord-bridge --restart unless-stopped --memory 1024m -v pgdata:/var/lib/postgresql/data -e POSTGRES_PASSWORD=changeme -e POSTGRES_USER=postgres postgres:17-alpine\",");
+                    b.Line("  \"docker run -d --name shared-redis --network xcord-bridge --restart unless-stopped --memory 512m -v redisdata:/data redis:7-alpine redis-server --requirepass changeme\",");
+                    b.Line("  \"docker run -d --name shared-minio --network xcord-bridge --restart unless-stopped --memory 512m -v miniodata:/data -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin minio/minio:latest server /data --console-address :9001\",");
+                    b.Line($"  \"docker run -d --name caddy --network xcord-bridge --restart unless-stopped --memory 128m -p 80:80 -p 443:443 -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+
+                    // Tenant FedServer containers — loop up to tenants_per_host
+                    b.Line($"  \"for i in $(seq 0 $((var.{poolName}_tenants_per_host - 1))); do docker run -d --name tenant-$i --network xcord-bridge --restart unless-stopped --memory {fedMemory}m --cpus {cpuLimit:F1} ghcr.io/xcord/fed:latest; done\",");
+
+                    pb.Line("]");
+                });
+            });
+            provisioning.Line();
+        }
+
         return provisioning.ToString();
     }
 
@@ -1008,7 +1139,7 @@ public sealed class LinodeProvider : ICloudProvider
         return volumes.ToString();
     }
 
-    private static string GenerateOutputs(List<HostEntry> hosts)
+    private static string GenerateOutputs(List<HostEntry> hosts, List<ComputePoolEntry> pools)
     {
         var outputs = new HclBuilder();
         foreach (var entry in hosts)
@@ -1038,6 +1169,18 @@ public sealed class LinodeProvider : ICloudProvider
             }
             outputs.Line();
         }
+
+        foreach (var pool in pools)
+        {
+            var poolName = SanitizeName(pool.Pool.Name);
+            outputs.Block($"output \"{poolName}_ips\"", b =>
+            {
+                b.RawAttribute("value", $"linode_instance.{poolName}[*].ip_address");
+                b.Attribute("description", $"Public IPs of compute pool '{pool.Pool.Name}'");
+            });
+            outputs.Line();
+        }
+
         return outputs.ToString();
     }
 

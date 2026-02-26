@@ -28,6 +28,30 @@ export async function getCredentialSchema(providerKey: string): Promise<Credenti
   return data.fields;
 }
 
+// --- Service keys ---
+
+export async function getServiceKeySchema(): Promise<CredentialField[]> {
+  const res = await fetch(`${API_BASE}/service-keys/schema`);
+  if (!res.ok) throw new Error(`Failed to get service key schema: ${res.statusText}`);
+  const data = await res.json();
+  return data.fields;
+}
+
+export async function getServiceKeyStatus(): Promise<CredentialStatus> {
+  const res = await fetch(`${API_BASE}/service-keys`);
+  if (!res.ok) throw new Error(`Failed to get service key status: ${res.statusText}`);
+  return res.json();
+}
+
+export async function saveServiceKeys(variables: Record<string, string>): Promise<void> {
+  const res = await fetch(`${API_BASE}/service-keys`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ variables }),
+  });
+  if (!res.ok) throw new Error(`Failed to save service keys: ${res.statusText}`);
+}
+
 // --- SSH keypair ---
 
 export async function generateSshKeypair(): Promise<{ publicKey: string; privateKey: string }> {

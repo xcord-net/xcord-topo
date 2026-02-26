@@ -72,6 +72,8 @@ function loadFromStorage(): Topology {
         }
       };
       backfill(parsed.containers);
+      // Backfill serviceKeys for topologies saved before service key support
+      if (!parsed.serviceKeys) parsed.serviceKeys = {};
       return parsed;
     }
   } catch { /* ignore corrupt data */ }

@@ -4,6 +4,7 @@
   "description": "Full HA deployment with tier-based tenant packing: Caddy reverse proxy, hub tier with load-balanced servers, shared LiveKit for voice/video, ComputePools for free and pro tiers with shared infrastructure (PG, Redis, MinIO per host), and a dedicated FederationGroup for enterprise tenants.",
   "provider": "linode",
   "providerConfig": {},
+  "serviceKeys": {},
   "containers": [
     {
       "id": "a0000000-0000-0000-0000-000000000001",

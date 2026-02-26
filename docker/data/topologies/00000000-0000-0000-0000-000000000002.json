@@ -4,6 +4,7 @@
   "description": "Minimal single-host deployment: everything on one server. Hub, Federation, PG, Redis, MinIO all singleton and shared. For multi-instance, wrap Fed/PG/Redis in a FederationGroup and leave MinIO at host level for shared storage.",
   "provider": "linode",
   "providerConfig": {},
+  "serviceKeys": {},
   "containers": [
     {
       "id": "a1000000-0000-0000-0000-000000000001",

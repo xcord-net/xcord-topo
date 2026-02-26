@@ -10,4 +10,12 @@ public interface ICloudProvider
     List<ComputePlan> GetPlans();
     List<CredentialField> GetCredentialSchema();
     Dictionary<string, string> GenerateHcl(Topology topology);
+
+    /// <summary>
+    /// Generate HCL files for only the containers owned by this provider.
+    /// Used in multi-provider topologies where each provider generates its own resources.
+    /// </summary>
+    Dictionary<string, string> GenerateHclForContainers(
+        Topology topology,
+        IReadOnlyList<Container> ownedContainers);
 }

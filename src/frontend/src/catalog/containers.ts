@@ -13,6 +13,7 @@ export const containerDefinitions: ContainerDefinition[] = [
       { id: '', name: 'private', type: 'Network', direction: 'InOut', side: 'Right', offset: 0.7 },
     ],
     configFields: [
+      { key: 'provider', label: 'Provider Override', placeholder: '' },
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
       { key: 'minReplicas', label: 'Min Replicas', placeholder: '' },
       { key: 'maxReplicas', label: 'Max Replicas', placeholder: '' },
@@ -60,6 +61,7 @@ export const containerDefinitions: ContainerDefinition[] = [
       { id: '', name: 'control', type: 'Control', direction: 'In', side: 'Left', offset: 0.5 },
     ],
     configFields: [
+      { key: 'provider', label: 'Provider Override', placeholder: '' },
       { key: 'domain', label: 'Domain', placeholder: 'chat.example.com' },
       { key: 'instanceCount', label: 'Instance Count', placeholder: '3' },
     ],
@@ -76,9 +78,25 @@ export const containerDefinitions: ContainerDefinition[] = [
       { id: '', name: 'control', type: 'Control', direction: 'In', side: 'Left', offset: 0.5 },
     ],
     configFields: [
+      { key: 'provider', label: 'Provider Override', placeholder: '' },
       { key: 'tierProfile', label: 'Tier Profile', placeholder: 'free' },
       { key: 'targetTenants', label: 'Target Tenants', placeholder: '100' },
     ],
     description: 'Shared-infrastructure host pool with tier-based tenant packing',
+  },
+  {
+    kind: 'Dns',
+    label: 'DNS Zone',
+    color: '#bb9af7',
+    defaultWidth: 300,
+    defaultHeight: 160,
+    defaultPorts: [
+      { id: '', name: 'records', type: 'Network', direction: 'In', side: 'Left', offset: 0.5 },
+    ],
+    configFields: [
+      { key: 'provider', label: 'Provider Override', placeholder: '' },
+      { key: 'domain', label: 'Domain', placeholder: 'example.com' },
+    ],
+    description: 'DNS zone — wire hosts here to create A records',
   },
 ];

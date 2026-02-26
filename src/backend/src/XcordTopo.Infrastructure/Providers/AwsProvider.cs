@@ -12,7 +12,7 @@ public sealed class AwsProvider : ICloudProvider
         Key = "aws",
         Name = "Amazon Web Services",
         Description = "AWS EC2 instances with VPC networking. The most widely used cloud platform.",
-        SupportedContainerKinds = ["Host", "Network", "Caddy", "FederationGroup", "ComputePool"]
+        SupportedContainerKinds = ["Host", "Network", "Caddy", "FederationGroup", "ComputePool", "Dns"]
     };
 
     public List<Region> GetRegions() =>
@@ -156,8 +156,9 @@ public sealed class AwsProvider : ICloudProvider
     public Dictionary<string, string> GenerateHcl(Topology topology)
     {
         var files = new Dictionary<string, string>();
-        var hosts = LinodeProvider.CollectHosts(topology.Containers, null);
-        var pools = LinodeProvider.CollectComputePools(topology.Containers, topology);
+        var hosts = TopologyHelpers.CollectHosts(topology.Containers, null);
+        var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology);
+        var dnsContainers = TopologyHelpers.CollectDnsContainers(topology.Containers);
         var resolver = new WireResolver(topology);
 
         files["main.tf"] = GenerateMain();
@@ -168,6 +169,35 @@ public sealed class AwsProvider : ICloudProvider
         files["instances.tf"] = GenerateInstances(topology, hosts, pools);
         files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology, pools);
         files["outputs.tf"] = GenerateOutputs(hosts, pools);
+
+        if (dnsContainers.Count > 0)
+            files["dns.tf"] = GenerateDnsRecords(dnsContainers, hosts, resolver, topology);
+
+        return files;
+    }
+
+    public Dictionary<string, string> GenerateHclForContainers(
+        Topology topology,
+        IReadOnlyList<Container> ownedContainers)
+    {
+        var files = new Dictionary<string, string>();
+        var hosts = TopologyHelpers.CollectHosts(ownedContainers.ToList(), null);
+        var pools = TopologyHelpers.CollectComputePools(ownedContainers.ToList(), topology);
+        var dnsContainers = ownedContainers.Where(c => c.Kind == ContainerKind.Dns).ToList();
+        var resolver = new WireResolver(topology);
+
+        files["main_aws.tf"] = GenerateMain();
+        files["variables_aws.tf"] = GenerateVariables(topology, pools);
+        files["secrets.tf"] = GenerateSecrets(hosts, resolver);
+        files["network_aws.tf"] = GenerateNetwork(topology);
+        files["security_groups_aws.tf"] = GenerateSecurityGroups(topology, hosts);
+        files["instances_aws.tf"] = GenerateInstances(topology, hosts, pools);
+        files["provisioning_aws.tf"] = GenerateProvisioning(hosts, resolver, topology, pools);
+        files["outputs_aws.tf"] = GenerateOutputs(hosts, pools);
+
+        var allHosts = TopologyHelpers.CollectHosts(topology.Containers, null);
+        if (dnsContainers.Count > 0)
+            files["dns_aws.tf"] = GenerateDnsRecords(dnsContainers, allHosts, resolver, topology);
 
         return files;
     }
@@ -181,6 +211,59 @@ public sealed class AwsProvider : ICloudProvider
                 return plan.Id;
         }
         return plans.Last().Id;
+    }
+
+    // --- DNS record generation ---
+
+    private string GenerateDnsRecords(
+        List<Container> dnsContainers,
+        List<TopologyHelpers.HostEntry> allHosts,
+        WireResolver resolver,
+        Topology topology)
+    {
+        var dns = new HclBuilder();
+
+        foreach (var dnsContainer in dnsContainers)
+        {
+            var domain = dnsContainer.Config.GetValueOrDefault("domain", "");
+            if (string.IsNullOrEmpty(domain)) continue;
+
+            var sanitizedDomain = TopologyHelpers.SanitizeName(domain);
+
+            dns.Block($"data \"aws_route53_zone\" \"{sanitizedDomain}\"", b =>
+            {
+                b.RawAttribute("name", "var.domain");
+            });
+            dns.Line();
+
+            var wiredHosts = TopologyHelpers.CollectHostsWiredToDns(dnsContainer, resolver, allHosts);
+            foreach (var entry in wiredHosts)
+            {
+                var hostName = TopologyHelpers.SanitizeName(entry.Host.Name);
+                var providerKey = TopologyHelpers.ResolveProviderKey(entry.Host, topology);
+                var ipRef = GetIpReference(hostName, providerKey, TopologyHelpers.IsReplicatedHost(entry));
+
+                dns.Block($"resource \"aws_route53_record\" \"{hostName}\"", b =>
+                {
+                    b.RawAttribute("zone_id", $"data.aws_route53_zone.{sanitizedDomain}.zone_id");
+                    b.RawAttribute("name", $"\"{hostName}.${{var.domain}}\"");
+                    b.Attribute("type", "A");
+                    b.Attribute("ttl", 300);
+                    b.RawAttribute("records", $"[{ipRef}]");
+                });
+                dns.Line();
+            }
+        }
+
+        return dns.ToString();
+    }
+
+    internal static string GetIpReference(string hostName, string providerKey, bool isReplicated)
+    {
+        if (string.Equals(providerKey, "linode", StringComparison.OrdinalIgnoreCase))
+            return isReplicated ? $"linode_instance.{hostName}[0].ip_address" : $"linode_instance.{hostName}.ip_address";
+
+        return isReplicated ? $"aws_instance.{hostName}[0].public_ip" : $"aws_instance.{hostName}.public_ip";
     }
 
     // --- File generators ---
@@ -214,7 +297,7 @@ public sealed class AwsProvider : ICloudProvider
         return main.ToString();
     }
 
-    private string GenerateVariables(Topology topology, List<LinodeProvider.ComputePoolEntry> pools)
+    private string GenerateVariables(Topology topology, List<TopologyHelpers.ComputePoolEntry> pools)
     {
         var vars = new HclBuilder();
         vars.Block("variable \"aws_access_key_id\"", b =>
@@ -255,14 +338,14 @@ public sealed class AwsProvider : ICloudProvider
         CollectFedGroupVariables(topology.Containers, vars);
 
         // Host replica variables
-        var hosts = LinodeProvider.CollectHosts(topology.Containers, null);
+        var hosts = TopologyHelpers.CollectHosts(topology.Containers, null);
         CollectHostReplicaVariables(hosts, vars);
 
         // ComputePool variables
         var plans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         foreach (var pool in pools)
         {
-            var poolName = LinodeProvider.SanitizeName(pool.Pool.Name);
+            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
             var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
             var minHostRam = sharedOverhead + fedMemory;
@@ -296,12 +379,12 @@ public sealed class AwsProvider : ICloudProvider
             if (container.Kind == ContainerKind.FederationGroup)
             {
                 var countValue = container.Config.GetValueOrDefault("instanceCount", "1");
-                var varName = $"{LinodeProvider.SanitizeName(container.Name)}_instance_count";
+                var varName = $"{TopologyHelpers.SanitizeName(container.Name)}_instance_count";
                 vars.Line();
                 vars.Block($"variable \"{varName}\"", b =>
                 {
                     b.Attribute("type", "number");
-                    if (IsVariableRef(countValue))
+                    if (TopologyHelpers.IsVariableRef(countValue))
                         b.Attribute("default", 1);
                     else
                         b.Attribute("default", int.TryParse(countValue, out var n) ? n : 1);
@@ -316,18 +399,18 @@ public sealed class AwsProvider : ICloudProvider
         }
     }
 
-    private static void CollectHostReplicaVariables(List<LinodeProvider.HostEntry> hosts, HclBuilder vars)
+    private static void CollectHostReplicaVariables(List<TopologyHelpers.HostEntry> hosts, HclBuilder vars)
     {
         foreach (var entry in hosts)
         {
             if (entry.FedGroup != null) continue;
 
-            var (literal, varRef) = LinodeProvider.ParseHostReplicas(entry.Host);
+            var (literal, varRef) = TopologyHelpers.ParseHostReplicas(entry.Host);
             var hasMinMax = entry.Host.Config.ContainsKey("minReplicas") || entry.Host.Config.ContainsKey("maxReplicas");
             var needsVariable = varRef != null || (literal.HasValue && literal.Value > 1 && hasMinMax);
             if (!needsVariable) continue;
 
-            var varName = varRef != null ? LinodeProvider.SanitizeName(varRef) : $"{LinodeProvider.SanitizeName(entry.Host.Name)}_replicas";
+            var varName = varRef != null ? TopologyHelpers.SanitizeName(varRef) : $"{TopologyHelpers.SanitizeName(entry.Host.Name)}_replicas";
             var defaultValue = literal ?? 1;
 
             var minStr = entry.Host.Config.GetValueOrDefault("minReplicas", "");
@@ -367,15 +450,12 @@ public sealed class AwsProvider : ICloudProvider
         }
     }
 
-    private static bool IsVariableRef(string value) =>
-        value.StartsWith('$') && value.Length > 1 && !value.Contains(' ');
-
-    private static string GenerateSecrets(List<LinodeProvider.HostEntry> hosts, WireResolver resolver)
+    private static string GenerateSecrets(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver)
     {
         var secrets = new HclBuilder();
         foreach (var entry in hosts)
         {
-            var allSecrets = LinodeProvider.CollectSecrets(entry, resolver);
+            var allSecrets = TopologyHelpers.CollectSecrets(entry, resolver);
             foreach (var secret in allSecrets)
             {
                 secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
@@ -391,7 +471,7 @@ public sealed class AwsProvider : ICloudProvider
 
     private static string GenerateNetwork(Topology topology)
     {
-        var name = LinodeProvider.SanitizeName(topology.Name);
+        var name = TopologyHelpers.SanitizeName(topology.Name);
         var net = new HclBuilder();
 
         net.Block($"resource \"aws_vpc\" \"{name}\"", b =>
@@ -458,13 +538,13 @@ public sealed class AwsProvider : ICloudProvider
         return net.ToString();
     }
 
-    private static string GenerateSecurityGroups(Topology topology, List<LinodeProvider.HostEntry> hosts)
+    private static string GenerateSecurityGroups(Topology topology, List<TopologyHelpers.HostEntry> hosts)
     {
-        var name = LinodeProvider.SanitizeName(topology.Name);
+        var name = TopologyHelpers.SanitizeName(topology.Name);
         var sg = new HclBuilder();
 
         var hasLiveKit = hosts.Any(e =>
-            e.FedGroup == null && LinodeProvider.CollectImages(e.Host).Any(i => i.Kind == ImageKind.LiveKit));
+            e.FedGroup == null && TopologyHelpers.CollectImages(e.Host).Any(i => i.Kind == ImageKind.LiveKit));
 
         sg.Block($"resource \"aws_security_group\" \"{name}\"", b =>
         {
@@ -473,7 +553,6 @@ public sealed class AwsProvider : ICloudProvider
             b.RawAttribute("vpc_id", $"aws_vpc.{name}.id");
             b.Line();
 
-            // SSH
             b.Block("ingress", ib =>
             {
                 ib.Attribute("description", "SSH");
@@ -483,7 +562,6 @@ public sealed class AwsProvider : ICloudProvider
                 ib.RawAttribute("cidr_blocks", "[\"0.0.0.0/0\"]");
             });
 
-            // HTTP/HTTPS
             b.Block("ingress", ib =>
             {
                 ib.Attribute("description", "HTTP");
@@ -523,7 +601,6 @@ public sealed class AwsProvider : ICloudProvider
                 });
             }
 
-            // Internal traffic within VPC
             b.Block("ingress", ib =>
             {
                 ib.Attribute("description", "Internal VPC traffic");
@@ -533,7 +610,6 @@ public sealed class AwsProvider : ICloudProvider
                 ib.RawAttribute("self", "true");
             });
 
-            // All outbound
             b.Block("egress", eb =>
             {
                 eb.Attribute("from_port", 0);
@@ -553,12 +629,11 @@ public sealed class AwsProvider : ICloudProvider
         return sg.ToString();
     }
 
-    private string GenerateInstances(Topology topology, List<LinodeProvider.HostEntry> hosts, List<LinodeProvider.ComputePoolEntry> pools)
+    private string GenerateInstances(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools)
     {
-        var topoName = LinodeProvider.SanitizeName(topology.Name);
+        var topoName = TopologyHelpers.SanitizeName(topology.Name);
         var instances = new HclBuilder();
 
-        // Key pair (conditional on ssh key being set)
         instances.Block($"resource \"aws_key_pair\" \"{topoName}\"", b =>
         {
             b.RawAttribute("count", "var.ssh_public_key != \"\" ? 1 : 0");
@@ -567,11 +642,10 @@ public sealed class AwsProvider : ICloudProvider
         });
         instances.Line();
 
-        // Ubuntu 24.04 AMI lookup
         instances.Block($"data \"aws_ami\" \"ubuntu\"", b =>
         {
             b.RawAttribute("most_recent", "true");
-            b.RawAttribute("owners", "[\"099720109477\"]"); // Canonical
+            b.RawAttribute("owners", "[\"099720109477\"]");
 
             b.Block("filter", fb =>
             {
@@ -589,14 +663,14 @@ public sealed class AwsProvider : ICloudProvider
 
         foreach (var entry in hosts)
         {
-            var resourceName = LinodeProvider.SanitizeName(entry.Host.Name);
-            var ramRequired = LinodeProvider.CalculateHostRam(entry.Host);
+            var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
+            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host);
             var instanceType = SelectPlan(ramRequired);
-            var isReplicated = LinodeProvider.IsReplicatedHost(entry);
+            var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
 
             instances.Block($"resource \"aws_instance\" \"{resourceName}\"", b =>
             {
-                var countExpr = LinodeProvider.GetHostCountExpression(entry);
+                var countExpr = TopologyHelpers.GetHostCountExpression(entry);
                 if (countExpr != null)
                     b.RawAttribute("count", countExpr);
 
@@ -631,7 +705,7 @@ public sealed class AwsProvider : ICloudProvider
         var allPlans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         foreach (var pool in pools)
         {
-            var poolName = LinodeProvider.SanitizeName(pool.Pool.Name);
+            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
             var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
             var minHostRam = sharedOverhead + fedMemory;
@@ -665,17 +739,17 @@ public sealed class AwsProvider : ICloudProvider
         return instances.ToString();
     }
 
-    private static string GenerateProvisioning(List<LinodeProvider.HostEntry> hosts, WireResolver resolver, Topology topology, List<LinodeProvider.ComputePoolEntry> pools)
+    private static string GenerateProvisioning(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology, List<TopologyHelpers.ComputePoolEntry> pools)
     {
         var provisioning = new HclBuilder();
         foreach (var entry in hosts)
         {
-            var resourceName = LinodeProvider.SanitizeName(entry.Host.Name);
-            var hostName = LinodeProvider.SanitizeName(entry.Host.Name);
-            var images = LinodeProvider.CollectImages(entry.Host);
-            var caddies = LinodeProvider.CollectCaddyContainers(entry.Host);
+            var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
+            var hostName = TopologyHelpers.SanitizeName(entry.Host.Name);
+            var images = TopologyHelpers.CollectImages(entry.Host);
+            var caddies = TopologyHelpers.CollectCaddyContainers(entry.Host);
             var isFederation = entry.FedGroup != null;
-            var isReplicated = LinodeProvider.IsReplicatedHost(entry);
+            var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
 
             if (images.Count == 0 && caddies.Count == 0) continue;
 
@@ -683,13 +757,13 @@ public sealed class AwsProvider : ICloudProvider
             {
                 var depsList = new List<string> { $"aws_instance.{resourceName}" };
 
-                var countExpr = LinodeProvider.GetHostCountExpression(entry);
+                var countExpr = TopologyHelpers.GetHostCountExpression(entry);
                 if (countExpr != null)
                     b.RawAttribute("count", countExpr);
 
                 if (!isFederation)
                 {
-                    var secrets = LinodeProvider.CollectSecrets(entry, resolver);
+                    var secrets = TopologyHelpers.CollectSecrets(entry, resolver);
                     foreach (var secret in secrets)
                         depsList.Add($"random_password.{secret.ResourceName}");
                 }
@@ -711,7 +785,6 @@ public sealed class AwsProvider : ICloudProvider
                 {
                     pb.RawAttribute("inline", "[");
 
-                    // Docker installation
                     b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
                     b.Line("  \"sudo usermod -aG docker ubuntu\",");
                     b.Line("  \"sudo systemctl enable docker\",");
@@ -723,8 +796,8 @@ public sealed class AwsProvider : ICloudProvider
 
                         foreach (var image in images)
                         {
-                            var dockerImage = image.DockerImage ?? GetDefaultDockerImage(image.Kind);
-                            var containerName = LinodeProvider.SanitizeName(image.Name);
+                            var dockerImage = image.DockerImage ?? TopologyHelpers.GetDefaultDockerImage(image.Kind);
+                            var containerName = TopologyHelpers.SanitizeName(image.Name);
                             var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
 
                             var flags = new List<string>
@@ -735,7 +808,7 @@ public sealed class AwsProvider : ICloudProvider
                                 "--restart unless-stopped"
                             };
 
-                            var envVars = LinodeProvider.BuildEnvVars(image, entry, resolver);
+                            var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver);
                             foreach (var (key, value) in envVars)
                                 flags.Add($"-e {key}={value}");
 
@@ -749,7 +822,7 @@ public sealed class AwsProvider : ICloudProvider
                                     flags.Add($"-p {port}:{port}");
                             }
 
-                            var cmdOverride = LinodeProvider.ResolveCommandOverride(image, entry, resolver);
+                            var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver);
                             var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
                             var flagStr = string.Join(" ", flags);
@@ -758,8 +831,8 @@ public sealed class AwsProvider : ICloudProvider
 
                         foreach (var caddy in caddies)
                         {
-                            var caddyfile = LinodeProvider.GenerateCaddyfile(caddy, resolver);
-                            var caddyName = LinodeProvider.SanitizeName(caddy.Name);
+                            var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver);
+                            var caddyName = TopologyHelpers.SanitizeName(caddy.Name);
 
                             b.Line($"  \"sudo mkdir -p /opt/caddy\",");
                             var escapedCaddyfile = caddyfile.Replace("\"", "\\\"").Replace("$", "\\$");
@@ -768,7 +841,7 @@ public sealed class AwsProvider : ICloudProvider
                             b.Line($"  \"sudo docker run -d --name {caddyName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
                         }
 
-                        var backupCommands = LinodeProvider.GenerateBackupCommands(images, entry.Host);
+                        var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host);
                         foreach (var cmd in backupCommands)
                             b.Line($"  \"{cmd}\",");
                     }
@@ -782,7 +855,7 @@ public sealed class AwsProvider : ICloudProvider
         // ComputePool provisioning
         foreach (var pool in pools)
         {
-            var poolName = LinodeProvider.SanitizeName(pool.Pool.Name);
+            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
             var fedCpuMillicores = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.CpuMillicores ?? 250;
             var cpuLimit = fedCpuMillicores / 1000.0;
@@ -821,13 +894,13 @@ public sealed class AwsProvider : ICloudProvider
         return provisioning.ToString();
     }
 
-    private static string GenerateOutputs(List<LinodeProvider.HostEntry> hosts, List<LinodeProvider.ComputePoolEntry> pools)
+    private static string GenerateOutputs(List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools)
     {
         var outputs = new HclBuilder();
         foreach (var entry in hosts)
         {
-            var resourceName = LinodeProvider.SanitizeName(entry.Host.Name);
-            if (LinodeProvider.IsReplicatedHost(entry))
+            var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
+            if (TopologyHelpers.IsReplicatedHost(entry))
             {
                 outputs.Block($"output \"{resourceName}_ips\"", b =>
                 {
@@ -854,7 +927,7 @@ public sealed class AwsProvider : ICloudProvider
 
         foreach (var pool in pools)
         {
-            var poolName = LinodeProvider.SanitizeName(pool.Pool.Name);
+            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             outputs.Block($"output \"{poolName}_ips\"", b =>
             {
                 b.RawAttribute("value", $"aws_instance.{poolName}[*].public_ip");
@@ -865,16 +938,4 @@ public sealed class AwsProvider : ICloudProvider
 
         return outputs.ToString();
     }
-
-    private static string GetDefaultDockerImage(ImageKind kind) => kind switch
-    {
-        ImageKind.HubServer => "ghcr.io/xcord/hub:latest",
-        ImageKind.FederationServer => "ghcr.io/xcord/fed:latest",
-        ImageKind.Redis => "redis:7-alpine",
-        ImageKind.PostgreSQL => "postgres:17-alpine",
-        ImageKind.MinIO => "minio/minio:latest",
-        ImageKind.LiveKit => "livekit/livekit-server:latest",
-        ImageKind.Custom => "alpine:latest",
-        _ => "alpine:latest"
-    };
 }

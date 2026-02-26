@@ -13,7 +13,7 @@ public sealed record GenerateHclResponse(Dictionary<string, string> Files);
 
 public sealed class GenerateHclHandler(
     ITopologyStore store,
-    ProviderRegistry registry,
+    MultiProviderHclGenerator hclGenerator,
     IHclFileManager hclFileManager)
     : IRequestHandler<GenerateHclRequest, Result<GenerateHclResponse>>
 {
@@ -23,11 +23,7 @@ public sealed class GenerateHclHandler(
         if (topology is null)
             return Error.NotFound("TOPOLOGY_NOT_FOUND", $"Topology {request.TopologyId} not found");
 
-        var provider = registry.Get(topology.Provider);
-        if (provider is null)
-            return Error.BadRequest("UNKNOWN_PROVIDER", $"Provider '{topology.Provider}' is not registered");
-
-        var files = provider.GenerateHcl(topology);
+        var files = hclGenerator.Generate(topology);
         await hclFileManager.WriteFilesAsync(request.TopologyId, files, ct);
 
         return new GenerateHclResponse(files);

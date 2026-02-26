@@ -29,7 +29,7 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
     public Task<ChannelReader<TerraformOutputLine>> ExecuteAsync(
         Guid topologyId,
         TerraformCommand command,
-        string providerKey = "linode",
+        IReadOnlyList<string> providerKeys,
         CancellationToken ct = default)
     {
         if (_runningProcesses.ContainsKey(topologyId))
@@ -50,10 +50,15 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
             _ => throw new ArgumentOutOfRangeException(nameof(command))
         };
 
-        var credentialsFile = Path.Combine(_credentialsBasePath, $"{providerKey}.tfvars");
-        if (File.Exists(credentialsFile) && command != TerraformCommand.Init)
+        // Append -var-file for each provider's credential file
+        if (command != TerraformCommand.Init)
         {
-            args += $" -var-file=\"{credentialsFile}\"";
+            foreach (var key in providerKeys)
+            {
+                var credFile = Path.Combine(_credentialsBasePath, $"{key}.tfvars");
+                if (File.Exists(credFile))
+                    args += $" -var-file=\"{credFile}\"";
+            }
         }
 
         _ = Task.Run(async () =>

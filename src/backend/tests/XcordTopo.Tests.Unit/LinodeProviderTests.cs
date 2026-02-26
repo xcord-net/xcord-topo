@@ -589,7 +589,7 @@ public class LinodeProviderTests
         };
         var resolver = new WireResolver(topology);
 
-        Assert.Equal("xcord_hub", LinodeProvider.DeriveDbName(pg, resolver));
+        Assert.Equal("xcord_hub", TopologyHelpers.DeriveDbName(pg, resolver));
     }
 
     [Fact]
@@ -609,7 +609,7 @@ public class LinodeProviderTests
         };
         var resolver = new WireResolver(topology);
 
-        Assert.Equal("xcord", LinodeProvider.DeriveDbName(pg, resolver));
+        Assert.Equal("xcord", TopologyHelpers.DeriveDbName(pg, resolver));
     }
 
     [Fact]
@@ -621,7 +621,7 @@ public class LinodeProviderTests
         var topology = new Topology { Containers = [host] };
         var resolver = new WireResolver(topology);
 
-        Assert.Equal("app", LinodeProvider.DeriveDbName(pg, resolver));
+        Assert.Equal("app", TopologyHelpers.DeriveDbName(pg, resolver));
     }
 
     [Fact]
@@ -637,7 +637,7 @@ public class LinodeProviderTests
             ]
         };
 
-        Assert.Equal(768, LinodeProvider.CalculateHostRam(host));
+        Assert.Equal(768, TopologyHelpers.CalculateHostRam(host));
     }
 
     [Fact]
@@ -656,7 +656,7 @@ public class LinodeProviderTests
             ]
         };
 
-        Assert.Equal(384, LinodeProvider.CalculateHostRam(host));
+        Assert.Equal(384, TopologyHelpers.CalculateHostRam(host));
     }
 
     // --- Host replica tests ---
@@ -787,9 +787,9 @@ public class LinodeProviderTests
     {
         var host = new Container { Name = "fed-host", Kind = ContainerKind.Host, Width = 300, Height = 200 };
         var fedGroup = new Container { Name = "federation", Kind = ContainerKind.FederationGroup, Width = 500, Height = 350 };
-        var entry = new LinodeProvider.HostEntry(host, fedGroup);
+        var entry = new TopologyHelpers.HostEntry(host, fedGroup);
 
-        Assert.True(LinodeProvider.IsReplicatedHost(entry));
+        Assert.True(TopologyHelpers.IsReplicatedHost(entry));
     }
 
     [Fact]
@@ -800,9 +800,9 @@ public class LinodeProviderTests
             Name = "media-host", Kind = ContainerKind.Host, Width = 300, Height = 200,
             Config = new() { ["replicas"] = "3" }
         };
-        var entry = new LinodeProvider.HostEntry(host, null);
+        var entry = new TopologyHelpers.HostEntry(host, null);
 
-        Assert.True(LinodeProvider.IsReplicatedHost(entry));
+        Assert.True(TopologyHelpers.IsReplicatedHost(entry));
     }
 
     [Fact]
@@ -813,9 +813,9 @@ public class LinodeProviderTests
             Name = "media-host", Kind = ContainerKind.Host, Width = 300, Height = 200,
             Config = new() { ["replicas"] = "$MEDIA_HOSTS" }
         };
-        var entry = new LinodeProvider.HostEntry(host, null);
+        var entry = new TopologyHelpers.HostEntry(host, null);
 
-        Assert.True(LinodeProvider.IsReplicatedHost(entry));
+        Assert.True(TopologyHelpers.IsReplicatedHost(entry));
     }
 
     [Fact]
@@ -826,18 +826,18 @@ public class LinodeProviderTests
             Name = "web-host", Kind = ContainerKind.Host, Width = 300, Height = 200,
             Config = new() { ["replicas"] = "1" }
         };
-        var entry = new LinodeProvider.HostEntry(host, null);
+        var entry = new TopologyHelpers.HostEntry(host, null);
 
-        Assert.False(LinodeProvider.IsReplicatedHost(entry));
+        Assert.False(TopologyHelpers.IsReplicatedHost(entry));
     }
 
     [Fact]
     public void IsReplicatedHost_NoReplicasConfig_ReturnsFalse()
     {
         var host = new Container { Name = "web-host", Kind = ContainerKind.Host, Width = 300, Height = 200 };
-        var entry = new LinodeProvider.HostEntry(host, null);
+        var entry = new TopologyHelpers.HostEntry(host, null);
 
-        Assert.False(LinodeProvider.IsReplicatedHost(entry));
+        Assert.False(TopologyHelpers.IsReplicatedHost(entry));
     }
 
     [Fact]

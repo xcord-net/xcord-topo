@@ -7,7 +7,8 @@ export type ContainerKind =
   | 'Network'
   | 'Caddy'
   | 'FederationGroup'
-  | 'ComputePool';
+  | 'ComputePool'
+  | 'Dns';
 
 export type ImageKind =
   | 'HubServer'

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Models;
@@ -31,12 +32,14 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
         if (executor.IsRunning(request.TopologyId))
             return Error.Conflict("ALREADY_RUNNING", "Terraform is already running for this topology");
 
-        // Look up topology to determine provider key
+        // Look up topology to determine all active provider keys
         var topology = await topologyStore.GetAsync(request.TopologyId, ct);
-        var providerKey = topology?.Provider ?? "linode";
+        var providerKeys = topology != null
+            ? TopologyHelpers.CollectActiveProviderKeys(topology)
+            : new List<string> { "linode" };
 
         var command = Enum.Parse<TerraformCommand>(request.Command, ignoreCase: true);
-        await executor.ExecuteAsync(request.TopologyId, command, providerKey, ct);
+        await executor.ExecuteAsync(request.TopologyId, command, providerKeys, ct);
 
         return new ExecuteTerraformResponse("started");
     }

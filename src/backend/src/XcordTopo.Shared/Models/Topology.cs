@@ -34,7 +34,8 @@ public enum ContainerKind
     Network,
     Caddy,
     FederationGroup,
-    ComputePool
+    ComputePool,
+    Dns
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

@@ -5,6 +5,7 @@ import { saveTopology } from '../lib/serialization';
 import { validateField, validateAllFields } from '../lib/credential-validation';
 import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, CostEstimate, TerraformOutputLine } from '../types/deploy';
 import type { MigrationDiffResult, MigrationDecision, MigrationPlan } from '../types/migration';
+import type { Topology, Container } from '../types/topology';
 
 interface ProviderInfo {
   key: string;
@@ -17,6 +18,20 @@ interface Region {
   id: string;
   label: string;
   country: string;
+}
+
+/** Collect all distinct provider keys from container overrides + topology-level provider. */
+function collectActiveProviders(topology: Topology): string[] {
+  const keys = new Set<string>([topology.provider]);
+  function walk(containers: Container[]) {
+    for (const c of containers) {
+      const override = c.config?.provider;
+      if (override) keys.add(override);
+      if (c.children) walk(c.children);
+    }
+  }
+  walk(topology.containers);
+  return Array.from(keys);
 }
 
 const STEPS: { key: DeployStep; label: string }[] = [
@@ -128,6 +143,17 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   const [fieldErrors, setFieldErrors] = createSignal<Record<string, string>>({});
   const [touchedFields, setTouchedFields] = createSignal<Set<string>>(new Set());
 
+  // Multi-provider state
+  const [activeProviderKeys, setActiveProviderKeys] = createSignal<string[]>([]);
+  const [activeProviderTab, setActiveProviderTab] = createSignal('');
+  const [providerSchemas, setProviderSchemas] = createSignal<Record<string, CredentialField[]>>({});
+  const [providerStatuses, setProviderStatuses] = createSignal<Record<string, CredentialStatus>>({});
+  const [providerValues, setProviderValues] = createSignal<Record<string, Record<string, string>>>({});
+  const [providerFieldErrors, setProviderFieldErrors] = createSignal<Record<string, Record<string, string>>>({});
+  const [providerTouchedFields, setProviderTouchedFields] = createSignal<Record<string, Set<string>>>({});
+
+  const isMultiProvider = () => activeProviderKeys().length > 1;
+
   // Migration state
   const [migrationSourceId, setMigrationSourceId] = createSignal('');
   const [migrationDiff, setMigrationDiff] = createSignal<MigrationDiffResult | null>(null);
@@ -181,29 +207,78 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     setLoading(true);
     setError('');
     try {
-      const [regRes, credRes, schema] = await Promise.all([
-        fetch(`/api/v1/providers/${key}/regions`).then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); }),
-        deployApi.getCredentialStatus(key),
-        deployApi.getCredentialSchema(key),
-      ]);
-      setRegions(regRes.regions);
-      setCredentialStatus(credRes);
-      setCredentialSchema(schema);
+      // Detect all active providers from topology container overrides
+      const allKeys = collectActiveProviders(topo.topology);
+      // Ensure the selected provider is included
+      if (!allKeys.includes(key)) allKeys.unshift(key);
+      setActiveProviderKeys(allKeys);
+      setActiveProviderTab(allKeys[0]);
 
-      // Pre-fill credential values: start with shared .tfvars values, then overlay per-topology providerConfig
-      const prefill: Record<string, string> = {};
-      if (credRes.nonSensitiveValues) {
-        for (const [k, v] of Object.entries(credRes.nonSensitiveValues)) {
-          prefill[k] = v;
+      if (allKeys.length > 1) {
+        // Multi-provider: load schemas/statuses for all providers in parallel
+        const schemaResults: Record<string, CredentialField[]> = {};
+        const statusResults: Record<string, CredentialStatus> = {};
+        const valResults: Record<string, Record<string, string>> = {};
+        const touchResults: Record<string, Set<string>> = {};
+        const errResults: Record<string, Record<string, string>> = {};
+
+        await Promise.all(allKeys.map(async (pk) => {
+          const [credRes, schema] = await Promise.all([
+            deployApi.getCredentialStatus(pk),
+            deployApi.getCredentialSchema(pk),
+          ]);
+          schemaResults[pk] = schema;
+          statusResults[pk] = credRes;
+          touchResults[pk] = new Set();
+          errResults[pk] = {};
+
+          const prefill: Record<string, string> = {};
+          if (credRes.nonSensitiveValues) {
+            for (const [k, v] of Object.entries(credRes.nonSensitiveValues)) {
+              prefill[k] = v;
+            }
+          }
+          valResults[pk] = prefill;
+        }));
+
+        setProviderSchemas(schemaResults);
+        setProviderStatuses(statusResults);
+        setProviderValues(valResults);
+        setProviderTouchedFields(touchResults);
+        setProviderFieldErrors(errResults);
+
+        // Also load primary provider data for single-provider compat
+        const regRes = await fetch(`/api/v1/providers/${key}/regions`).then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); });
+        setRegions(regRes.regions);
+        setCredentialSchema(schemaResults[key] ?? []);
+        setCredentialStatus(statusResults[key] ?? null);
+        setCredentialValues(valResults[key] ?? {});
+      } else {
+        // Single provider: original path
+        const [regRes, credRes, schema] = await Promise.all([
+          fetch(`/api/v1/providers/${key}/regions`).then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); }),
+          deployApi.getCredentialStatus(key),
+          deployApi.getCredentialSchema(key),
+        ]);
+        setRegions(regRes.regions);
+        setCredentialStatus(credRes);
+        setCredentialSchema(schema);
+
+        const prefill: Record<string, string> = {};
+        if (credRes.nonSensitiveValues) {
+          for (const [k, v] of Object.entries(credRes.nonSensitiveValues)) {
+            prefill[k] = v;
+          }
         }
-      }
-      const topoConfig = topo.topology.providerConfig;
-      if (topoConfig) {
-        for (const [k, v] of Object.entries(topoConfig)) {
-          prefill[k] = v;
+        const topoConfig = topo.topology.providerConfig;
+        if (topoConfig) {
+          for (const [k, v] of Object.entries(topoConfig)) {
+            prefill[k] = v;
+          }
         }
+        setCredentialValues(prefill);
       }
-      setCredentialValues(prefill);
+
       setStep('configure');
     } catch (e: any) {
       setError(e.message);
@@ -231,16 +306,48 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   };
 
   const handleSaveAndNext = async () => {
-    // Mark all fields touched and validate
-    const schema = credentialSchema();
-    const allKeys = new Set(schema.map(f => f.key));
-    setTouchedFields(allKeys);
-    const savedKeys = new Set(credentialStatus()?.setVariables ?? []);
-    const errors = validateAllFields(schema, credentialValues(), savedKeys);
-    setFieldErrors(errors);
-    if (Object.keys(errors).length > 0) {
-      setError('Please fix the validation errors below');
-      return;
+    if (isMultiProvider()) {
+      // Validate all provider tabs
+      const allProvKeys = activeProviderKeys();
+      const schemas = providerSchemas();
+      const vals = providerValues();
+      const statuses = providerStatuses();
+      let hasErrors = false;
+      const newErrors: Record<string, Record<string, string>> = {};
+      const newTouched: Record<string, Set<string>> = {};
+
+      for (const pk of allProvKeys) {
+        const schema = schemas[pk] ?? [];
+        const fieldKeys = new Set(schema.map(f => f.key));
+        newTouched[pk] = fieldKeys;
+        const savedKeys = new Set(statuses[pk]?.setVariables ?? []);
+        const errors = validateAllFields(schema, vals[pk] ?? {}, savedKeys);
+        newErrors[pk] = errors;
+        if (Object.keys(errors).length > 0) hasErrors = true;
+      }
+
+      setProviderFieldErrors(newErrors);
+      setProviderTouchedFields(newTouched);
+
+      if (hasErrors) {
+        // Switch to the first tab with errors
+        const firstError = allProvKeys.find(pk => Object.keys(newErrors[pk] ?? {}).length > 0);
+        if (firstError) setActiveProviderTab(firstError);
+        setError('Please fix the validation errors on all provider tabs');
+        return;
+      }
+    } else {
+      // Single provider validation
+      const schema = credentialSchema();
+      const allKeys = new Set(schema.map(f => f.key));
+      setTouchedFields(allKeys);
+      const savedKeys = new Set(credentialStatus()?.setVariables ?? []);
+      const errors = validateAllFields(schema, credentialValues(), savedKeys);
+      setFieldErrors(errors);
+      if (Object.keys(errors).length > 0) {
+        setError('Please fix the validation errors below');
+        return;
+      }
     }
 
     setLoading(true);
@@ -252,25 +359,40 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       }
       await saveTopology(topo.topology);
 
-      // Only send non-empty values
-      const vars: Record<string, string> = {};
-      for (const [k, v] of Object.entries(credentialValues())) {
-        if (v) vars[k] = v;
-      }
-      if (Object.keys(vars).length > 0) {
-        await deployApi.saveCredentials(provider(), vars);
-      }
-
-      // Persist non-sensitive config to topology's providerConfig (per-topology, not shared)
-      const schema = credentialSchema();
-      const nonSensitive: Record<string, string> = {};
-      for (const [k, v] of Object.entries(vars)) {
-        const field = schema.find(f => f.key === k);
-        if (field && !field.sensitive) {
-          nonSensitive[k] = v;
+      if (isMultiProvider()) {
+        // Save credentials for each provider
+        const allProvKeys = activeProviderKeys();
+        const vals = providerValues();
+        for (const pk of allProvKeys) {
+          const vars: Record<string, string> = {};
+          for (const [k, v] of Object.entries(vals[pk] ?? {})) {
+            if (v) vars[k] = v;
+          }
+          if (Object.keys(vars).length > 0) {
+            await deployApi.saveCredentials(pk, vars);
+          }
         }
+      } else {
+        // Only send non-empty values
+        const vars: Record<string, string> = {};
+        for (const [k, v] of Object.entries(credentialValues())) {
+          if (v) vars[k] = v;
+        }
+        if (Object.keys(vars).length > 0) {
+          await deployApi.saveCredentials(provider(), vars);
+        }
+
+        // Persist non-sensitive config to topology's providerConfig (per-topology, not shared)
+        const schema = credentialSchema();
+        const nonSensitive: Record<string, string> = {};
+        for (const [k, v] of Object.entries(vars)) {
+          const field = schema.find(f => f.key === k);
+          if (field && !field.sensitive) {
+            nonSensitive[k] = v;
+          }
+        }
+        topo.updateProviderConfig(nonSensitive);
       }
-      topo.updateProviderConfig(nonSensitive);
 
       // Generate HCL
       const hclResult = await deployApi.generateHcl(topo.topology.id);
@@ -595,6 +717,92 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     );
   };
 
+  // --- Multi-provider field rendering ---
+  const renderMultiProviderField = (
+    providerKey: string,
+    field: CredentialField,
+    vals: () => Record<string, string>,
+    errs: () => Record<string, string>,
+    touched: () => Set<string>,
+    status: () => CredentialStatus | undefined,
+  ) => {
+    const isSaved = () => status()?.setVariables?.includes(field.key);
+    const hasError = () => touched().has(field.key) && errs()[field.key];
+    const borderClass = () => hasError() ? 'border-topo-error' : 'border-topo-border';
+
+    const setValue = (key: string, value: string) => {
+      setProviderValues(prev => ({
+        ...prev,
+        [providerKey]: { ...(prev[providerKey] ?? {}), [key]: value },
+      }));
+      setProviderFieldErrors(prev => {
+        const next = { ...prev };
+        const pErrors = { ...(next[providerKey] ?? {}) };
+        delete pErrors[key];
+        next[providerKey] = pErrors;
+        return next;
+      });
+    };
+
+    const handleBlur = () => {
+      setProviderTouchedFields(prev => {
+        const next = { ...prev };
+        const s = new Set(next[providerKey] ?? []);
+        s.add(field.key);
+        next[providerKey] = s;
+        return next;
+      });
+      const value = vals()[field.key] ?? '';
+      const isSavedNow = status()?.setVariables?.includes(field.key) ?? false;
+      const err = validateField(field, value, isSavedNow);
+      setProviderFieldErrors(prev => {
+        const next = { ...prev };
+        const pErrors = { ...(next[providerKey] ?? {}) };
+        if (err) pErrors[field.key] = err; else delete pErrors[field.key];
+        next[providerKey] = pErrors;
+        return next;
+      });
+    };
+
+    return (
+      <div>
+        <label class="flex items-center text-xs text-topo-text-muted mb-1">
+          {field.label}
+          <Show when={!field.required}>
+            <span class="ml-1 text-topo-text-muted/50">(optional)</span>
+          </Show>
+          <Show when={isSaved()}>
+            <span class="ml-2 text-topo-success">(saved)</span>
+          </Show>
+          <Show when={field.help}>
+            <FieldHelp help={field.help!} />
+          </Show>
+        </label>
+        {field.type === 'textarea' ? (
+          <textarea
+            class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand font-mono h-16 resize-none`}
+            placeholder={field.placeholder}
+            value={vals()[field.key] ?? ''}
+            onInput={(e) => setValue(field.key, e.currentTarget.value)}
+            onBlur={handleBlur}
+          />
+        ) : (
+          <input
+            type={field.type === 'password' ? 'password' : 'text'}
+            class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand`}
+            placeholder={isSaved() && field.sensitive ? '••••••••' : (field.placeholder ?? '')}
+            value={vals()[field.key] ?? ''}
+            onInput={(e) => setValue(field.key, e.currentTarget.value)}
+            onBlur={handleBlur}
+          />
+        )}
+        <Show when={hasError()}>
+          <p class="text-xs text-topo-error mt-0.5">{errs()[field.key]}</p>
+        </Show>
+      </div>
+    );
+  };
+
   // --- Inline navigation buttons ---
   const renderNav = (children: any) => (
     <div class="flex items-center justify-between mt-6 pt-4 border-t border-topo-border">
@@ -695,11 +903,74 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
             <div class="flex gap-6">
               {/* Form */}
               <div class="flex-1 space-y-3">
-                <p class="text-xs text-topo-text-muted">Enter credentials and configuration for {provider()}.</p>
+                <Show when={isMultiProvider()}>
+                  <div class="bg-topo-brand/10 border border-topo-brand/20 rounded px-3 py-2 text-xs text-topo-brand">
+                    This topology uses multiple providers. Configure credentials for each.
+                  </div>
 
-                <For each={credentialSchema()}>
-                  {(field) => renderField(field)}
-                </For>
+                  {/* Provider tabs */}
+                  <div class="flex gap-1 border-b border-topo-border">
+                    <For each={activeProviderKeys()}>
+                      {(pk) => {
+                        const hasProvErrors = () => Object.keys(providerFieldErrors()[pk] ?? {}).length > 0;
+                        const provStatus = () => providerStatuses()[pk];
+                        const allSaved = () => {
+                          const schema = providerSchemas()[pk] ?? [];
+                          const savedVars = provStatus()?.setVariables ?? [];
+                          return schema.filter(f => f.required).every(f => savedVars.includes(f.key));
+                        };
+
+                        return (
+                          <button
+                            class={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                              activeProviderTab() === pk
+                                ? 'border-topo-brand text-topo-brand'
+                                : 'border-transparent text-topo-text-muted hover:text-topo-text-secondary'
+                            }`}
+                            onClick={() => setActiveProviderTab(pk)}
+                          >
+                            {pk}
+                            <Show when={allSaved() && !hasProvErrors()}>
+                              <span class="ml-1 text-topo-success">&#10003;</span>
+                            </Show>
+                            <Show when={hasProvErrors()}>
+                              <span class="ml-1 text-topo-error">&#9679;</span>
+                            </Show>
+                          </button>
+                        );
+                      }}
+                    </For>
+                  </div>
+
+                  {/* Per-provider credential form */}
+                  <For each={activeProviderKeys()}>
+                    {(pk) => (
+                      <Show when={activeProviderTab() === pk}>
+                        <div class="space-y-3">
+                          <p class="text-xs text-topo-text-muted">Enter credentials for {pk}.</p>
+                          <For each={providerSchemas()[pk] ?? []}>
+                            {(field) => {
+                              const vals = () => providerValues()[pk] ?? {};
+                              const errs = () => providerFieldErrors()[pk] ?? {};
+                              const touched = () => providerTouchedFields()[pk] ?? new Set();
+                              const status = () => providerStatuses()[pk];
+
+                              return renderMultiProviderField(pk, field, vals, errs, touched, status);
+                            }}
+                          </For>
+                        </div>
+                      </Show>
+                    )}
+                  </For>
+                </Show>
+
+                <Show when={!isMultiProvider()}>
+                  <p class="text-xs text-topo-text-muted">Enter credentials and configuration for {provider()}.</p>
+
+                  <For each={credentialSchema()}>
+                    {(field) => renderField(field)}
+                  </For>
+                </Show>
 
                 {renderNav(
                   <button

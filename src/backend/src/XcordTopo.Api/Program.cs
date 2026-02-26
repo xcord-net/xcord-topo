@@ -36,6 +36,7 @@ builder.Services.AddSingleton<AwsProvider>();
 builder.Services.AddSingleton<ICloudProvider>(sp => sp.GetRequiredService<LinodeProvider>());
 builder.Services.AddSingleton<ICloudProvider>(sp => sp.GetRequiredService<AwsProvider>());
 builder.Services.AddSingleton<ProviderRegistry>();
+builder.Services.AddSingleton<MultiProviderHclGenerator>();
 
 // Credentials
 builder.Services.AddSingleton<ICredentialStore, FileCredentialStore>();

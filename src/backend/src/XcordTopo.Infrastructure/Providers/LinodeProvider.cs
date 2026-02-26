@@ -12,7 +12,7 @@ public sealed class LinodeProvider : ICloudProvider
         Key = "linode",
         Name = "Linode (Akamai)",
         Description = "Akamai Connected Cloud (formerly Linode). Affordable VPS hosting with global regions.",
-        SupportedContainerKinds = ["Host", "Network", "Caddy", "FederationGroup", "ComputePool"]
+        SupportedContainerKinds = ["Host", "Network", "Caddy", "FederationGroup", "ComputePool", "Dns"]
     };
 
     public List<Region> GetRegions() =>
@@ -133,8 +133,9 @@ public sealed class LinodeProvider : ICloudProvider
     public Dictionary<string, string> GenerateHcl(Topology topology)
     {
         var files = new Dictionary<string, string>();
-        var hosts = CollectHosts(topology.Containers, null);
-        var pools = CollectComputePools(topology.Containers, topology);
+        var hosts = TopologyHelpers.CollectHosts(topology.Containers, null);
+        var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology);
+        var dnsContainers = TopologyHelpers.CollectDnsContainers(topology.Containers);
         var resolver = new WireResolver(topology);
 
         files["main.tf"] = GenerateMain();
@@ -146,160 +147,36 @@ public sealed class LinodeProvider : ICloudProvider
         files["volumes.tf"] = GenerateVolumes(hosts);
         files["outputs.tf"] = GenerateOutputs(hosts, pools);
 
+        if (dnsContainers.Count > 0)
+            files["dns.tf"] = GenerateDnsRecords(dnsContainers, hosts, resolver, topology);
+
         return files;
     }
 
-    // --- Tree-walking helpers ---
-
-    internal record HostEntry(Container Host, Container? FedGroup);
-
-    internal static List<HostEntry> CollectHosts(List<Container> containers, Container? fedGroup)
+    public Dictionary<string, string> GenerateHclForContainers(
+        Topology topology,
+        IReadOnlyList<Container> ownedContainers)
     {
-        var result = new List<HostEntry>();
-        foreach (var container in containers)
-        {
-            if (container.Kind == ContainerKind.Host)
-            {
-                result.Add(new HostEntry(container, fedGroup));
-                result.AddRange(CollectHosts(container.Children, fedGroup));
-            }
-            else if (container.Kind == ContainerKind.FederationGroup)
-            {
-                result.AddRange(CollectHosts(container.Children, container));
-            }
-            else if (container.Kind == ContainerKind.Network)
-            {
-                result.AddRange(CollectHosts(container.Children, fedGroup));
-            }
-            // ComputePool containers are handled separately via CollectComputePools
-        }
-        return result;
-    }
+        var files = new Dictionary<string, string>();
+        var hosts = TopologyHelpers.CollectHosts(ownedContainers.ToList(), null);
+        var pools = TopologyHelpers.CollectComputePools(ownedContainers.ToList(), topology);
+        var dnsContainers = ownedContainers.Where(c => c.Kind == ContainerKind.Dns).ToList();
+        var resolver = new WireResolver(topology);
 
-    internal record ComputePoolEntry(Container Pool, TierProfile TierProfile, int TargetTenants);
+        files["main_linode.tf"] = GenerateMain();
+        files["variables_linode.tf"] = GenerateVariables(topology, pools);
+        files["secrets.tf"] = GenerateSecrets(hosts, resolver, topology);
+        files["instances_linode.tf"] = GenerateInstances(topology, hosts, pools);
+        files["firewall_linode.tf"] = GenerateFirewall(topology, hosts);
+        files["provisioning_linode.tf"] = GenerateProvisioning(hosts, resolver, topology, pools);
+        files["volumes_linode.tf"] = GenerateVolumes(hosts);
+        files["outputs_linode.tf"] = GenerateOutputs(hosts, pools);
 
-    internal static List<ComputePoolEntry> CollectComputePools(List<Container> containers, Topology topology)
-    {
-        var result = new List<ComputePoolEntry>();
-        var tierProfiles = topology.TierProfiles.Count > 0
-            ? topology.TierProfiles
-            : ImageOperationalMetadata.DefaultTierProfiles;
+        var allHosts = TopologyHelpers.CollectHosts(topology.Containers, null);
+        if (dnsContainers.Count > 0)
+            files["dns_linode.tf"] = GenerateDnsRecords(dnsContainers, allHosts, resolver, topology);
 
-        foreach (var container in containers)
-        {
-            if (container.Kind == ContainerKind.ComputePool)
-            {
-                var tierProfileId = container.Config.GetValueOrDefault("tierProfile", "free");
-                var targetTenantsStr = container.Config.GetValueOrDefault("targetTenants", "10");
-                var targetTenants = int.TryParse(targetTenantsStr, out var n) ? n : 10;
-
-                var tierProfile = tierProfiles.FirstOrDefault(t => t.Id == tierProfileId)
-                    ?? tierProfiles.First();
-
-                result.Add(new ComputePoolEntry(container, tierProfile, targetTenants));
-            }
-            else if (container.Kind == ContainerKind.Network)
-            {
-                result.AddRange(CollectComputePools(container.Children, topology));
-            }
-        }
-        return result;
-    }
-
-    internal static List<Image> CollectImages(Container container)
-    {
-        var images = new List<Image>(container.Images);
-        foreach (var child in container.Children)
-        {
-            if (child.Kind != ContainerKind.FederationGroup)
-                images.AddRange(CollectImages(child));
-        }
-        return images;
-    }
-
-    internal static List<Container> CollectCaddyContainers(Container container)
-    {
-        var caddies = new List<Container>();
-        foreach (var child in container.Children)
-        {
-            if (child.Kind == ContainerKind.Caddy)
-                caddies.Add(child);
-            else if (child.Kind != ContainerKind.FederationGroup)
-                caddies.AddRange(CollectCaddyContainers(child));
-        }
-        return caddies;
-    }
-
-    private static bool IsVariableRef(string value) =>
-        value.StartsWith('$') && value.Length > 1 && !value.Contains(' ');
-
-    private static (int? Literal, string? VarRef) ParseReplicas(Image image)
-    {
-        var replicas = image.Config.GetValueOrDefault("replicas", "1");
-        if (IsVariableRef(replicas))
-            return (null, replicas[1..]);
-        return (int.TryParse(replicas, out var n) ? n : 1, null);
-    }
-
-    internal static (int? Literal, string? VarRef) ParseHostReplicas(Container host)
-    {
-        var replicas = host.Config.GetValueOrDefault("replicas", "1");
-        if (IsVariableRef(replicas))
-            return (null, replicas[1..]);
-        return (int.TryParse(replicas, out var n) ? n : 1, null);
-    }
-
-    internal static bool IsReplicatedHost(HostEntry entry)
-    {
-        if (entry.FedGroup != null) return true;
-        var (literal, varRef) = ParseHostReplicas(entry.Host);
-        return varRef != null || (literal.HasValue && literal.Value > 1);
-    }
-
-    /// <summary>
-    /// Get the Terraform count expression for a replicated host.
-    /// FedGroup hosts use the federation instance_count variable.
-    /// Host-replicated hosts use a literal or variable reference.
-    /// Returns null for non-replicated hosts.
-    /// </summary>
-    internal static string? GetHostCountExpression(HostEntry entry)
-    {
-        if (entry.FedGroup != null)
-            return $"var.{SanitizeName(entry.FedGroup.Name)}_instance_count";
-
-        var (literal, varRef) = ParseHostReplicas(entry.Host);
-        if (varRef != null)
-            return $"var.{SanitizeName(varRef)}";
-        if (literal.HasValue && literal.Value > 1)
-        {
-            // If min/max are set, use a variable (for runtime override) instead of literal
-            var hasMinMax = entry.Host.Config.ContainsKey("minReplicas") || entry.Host.Config.ContainsKey("maxReplicas");
-            if (hasMinMax)
-                return $"var.{SanitizeName(entry.Host.Name)}_replicas";
-            return literal.Value.ToString();
-        }
-        return null;
-    }
-
-    // --- Compute plan auto-selection ---
-
-    internal static int CalculateHostRam(Container host)
-    {
-        var totalRam = 0;
-        var images = CollectImages(host);
-        foreach (var image in images)
-        {
-            if (ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta))
-                totalRam += meta.MinRamMb;
-            else
-                totalRam += 256;
-        }
-        // Add Caddy overhead if present
-        var caddies = CollectCaddyContainers(host);
-        if (caddies.Count > 0)
-            totalRam += ImageOperationalMetadata.Caddy.MinRamMb;
-
-        return totalRam;
+        return files;
     }
 
     internal string SelectPlan(int requiredRamMb)
@@ -310,65 +187,63 @@ public sealed class LinodeProvider : ICloudProvider
             if (plan.MemoryMb >= requiredRamMb)
                 return plan.Id;
         }
-        return plans.Last().Id; // largest available
+        return plans.Last().Id;
     }
 
-    // --- Secret helpers ---
+    // --- DNS record generation ---
 
-    internal record SecretEntry(string ResourceName, string Description);
-
-    internal static List<SecretEntry> CollectSecrets(HostEntry entry, WireResolver resolver)
+    private string GenerateDnsRecords(
+        List<Container> dnsContainers,
+        List<TopologyHelpers.HostEntry> allHosts,
+        WireResolver resolver,
+        Topology topology)
     {
-        if (entry.FedGroup != null) return []; // Hub manages federation secrets
+        var dns = new HclBuilder();
 
-        var secrets = new List<SecretEntry>();
-        var hostName = SanitizeName(entry.Host.Name);
-        var images = CollectImages(entry.Host);
-
-        foreach (var image in images)
+        foreach (var dnsContainer in dnsContainers)
         {
-            var imgName = SanitizeName(image.Name);
-            switch (image.Kind)
+            var domain = dnsContainer.Config.GetValueOrDefault("domain", "");
+            if (string.IsNullOrEmpty(domain)) continue;
+
+            var sanitizedDomain = TopologyHelpers.SanitizeName(domain);
+
+            dns.Block($"data \"linode_domain\" \"{sanitizedDomain}\"", b =>
             {
-                case ImageKind.PostgreSQL:
-                    secrets.Add(new($"{hostName}_{imgName}_password", $"PostgreSQL password for {image.Name}"));
-                    break;
-                case ImageKind.Redis:
-                    secrets.Add(new($"{hostName}_{imgName}_password", $"Redis password for {image.Name}"));
-                    break;
-                case ImageKind.MinIO:
-                    secrets.Add(new($"{hostName}_{imgName}_access_key", $"MinIO access key for {image.Name}"));
-                    secrets.Add(new($"{hostName}_{imgName}_secret_key", $"MinIO secret key for {image.Name}"));
-                    break;
-                case ImageKind.LiveKit:
-                    secrets.Add(new($"{hostName}_{imgName}_api_key", $"LiveKit API key for {image.Name}"));
-                    secrets.Add(new($"{hostName}_{imgName}_api_secret", $"LiveKit API secret for {image.Name}"));
-                    break;
+                b.RawAttribute("domain", "var.domain");
+            });
+            dns.Line();
+
+            var wiredHosts = TopologyHelpers.CollectHostsWiredToDns(dnsContainer, resolver, allHosts);
+            foreach (var entry in wiredHosts)
+            {
+                var hostName = TopologyHelpers.SanitizeName(entry.Host.Name);
+                var providerKey = TopologyHelpers.ResolveProviderKey(entry.Host, topology);
+                var ipRef = GetIpReference(hostName, providerKey, TopologyHelpers.IsReplicatedHost(entry));
+
+                dns.Block($"resource \"linode_domain_record\" \"{hostName}\"", b =>
+                {
+                    b.RawAttribute("domain_id", $"data.linode_domain.{sanitizedDomain}.id");
+                    b.Attribute("name", hostName);
+                    b.Attribute("record_type", "A");
+                    b.RawAttribute("target", ipRef);
+                    b.Attribute("ttl_sec", 300);
+                });
+                dns.Line();
             }
         }
-        return secrets;
+
+        return dns.ToString();
     }
 
     /// <summary>
-    /// Derive DB name from the consumer wired to this PG image.
-    /// HubServer → xcord_hub, FederationServer → xcord, otherwise → app
+    /// Get the Terraform IP reference for a host based on which provider owns it.
     /// </summary>
-    internal static string DeriveDbName(Image pgImage, WireResolver resolver)
+    internal static string GetIpReference(string hostName, string providerKey, bool isReplicated)
     {
-        var incoming = resolver.ResolveIncoming(pgImage.Id, "postgres");
-        foreach (var (node, _) in incoming)
-        {
-            if (node is Image consumerImage)
-            {
-                return consumerImage.Kind switch
-                {
-                    ImageKind.HubServer => "xcord_hub",
-                    ImageKind.FederationServer => "xcord",
-                    _ => "app"
-                };
-            }
-        }
-        return "app";
+        if (string.Equals(providerKey, "aws", StringComparison.OrdinalIgnoreCase))
+            return isReplicated ? $"aws_instance.{hostName}[0].public_ip" : $"aws_instance.{hostName}.public_ip";
+
+        return isReplicated ? $"linode_instance.{hostName}[0].ip_address" : $"linode_instance.{hostName}.ip_address";
     }
 
     // --- File generators ---
@@ -400,12 +275,12 @@ public sealed class LinodeProvider : ICloudProvider
         return main.ToString();
     }
 
-    private static string GenerateSecrets(List<HostEntry> hosts, WireResolver resolver, Topology topology)
+    private static string GenerateSecrets(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology)
     {
         var secrets = new HclBuilder();
         foreach (var entry in hosts)
         {
-            var allSecrets = CollectSecrets(entry, resolver);
+            var allSecrets = TopologyHelpers.CollectSecrets(entry, resolver);
             foreach (var secret in allSecrets)
             {
                 secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
@@ -419,7 +294,7 @@ public sealed class LinodeProvider : ICloudProvider
         return secrets.ToString();
     }
 
-    private string GenerateVariables(Topology topology, List<ComputePoolEntry> pools)
+    private string GenerateVariables(Topology topology, List<TopologyHelpers.ComputePoolEntry> pools)
     {
         var vars = new HclBuilder();
         vars.Block("variable \"linode_token\"", b =>
@@ -453,14 +328,14 @@ public sealed class LinodeProvider : ICloudProvider
         CollectFedGroupVariables(topology.Containers, vars);
 
         // Host replica $VAR variables
-        var hosts = CollectHosts(topology.Containers, null);
+        var hosts = TopologyHelpers.CollectHosts(topology.Containers, null);
         CollectHostReplicaVariables(hosts, vars);
 
         // ComputePool variables
         var plans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         foreach (var pool in pools)
         {
-            var poolName = SanitizeName(pool.Pool.Name);
+            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
             var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
             var minHostRam = sharedOverhead + fedMemory;
@@ -494,12 +369,12 @@ public sealed class LinodeProvider : ICloudProvider
             if (container.Kind == ContainerKind.FederationGroup)
             {
                 var countValue = container.Config.GetValueOrDefault("instanceCount", "1");
-                var varName = $"{SanitizeName(container.Name)}_instance_count";
+                var varName = $"{TopologyHelpers.SanitizeName(container.Name)}_instance_count";
                 vars.Line();
                 vars.Block($"variable \"{varName}\"", b =>
                 {
                     b.Attribute("type", "number");
-                    if (IsVariableRef(countValue))
+                    if (TopologyHelpers.IsVariableRef(countValue))
                         b.Attribute("default", 1);
                     else
                         b.Attribute("default", int.TryParse(countValue, out var n) ? n : 1);
@@ -514,20 +389,19 @@ public sealed class LinodeProvider : ICloudProvider
         }
     }
 
-    private static void CollectHostReplicaVariables(List<HostEntry> hosts, HclBuilder vars)
+    private static void CollectHostReplicaVariables(List<TopologyHelpers.HostEntry> hosts, HclBuilder vars)
     {
         foreach (var entry in hosts)
         {
-            if (entry.FedGroup != null) continue; // FedGroup hosts use the fedgroup variable
+            if (entry.FedGroup != null) continue;
 
-            var (literal, varRef) = ParseHostReplicas(entry.Host);
+            var (literal, varRef) = TopologyHelpers.ParseHostReplicas(entry.Host);
             var hasMinMax = entry.Host.Config.ContainsKey("minReplicas") || entry.Host.Config.ContainsKey("maxReplicas");
 
-            // $VAR always needs a variable; literal replicas only need one when min/max are set
             var needsVariable = varRef != null || (literal.HasValue && literal.Value > 1 && hasMinMax);
             if (!needsVariable) continue;
 
-            var varName = varRef != null ? SanitizeName(varRef) : $"{SanitizeName(entry.Host.Name)}_replicas";
+            var varName = varRef != null ? TopologyHelpers.SanitizeName(varRef) : $"{TopologyHelpers.SanitizeName(entry.Host.Name)}_replicas";
             var defaultValue = literal ?? 1;
 
             var minStr = entry.Host.Config.GetValueOrDefault("minReplicas", "");
@@ -567,22 +441,22 @@ public sealed class LinodeProvider : ICloudProvider
         }
     }
 
-    private string GenerateInstances(Topology topology, List<HostEntry> hosts, List<ComputePoolEntry> pools)
+    private string GenerateInstances(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools)
     {
         var instances = new HclBuilder();
         foreach (var entry in hosts)
         {
-            var resourceName = SanitizeName(entry.Host.Name);
-            var ramRequired = CalculateHostRam(entry.Host);
+            var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
+            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host);
             var plan = SelectPlan(ramRequired);
 
             instances.Block($"resource \"linode_instance\" \"{resourceName}\"", b =>
             {
-                var countExpr = GetHostCountExpression(entry);
+                var countExpr = TopologyHelpers.GetHostCountExpression(entry);
                 if (countExpr != null)
                     b.RawAttribute("count", countExpr);
 
-                b.Attribute("label", IsReplicatedHost(entry)
+                b.Attribute("label", TopologyHelpers.IsReplicatedHost(entry)
                     ? $"{topology.Name}-{entry.Host.Name}-${{count.index}}"
                     : $"{topology.Name}-{entry.Host.Name}");
                 b.RawAttribute("region", "var.region");
@@ -599,7 +473,7 @@ public sealed class LinodeProvider : ICloudProvider
         var allPlans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         foreach (var pool in pools)
         {
-            var poolName = SanitizeName(pool.Pool.Name);
+            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
             var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
             var minHostRam = sharedOverhead + fedMemory;
@@ -622,13 +496,12 @@ public sealed class LinodeProvider : ICloudProvider
         return instances.ToString();
     }
 
-    private static string GenerateFirewall(Topology topology, List<HostEntry> hosts)
+    private static string GenerateFirewall(Topology topology, List<TopologyHelpers.HostEntry> hosts)
     {
         var firewall = new HclBuilder();
 
-        // Check if any non-federation host contains LiveKit (includes replicated hosts)
         var hasLiveKit = hosts.Any(e =>
-            e.FedGroup == null && CollectImages(e.Host).Any(i => i.Kind == ImageKind.LiveKit));
+            e.FedGroup == null && TopologyHelpers.CollectImages(e.Host).Any(i => i.Kind == ImageKind.LiveKit));
 
         firewall.Block("resource \"linode_firewall\" \"main\"", b =>
         {
@@ -683,12 +556,11 @@ public sealed class LinodeProvider : ICloudProvider
                 ob.Attribute("action", "ACCEPT");
             });
 
-            // Build linodes list with splat for counted resources
             var refs = new List<string>();
             foreach (var entry in hosts)
             {
-                var resourceName = SanitizeName(entry.Host.Name);
-                if (IsReplicatedHost(entry))
+                var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
+                if (TopologyHelpers.IsReplicatedHost(entry))
                     refs.Add($"linode_instance.{resourceName}[*].id");
                 else
                     refs.Add($"[linode_instance.{resourceName}.id]");
@@ -701,41 +573,38 @@ public sealed class LinodeProvider : ICloudProvider
             }
             else
             {
-                var idRefs = hosts.Select(e => $"linode_instance.{SanitizeName(e.Host.Name)}.id");
+                var idRefs = hosts.Select(e => $"linode_instance.{TopologyHelpers.SanitizeName(e.Host.Name)}.id");
                 b.RawAttribute("linodes", $"[{string.Join(", ", idRefs)}]");
             }
         });
         return firewall.ToString();
     }
 
-    private string GenerateProvisioning(List<HostEntry> hosts, WireResolver resolver, Topology topology, List<ComputePoolEntry> pools)
+    private string GenerateProvisioning(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology, List<TopologyHelpers.ComputePoolEntry> pools)
     {
         var provisioning = new HclBuilder();
         foreach (var entry in hosts)
         {
-            var resourceName = SanitizeName(entry.Host.Name);
-            var hostName = SanitizeName(entry.Host.Name);
-            var images = CollectImages(entry.Host);
-            var caddies = CollectCaddyContainers(entry.Host);
+            var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
+            var hostName = TopologyHelpers.SanitizeName(entry.Host.Name);
+            var images = TopologyHelpers.CollectImages(entry.Host);
+            var caddies = TopologyHelpers.CollectCaddyContainers(entry.Host);
             var isFederation = entry.FedGroup != null;
-            var isReplicated = IsReplicatedHost(entry);
+            var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
 
-            // Skip hosts with no images and no caddy (nothing to provision)
             if (images.Count == 0 && caddies.Count == 0) continue;
 
             provisioning.Block($"resource \"null_resource\" \"provision_{resourceName}\"", b =>
             {
-                // Dependencies
                 var depsList = new List<string> { $"linode_instance.{resourceName}" };
 
-                var countExpr = GetHostCountExpression(entry);
+                var countExpr = TopologyHelpers.GetHostCountExpression(entry);
                 if (countExpr != null)
                     b.RawAttribute("count", countExpr);
 
-                // Collect secret dependencies for static hosts (not federation)
                 if (!isFederation)
                 {
-                    var secrets = CollectSecrets(entry, resolver);
+                    var secrets = TopologyHelpers.CollectSecrets(entry, resolver);
                     foreach (var secret in secrets)
                         depsList.Add($"random_password.{secret.ResourceName}");
                 }
@@ -757,21 +626,18 @@ public sealed class LinodeProvider : ICloudProvider
                 {
                     pb.RawAttribute("inline", "[");
 
-                    // Docker installation
                     b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
                     b.Line("  \"systemctl enable docker\",");
                     b.Line("  \"systemctl start docker\",");
 
                     if (!isFederation)
                     {
-                        // Create bridge network
                         b.Line("  \"docker network create xcord-bridge\",");
 
-                        // Docker run per image
                         foreach (var image in images)
                         {
-                            var dockerImage = image.DockerImage ?? GetDefaultDockerImage(image.Kind);
-                            var containerName = SanitizeName(image.Name);
+                            var dockerImage = image.DockerImage ?? TopologyHelpers.GetDefaultDockerImage(image.Kind);
+                            var containerName = TopologyHelpers.SanitizeName(image.Name);
                             var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
 
                             var flags = new List<string>
@@ -782,52 +648,43 @@ public sealed class LinodeProvider : ICloudProvider
                                 "--restart unless-stopped"
                             };
 
-                            // Environment variables from wires
-                            var envVars = BuildEnvVars(image, entry, resolver);
+                            var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver);
                             foreach (var (key, value) in envVars)
                                 flags.Add($"-e {key}={value}");
 
-                            // Volume mount
                             var volumeSize = image.Config.GetValueOrDefault("volumeSize", "");
                             if (!string.IsNullOrEmpty(volumeSize) && meta?.MountPath != null)
                                 flags.Add($"-v {containerName}_data:{meta.MountPath}");
 
-                            // Port mapping — only for cross-host accessible services, LiveKit, Caddy
                             if (image.Kind == ImageKind.LiveKit && meta != null)
                             {
                                 foreach (var port in meta.Ports)
                                     flags.Add($"-p {port}:{port}");
                             }
 
-                            // Command override
-                            var cmdOverride = ResolveCommandOverride(image, entry, resolver);
+                            var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver);
                             var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
                             var flagStr = string.Join(" ", flags);
                             b.Line($"  \"docker run {flagStr} {dockerImage}{cmd}\",");
                         }
 
-                        // Caddy containers
                         foreach (var caddy in caddies)
                         {
-                            var caddyfile = GenerateCaddyfile(caddy, resolver);
-                            var caddyName = SanitizeName(caddy.Name);
+                            var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver);
+                            var caddyName = TopologyHelpers.SanitizeName(caddy.Name);
 
-                            // Write Caddyfile to host
                             b.Line($"  \"mkdir -p /opt/caddy\",");
-                            // Escape the caddyfile for shell heredoc
                             var escapedCaddyfile = caddyfile.Replace("\"", "\\\"").Replace("$", "\\$");
                             var caddyfileLines = escapedCaddyfile.Split('\n');
                             b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
 
                             b.Line($"  \"docker run -d --name {caddyName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
                         }
-                        // Backup cron jobs for volume-bearing images
-                        var backupCommands = GenerateBackupCommands(images, entry.Host);
+                        var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host);
                         foreach (var cmd in backupCommands)
                             b.Line($"  \"{cmd}\",");
                     }
-                    // Federation hosts: Docker install only — hub provisions at runtime
 
                     pb.Line("]");
                 });
@@ -835,10 +692,10 @@ public sealed class LinodeProvider : ICloudProvider
             provisioning.Line();
         }
 
-        // ComputePool provisioning — shared infra once per host, tenant containers loop
+        // ComputePool provisioning
         foreach (var pool in pools)
         {
-            var poolName = SanitizeName(pool.Pool.Name);
+            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
             var fedCpuMillicores = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.CpuMillicores ?? 250;
             var cpuLimit = fedCpuMillicores / 1000.0;
@@ -859,19 +716,16 @@ public sealed class LinodeProvider : ICloudProvider
                 {
                     pb.RawAttribute("inline", "[");
 
-                    // Docker installation
                     b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
                     b.Line("  \"systemctl enable docker\",");
                     b.Line("  \"systemctl start docker\",");
                     b.Line("  \"docker network create xcord-bridge\",");
 
-                    // Shared infrastructure — one instance per host
                     b.Line("  \"docker run -d --name shared-postgres --network xcord-bridge --restart unless-stopped --memory 1024m -v pgdata:/var/lib/postgresql/data -e POSTGRES_PASSWORD=changeme -e POSTGRES_USER=postgres postgres:17-alpine\",");
                     b.Line("  \"docker run -d --name shared-redis --network xcord-bridge --restart unless-stopped --memory 512m -v redisdata:/data redis:7-alpine redis-server --requirepass changeme\",");
                     b.Line("  \"docker run -d --name shared-minio --network xcord-bridge --restart unless-stopped --memory 512m -v miniodata:/data -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin minio/minio:latest server /data --console-address :9001\",");
                     b.Line($"  \"docker run -d --name caddy --network xcord-bridge --restart unless-stopped --memory 128m -p 80:80 -p 443:443 -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
 
-                    // Tenant FedServer containers — loop up to tenants_per_host
                     b.Line($"  \"for i in $(seq 0 $((var.{poolName}_tenants_per_host - 1))); do docker run -d --name tenant-$i --network xcord-bridge --restart unless-stopped --memory {fedMemory}m --cpus {cpuLimit:F1} ghcr.io/xcord/fed:latest; done\",");
 
                     pb.Line("]");
@@ -883,242 +737,26 @@ public sealed class LinodeProvider : ICloudProvider
         return provisioning.ToString();
     }
 
-    /// <summary>
-    /// Build environment variables for an image based on its wire connections and secret references.
-    /// </summary>
-    internal static List<(string Key, string Value)> BuildEnvVars(
-        Image image, HostEntry entry, WireResolver resolver)
-    {
-        var envVars = new List<(string, string)>();
-        var hostName = SanitizeName(entry.Host.Name);
-
-        switch (image.Kind)
-        {
-            case ImageKind.PostgreSQL:
-            {
-                var secretRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_password.result}}";
-                var dbName = DeriveDbName(image, resolver);
-                envVars.Add(("POSTGRES_PASSWORD", secretRef));
-                envVars.Add(("POSTGRES_DB", dbName));
-                envVars.Add(("POSTGRES_USER", "postgres"));
-                break;
-            }
-            case ImageKind.Redis:
-                // Redis uses command override, not env vars — no env needed
-                break;
-            case ImageKind.MinIO:
-            {
-                var accessKeyRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_access_key.result}}";
-                var secretKeyRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_secret_key.result}}";
-                envVars.Add(("MINIO_ROOT_USER", accessKeyRef));
-                envVars.Add(("MINIO_ROOT_PASSWORD", secretKeyRef));
-                break;
-            }
-            case ImageKind.HubServer:
-            {
-                // Resolve PG connection via wire
-                var pgTarget = resolver.ResolveWiredImage(image.Id, "pg_connection");
-                if (pgTarget != null)
-                {
-                    var pgContainer = SanitizeName(pgTarget.Name);
-                    var pgHost = resolver.FindHostFor(pgTarget.Id);
-                    var pgHostName = pgHost != null ? SanitizeName(pgHost.Name) : hostName;
-                    var dbName = DeriveDbName(pgTarget, resolver);
-                    var pgSecretRef = $"${{random_password.{pgHostName}_{pgContainer}_password.result}}";
-                    envVars.Add(("ConnectionStrings__DefaultConnection",
-                        $"Host={pgContainer};Port=5432;Database={dbName};Username=postgres;Password={pgSecretRef}"));
-                }
-
-                // Resolve Redis connection via wire
-                var redisTarget = resolver.ResolveWiredImage(image.Id, "redis_connection");
-                if (redisTarget != null)
-                {
-                    var redisContainer = SanitizeName(redisTarget.Name);
-                    var redisHost = resolver.FindHostFor(redisTarget.Id);
-                    var redisHostName = redisHost != null ? SanitizeName(redisHost.Name) : hostName;
-                    var redisSecretRef = $"${{random_password.{redisHostName}_{redisContainer}_password.result}}";
-                    envVars.Add(("ConnectionStrings__Redis",
-                        $"{redisContainer}:6379,password={redisSecretRef}"));
-                }
-                break;
-            }
-            case ImageKind.FederationServer:
-            {
-                // Resolve PG connection via wire
-                var pgTarget = resolver.ResolveWiredImage(image.Id, "pg_connection");
-                if (pgTarget != null)
-                {
-                    var pgContainer = SanitizeName(pgTarget.Name);
-                    var pgHost = resolver.FindHostFor(pgTarget.Id);
-                    var pgHostName = pgHost != null ? SanitizeName(pgHost.Name) : hostName;
-                    var dbName = DeriveDbName(pgTarget, resolver);
-                    var pgSecretRef = $"${{random_password.{pgHostName}_{pgContainer}_password.result}}";
-                    envVars.Add(("ConnectionStrings__DefaultConnection",
-                        $"Host={pgContainer};Port=5432;Database={dbName};Username=postgres;Password={pgSecretRef}"));
-                }
-
-                // Resolve Redis connection via wire
-                var redisTarget = resolver.ResolveWiredImage(image.Id, "redis_connection");
-                if (redisTarget != null)
-                {
-                    var redisContainer = SanitizeName(redisTarget.Name);
-                    var redisHost = resolver.FindHostFor(redisTarget.Id);
-                    var redisHostName = redisHost != null ? SanitizeName(redisHost.Name) : hostName;
-                    var redisSecretRef = $"${{random_password.{redisHostName}_{redisContainer}_password.result}}";
-                    envVars.Add(("ConnectionStrings__Redis",
-                        $"{redisContainer}:6379,password={redisSecretRef}"));
-                }
-
-                // Resolve MinIO connection via wire
-                var minioTarget = resolver.ResolveWiredImage(image.Id, "minio_connection");
-                if (minioTarget != null)
-                {
-                    var minioContainer = SanitizeName(minioTarget.Name);
-                    var minioHost = resolver.FindHostFor(minioTarget.Id);
-                    var minioHostName = minioHost != null ? SanitizeName(minioHost.Name) : hostName;
-                    var accessRef = $"${{random_password.{minioHostName}_{minioContainer}_access_key.result}}";
-                    var secretRef = $"${{random_password.{minioHostName}_{minioContainer}_secret_key.result}}";
-                    envVars.Add(("MinIO__Endpoint", $"{minioContainer}:9000"));
-                    envVars.Add(("MinIO__AccessKey", accessRef));
-                    envVars.Add(("MinIO__SecretKey", secretRef));
-                }
-                break;
-            }
-            case ImageKind.LiveKit:
-            {
-                var apiKeyRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_api_key.result}}";
-                var apiSecretRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_api_secret.result}}";
-                envVars.Add(("LIVEKIT_KEYS", $"{apiKeyRef}: {apiSecretRef}"));
-                break;
-            }
-        }
-
-        return envVars;
-    }
-
-    internal static string? ResolveCommandOverride(Image image, HostEntry entry, WireResolver resolver)
-    {
-        if (image.Kind == ImageKind.Redis)
-        {
-            var hostName = SanitizeName(entry.Host.Name);
-            var secretRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_password.result}}";
-            return $"redis-server --requirepass {secretRef}";
-        }
-
-        if (image.Kind == ImageKind.MinIO)
-            return "server /data --console-address :9001";
-
-        return null;
-    }
-
-    internal static List<string> GenerateBackupCommands(List<Image> images, Container host)
-    {
-        var commands = new List<string>();
-        var scheduleMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["hourly"] = "0 * * * *",
-            ["daily"] = "0 2 * * *",
-            ["weekly"] = "0 2 * * 0"
-        };
-
-        foreach (var image in images)
-        {
-            var volumeSize = image.Config.GetValueOrDefault("volumeSize", "");
-            if (string.IsNullOrEmpty(volumeSize)) continue;
-
-            // Resolve frequency: image config → host config → skip
-            var frequency = image.Config.GetValueOrDefault("backupFrequency", "");
-            if (string.IsNullOrEmpty(frequency))
-                frequency = host.Config.GetValueOrDefault("backupFrequency", "");
-            if (string.IsNullOrEmpty(frequency)) continue;
-
-            if (!scheduleMap.TryGetValue(frequency, out var schedule)) continue;
-
-            // Resolve retention: image config → host config → default 7
-            var retentionStr = image.Config.GetValueOrDefault("backupRetention", "");
-            if (string.IsNullOrEmpty(retentionStr))
-                retentionStr = host.Config.GetValueOrDefault("backupRetention", "");
-            var retention = int.TryParse(retentionStr, out var r) ? r : 7;
-
-            var containerName = SanitizeName(image.Name);
-            var backupDir = $"/opt/backups/{containerName}";
-
-            // Build backup command based on image kind
-            var backupCmd = image.Kind switch
-            {
-                ImageKind.PostgreSQL =>
-                    $"docker exec {containerName} pg_dumpall -U postgres | gzip > {backupDir}/{containerName}_$(date +%Y%m%d_%H%M%S).sql.gz",
-                ImageKind.Redis =>
-                    $"docker exec {containerName} redis-cli BGSAVE && sleep 2 && docker cp {containerName}:/data/dump.rdb {backupDir}/{containerName}_$(date +%Y%m%d_%H%M%S).rdb",
-                ImageKind.MinIO =>
-                    $"docker run --rm --network xcord-bridge -v {backupDir}:/backup minio/mc mirror http://{containerName}:9000 /backup/{containerName}_$(date +%Y%m%d_%H%M%S)/",
-                _ => null
-            };
-
-            if (backupCmd == null) continue;
-
-            var scriptContent = $"#!/bin/bash\\n{backupCmd}\\nfind {backupDir} -type f -mtime +{retention} -delete\\nfind {backupDir} -type d -empty -delete";
-
-            commands.Add($"mkdir -p {backupDir}");
-            commands.Add($"printf '{scriptContent}\\n' > {backupDir}/backup.sh");
-            commands.Add($"chmod +x {backupDir}/backup.sh");
-            commands.Add($"(crontab -l 2>/dev/null; echo \\\"{schedule} {backupDir}/backup.sh\\\") | crontab -");
-        }
-
-        return commands;
-    }
-
-    internal static string GenerateCaddyfile(Container caddy, WireResolver resolver)
-    {
-        var upstreams = resolver.ResolveCaddyUpstreams(caddy);
-        var domain = caddy.Config.GetValueOrDefault("domain", "{$DOMAIN}");
-
-        var lines = new List<string>
-        {
-            $"{domain} {{",
-            "  header {",
-            "    Strict-Transport-Security \"max-age=31536000; includeSubDomains; preload\"",
-            "    X-Content-Type-Options \"nosniff\"",
-            "    X-Frame-Options \"DENY\"",
-            "    Referrer-Policy \"strict-origin-when-cross-origin\"",
-            "    Permissions-Policy \"camera=(), microphone=(self), geolocation=(), payment=()\"",
-            "  }"
-        };
-
-        foreach (var (image, upstreamPath) in upstreams)
-        {
-            var containerName = SanitizeName(image.Name);
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-            var port = meta?.Ports.FirstOrDefault() ?? 80;
-            lines.Add($"  handle_path {upstreamPath} {{");
-            lines.Add($"    reverse_proxy {containerName}:{port}");
-            lines.Add("  }");
-        }
-
-        lines.Add("}");
-        return string.Join("\n", lines);
-    }
-
-    private static string GenerateVolumes(List<HostEntry> hosts)
+    private static string GenerateVolumes(List<TopologyHelpers.HostEntry> hosts)
     {
         var volumes = new HclBuilder();
         foreach (var entry in hosts)
         {
-            var images = CollectImages(entry.Host);
+            var images = TopologyHelpers.CollectImages(entry.Host);
             foreach (var image in images)
             {
                 var volumeSize = image.Config.GetValueOrDefault("volumeSize", "");
                 if (string.IsNullOrEmpty(volumeSize)) continue;
 
                 var size = int.TryParse(volumeSize, out var s) ? s : 25;
-                var resourceName = $"{SanitizeName(entry.Host.Name)}_{SanitizeName(image.Name)}";
+                var resourceName = $"{TopologyHelpers.SanitizeName(entry.Host.Name)}_{TopologyHelpers.SanitizeName(image.Name)}";
 
-                var isReplicated = IsReplicatedHost(entry);
+                var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
                 volumes.Block($"resource \"linode_volume\" \"{resourceName}_vol\"", b =>
                 {
                     if (isReplicated)
                     {
-                        var countExpr = GetHostCountExpression(entry);
+                        var countExpr = TopologyHelpers.GetHostCountExpression(entry);
                         b.RawAttribute("count", countExpr!);
                         b.Attribute("label", $"{image.Name}-vol-${{count.index}}");
                     }
@@ -1130,8 +768,8 @@ public sealed class LinodeProvider : ICloudProvider
                     b.RawAttribute("region", "var.region");
                     b.Attribute("size", size);
                     b.RawAttribute("linode_id", isReplicated
-                        ? $"linode_instance.{SanitizeName(entry.Host.Name)}[count.index].id"
-                        : $"linode_instance.{SanitizeName(entry.Host.Name)}.id");
+                        ? $"linode_instance.{TopologyHelpers.SanitizeName(entry.Host.Name)}[count.index].id"
+                        : $"linode_instance.{TopologyHelpers.SanitizeName(entry.Host.Name)}.id");
                 });
                 volumes.Line();
             }
@@ -1139,13 +777,13 @@ public sealed class LinodeProvider : ICloudProvider
         return volumes.ToString();
     }
 
-    private static string GenerateOutputs(List<HostEntry> hosts, List<ComputePoolEntry> pools)
+    private static string GenerateOutputs(List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools)
     {
         var outputs = new HclBuilder();
         foreach (var entry in hosts)
         {
-            var resourceName = SanitizeName(entry.Host.Name);
-            if (IsReplicatedHost(entry))
+            var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
+            if (TopologyHelpers.IsReplicatedHost(entry))
             {
                 outputs.Block($"output \"{resourceName}_ips\"", b =>
                 {
@@ -1172,7 +810,7 @@ public sealed class LinodeProvider : ICloudProvider
 
         foreach (var pool in pools)
         {
-            var poolName = SanitizeName(pool.Pool.Name);
+            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             outputs.Block($"output \"{poolName}_ips\"", b =>
             {
                 b.RawAttribute("value", $"linode_instance.{poolName}[*].ip_address");
@@ -1183,25 +821,4 @@ public sealed class LinodeProvider : ICloudProvider
 
         return outputs.ToString();
     }
-
-    // --- Utilities ---
-
-    internal static string SanitizeName(string name) =>
-        name.ToLowerInvariant()
-            .Replace(' ', '_')
-            .Replace('-', '_')
-            .Where(c => char.IsLetterOrDigit(c) || c == '_')
-            .Aggregate("", (current, c) => current + c);
-
-    private static string GetDefaultDockerImage(ImageKind kind) => kind switch
-    {
-        ImageKind.HubServer => "ghcr.io/xcord/hub:latest",
-        ImageKind.FederationServer => "ghcr.io/xcord/fed:latest",
-        ImageKind.Redis => "redis:7-alpine",
-        ImageKind.PostgreSQL => "postgres:17-alpine",
-        ImageKind.MinIO => "minio/minio:latest",
-        ImageKind.LiveKit => "livekit/livekit-server:latest",
-        ImageKind.Custom => "alpine:latest",
-        _ => "alpine:latest"
-    };
 }

@@ -30,15 +30,15 @@ public sealed class EstimateCostHandler(
         if (provider is null)
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{topology.Provider}' not found");
 
-        var hosts = LinodeProvider.CollectHosts(topology.Containers, null);
-        var pools = LinodeProvider.CollectComputePools(topology.Containers, topology);
+        var hosts = TopologyHelpers.CollectHosts(topology.Containers, null);
+        var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology);
         var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         var entries = new List<HostCostEntry>();
         var total = 0m;
 
         foreach (var entry in hosts)
         {
-            var requiredRam = LinodeProvider.CalculateHostRam(entry.Host);
+            var requiredRam = TopologyHelpers.CalculateHostRam(entry.Host);
             var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= requiredRam) ?? plans.Last();
 
             // Determine count
@@ -50,7 +50,7 @@ public sealed class EstimateCostHandler(
             }
             else
             {
-                var (literal, _) = LinodeProvider.ParseHostReplicas(entry.Host);
+                var (literal, _) = TopologyHelpers.ParseHostReplicas(entry.Host);
                 if (literal.HasValue) count = literal.Value;
             }
 

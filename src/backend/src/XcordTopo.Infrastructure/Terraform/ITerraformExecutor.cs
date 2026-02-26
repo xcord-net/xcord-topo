@@ -8,7 +8,7 @@ public interface ITerraformExecutor
     Task<ChannelReader<TerraformOutputLine>> ExecuteAsync(
         Guid topologyId,
         TerraformCommand command,
-        string providerKey = "linode",
+        IReadOnlyList<string> providerKeys,
         CancellationToken ct = default);
 
     ChannelReader<TerraformOutputLine>? GetOutputStream(Guid topologyId);

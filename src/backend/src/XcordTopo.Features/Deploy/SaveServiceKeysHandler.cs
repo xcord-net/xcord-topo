@@ -31,7 +31,7 @@ public sealed class SaveServiceKeysHandler(ICredentialStore credentialStore)
         if (errors.Count > 0)
         {
             var detail = string.Join("; ", errors.Select(e => $"{e.Key}: {e.Value}"));
-            return Error.Validation("CREDENTIAL_VALIDATION_FAILED", detail);
+            return Error.Validation("SERVICE_KEY_VALIDATION_FAILED", detail);
         }
 
         await credentialStore.SaveAsync("service-keys", request.Variables, ct);

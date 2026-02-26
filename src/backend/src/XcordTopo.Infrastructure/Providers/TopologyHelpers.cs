@@ -385,7 +385,7 @@ public static class TopologyHelpers
         string serviceKey,
         string envVarName)
     {
-        if (topology.ServiceKeys.TryGetValue(serviceKey, out _))
+        if (topology.ServiceKeys.TryGetValue(serviceKey, out var value) && !string.IsNullOrEmpty(value))
             envVars.Add((envVarName, $"${{var.{serviceKey}}}"));
     }
 

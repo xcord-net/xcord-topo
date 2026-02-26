@@ -369,6 +369,22 @@ public sealed class AwsProvider : ICloudProvider
             });
         }
 
+        // Service key variables
+        foreach (var field in ServiceKeySchema.GetSchema())
+        {
+            if (!topology.ServiceKeys.ContainsKey(field.Key)) continue;
+
+            vars.Line();
+            vars.Block($"variable \"{field.Key}\"", b =>
+            {
+                b.Attribute("type", "string");
+                if (field.Sensitive)
+                    b.RawAttribute("sensitive", "true");
+                b.Attribute("description", field.Label);
+                b.Attribute("default", "");
+            });
+        }
+
         return vars.ToString();
     }
 
@@ -808,7 +824,7 @@ public sealed class AwsProvider : ICloudProvider
                                 "--restart unless-stopped"
                             };
 
-                            var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver);
+                            var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, topology);
                             foreach (var (key, value) in envVars)
                                 flags.Add($"-e {key}={value}");
 

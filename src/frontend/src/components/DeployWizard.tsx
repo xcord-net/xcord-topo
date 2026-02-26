@@ -161,6 +161,15 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   const [serviceKeyErrors, setServiceKeyErrors] = createSignal<Record<string, string>>({});
   const [serviceKeyTouched, setServiceKeyTouched] = createSignal<Set<string>>(new Set());
 
+  const missingRequiredServiceKeys = () => {
+    const status = serviceKeyStatus();
+    if (!status) return true;
+    const setKeys = new Set(status.setVariables);
+    return serviceKeySchema()
+      .filter(f => f.required)
+      .some(f => !setKeys.has(f.key));
+  };
+
   // Migration state
   const [migrationSourceId, setMigrationSourceId] = createSignal('');
   const [migrationDiff, setMigrationDiff] = createSignal<MigrationDiffResult | null>(null);
@@ -1217,6 +1226,39 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                   </div>
                 </div>
 
+                {/* Service key status */}
+                <Show when={serviceKeySchema().length > 0}>
+                  <div>
+                    <h3 class="text-xs font-semibold text-topo-text-primary mb-2">Service Keys</h3>
+                    <div class="space-y-1">
+                      <For each={serviceKeySchema()}>
+                        {(field) => {
+                          const isSet = () => serviceKeyStatus()?.setVariables?.includes(field.key) ?? false;
+                          return (
+                            <div class="flex items-center gap-2 text-xs">
+                              <Show when={isSet()} fallback={
+                                <Show when={field.required} fallback={
+                                  <span class="text-topo-text-muted">&#8212;</span>
+                                }>
+                                  <span class="text-topo-error">&#10007;</span>
+                                </Show>
+                              }>
+                                <span class="text-topo-success">&#10003;</span>
+                              </Show>
+                              <span class={isSet() ? 'text-topo-text-secondary' : field.required ? 'text-topo-error' : 'text-topo-text-muted'}>
+                                {field.label}
+                                <Show when={!field.required}>
+                                  <span class="text-topo-text-muted ml-1">(optional)</span>
+                                </Show>
+                              </span>
+                            </div>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  </div>
+                </Show>
+
                 {/* Cost breakdown */}
                 <Show when={costEstimate()}>
                   {(cost) => (
@@ -1301,7 +1343,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                   <button
                     class="px-3 py-1 text-xs rounded bg-topo-brand hover:bg-topo-brand-hover text-white font-medium disabled:opacity-30"
                     onClick={handleDeployFromReview}
-                    disabled={loading()}
+                    disabled={loading() || missingRequiredServiceKeys()}
                   >
                     {deployMode() === 'update' ? 'Update' : 'Deploy'}
                   </button>

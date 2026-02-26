@@ -1045,6 +1045,124 @@ public class LinodeProviderTests
         Assert.Contains("-mtime +30", provisioning);
     }
 
+    // --- Service key tests ---
+
+    [Fact]
+    public void GenerateHcl_WithServiceKeys_IncludesServiceKeyVariables()
+    {
+        var topology = CreateWiredHubTopology();
+        topology.ServiceKeys = new Dictionary<string, string>
+        {
+            ["stripe_publishable_key"] = "pk_test_123",
+            ["stripe_secret_key"] = "sk_test_456",
+            ["smtp_host"] = "smtp.sendgrid.net",
+            ["smtp_port"] = "587",
+            ["smtp_username"] = "apikey",
+            ["smtp_password"] = "SG.secret",
+            ["smtp_from_address"] = "noreply@example.com",
+            ["smtp_from_name"] = "Xcord",
+            ["tenor_api_key"] = "AIzaSyD_test"
+        };
+
+        var files = _provider.GenerateHcl(topology);
+        var vars = files["variables.tf"];
+        var provisioning = files["provisioning.tf"];
+
+        // Variables should include service key variable blocks
+        Assert.Contains("variable \"stripe_publishable_key\"", vars);
+        Assert.Contains("variable \"stripe_secret_key\"", vars);
+        Assert.Contains("variable \"smtp_host\"", vars);
+        Assert.Contains("variable \"smtp_port\"", vars);
+        Assert.Contains("variable \"smtp_username\"", vars);
+        Assert.Contains("variable \"smtp_password\"", vars);
+        Assert.Contains("variable \"smtp_from_address\"", vars);
+        Assert.Contains("variable \"smtp_from_name\"", vars);
+        Assert.Contains("variable \"tenor_api_key\"", vars);
+
+        // Sensitive keys should have sensitive = true
+        Assert.Contains("sensitive = true", vars);
+
+        // Provisioning should inject service keys as env vars for HubServer
+        Assert.Contains("Stripe__PublishableKey=${var.stripe_publishable_key}", provisioning);
+        Assert.Contains("Stripe__SecretKey=${var.stripe_secret_key}", provisioning);
+        Assert.Contains("Email__SmtpHost=${var.smtp_host}", provisioning);
+        Assert.Contains("Email__SmtpPassword=${var.smtp_password}", provisioning);
+    }
+
+    [Fact]
+    public void GenerateHcl_WithServiceKeys_FedServerGetsSmtpAndTenor()
+    {
+        var pgPort = new Port { Id = Guid.NewGuid(), Name = "postgres", Type = PortType.Database, Direction = PortDirection.In };
+        var redisPort = new Port { Id = Guid.NewGuid(), Name = "redis", Type = PortType.Database, Direction = PortDirection.In };
+        var minioPort = new Port { Id = Guid.NewGuid(), Name = "minio", Type = PortType.Storage, Direction = PortDirection.In };
+
+        var fedPgPort = new Port { Id = Guid.NewGuid(), Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
+        var fedRedisPort = new Port { Id = Guid.NewGuid(), Name = "redis_connection", Type = PortType.Database, Direction = PortDirection.Out };
+        var fedMinioPort = new Port { Id = Guid.NewGuid(), Name = "minio_connection", Type = PortType.Storage, Direction = PortDirection.Out };
+
+        var pg = new Image { Id = Guid.NewGuid(), Name = "PostgreSQL", Kind = ImageKind.PostgreSQL, Ports = [pgPort], Width = 120, Height = 50 };
+        var redis = new Image { Id = Guid.NewGuid(), Name = "Redis", Kind = ImageKind.Redis, Ports = [redisPort], Width = 120, Height = 50 };
+        var minio = new Image { Id = Guid.NewGuid(), Name = "MinIO", Kind = ImageKind.MinIO, Ports = [minioPort], Width = 120, Height = 50 };
+        var fed = new Image
+        {
+            Id = Guid.NewGuid(), Name = "Fed Server", Kind = ImageKind.FederationServer,
+            Ports = [fedPgPort, fedRedisPort, fedMinioPort], Width = 140, Height = 60
+        };
+
+        var host = new Container
+        {
+            Id = Guid.NewGuid(), Name = "fed-host", Kind = ContainerKind.Host,
+            Images = [fed, pg, redis, minio], Width = 400, Height = 300
+        };
+
+        var topology = new Topology
+        {
+            Name = "test-topo",
+            Containers = [host],
+            Wires =
+            [
+                new Wire { FromNodeId = fed.Id, FromPortId = fedPgPort.Id, ToNodeId = pg.Id, ToPortId = pgPort.Id },
+                new Wire { FromNodeId = fed.Id, FromPortId = fedRedisPort.Id, ToNodeId = redis.Id, ToPortId = redisPort.Id },
+                new Wire { FromNodeId = fed.Id, FromPortId = fedMinioPort.Id, ToNodeId = minio.Id, ToPortId = minioPort.Id }
+            ],
+            ServiceKeys = new Dictionary<string, string>
+            {
+                ["smtp_host"] = "smtp.sendgrid.net",
+                ["smtp_port"] = "587",
+                ["smtp_username"] = "apikey",
+                ["smtp_password"] = "SG.secret",
+                ["smtp_from_address"] = "noreply@example.com",
+                ["smtp_from_name"] = "Xcord",
+                ["tenor_api_key"] = "AIzaSyD_test"
+            }
+        };
+
+        var files = _provider.GenerateHcl(topology);
+        var provisioning = files["provisioning.tf"];
+
+        // FedServer should get SMTP + Tenor
+        Assert.Contains("Email__SmtpHost=${var.smtp_host}", provisioning);
+        Assert.Contains("Email__SmtpPassword=${var.smtp_password}", provisioning);
+        Assert.Contains("Gif__ApiKey=${var.tenor_api_key}", provisioning);
+
+        // FedServer should NOT get Stripe
+        Assert.DoesNotContain("Stripe__", provisioning);
+    }
+
+    [Fact]
+    public void GenerateHcl_WithoutServiceKeys_NoServiceKeyVariables()
+    {
+        var topology = CreateWiredHubTopology();
+        // ServiceKeys is empty by default
+
+        var files = _provider.GenerateHcl(topology);
+        var vars = files["variables.tf"];
+
+        Assert.DoesNotContain("stripe_publishable_key", vars);
+        Assert.DoesNotContain("smtp_host", vars);
+        Assert.DoesNotContain("tenor_api_key", vars);
+    }
+
     // --- Helper methods ---
 
     private static Topology CreateReplicatedHostTopology(

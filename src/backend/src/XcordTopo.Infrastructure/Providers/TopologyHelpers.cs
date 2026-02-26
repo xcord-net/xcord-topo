@@ -251,7 +251,7 @@ public static class TopologyHelpers
     // --- Environment variable building ---
 
     public static List<(string Key, string Value)> BuildEnvVars(
-        Image image, HostEntry entry, WireResolver resolver)
+        Image image, HostEntry entry, WireResolver resolver, Topology? topology = null)
     {
         var envVars = new List<(string, string)>();
         var hostName = SanitizeName(entry.Host.Name);
@@ -301,6 +301,19 @@ public static class TopologyHelpers
                     envVars.Add(("ConnectionStrings__Redis",
                         $"{redisContainer}:6379,password={redisSecretRef}"));
                 }
+
+                // Service keys — hub gets Stripe + SMTP
+                if (topology != null)
+                {
+                    AddServiceKeyEnvVar(envVars, topology, "stripe_publishable_key", "Stripe__PublishableKey");
+                    AddServiceKeyEnvVar(envVars, topology, "stripe_secret_key", "Stripe__SecretKey");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_host", "Email__SmtpHost");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_port", "Email__SmtpPort");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_username", "Email__SmtpUsername");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_password", "Email__SmtpPassword");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_from_address", "Email__FromAddress");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_from_name", "Email__FromName");
+                }
                 break;
             }
             case ImageKind.FederationServer:
@@ -340,6 +353,18 @@ public static class TopologyHelpers
                     envVars.Add(("MinIO__AccessKey", accessRef));
                     envVars.Add(("MinIO__SecretKey", secretRef));
                 }
+
+                // Service keys — instances get SMTP + Tenor
+                if (topology != null)
+                {
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_host", "Email__SmtpHost");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_port", "Email__SmtpPort");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_username", "Email__SmtpUsername");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_password", "Email__SmtpPassword");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_from_address", "Email__FromAddress");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_from_name", "Email__FromName");
+                    AddServiceKeyEnvVar(envVars, topology, "tenor_api_key", "Gif__ApiKey");
+                }
                 break;
             }
             case ImageKind.LiveKit:
@@ -352,6 +377,16 @@ public static class TopologyHelpers
         }
 
         return envVars;
+    }
+
+    private static void AddServiceKeyEnvVar(
+        List<(string Key, string Value)> envVars,
+        Topology topology,
+        string serviceKey,
+        string envVarName)
+    {
+        if (topology.ServiceKeys.TryGetValue(serviceKey, out _))
+            envVars.Add((envVarName, $"${{var.{serviceKey}}}"));
     }
 
     public static string? ResolveCommandOverride(Image image, HostEntry entry, WireResolver resolver)

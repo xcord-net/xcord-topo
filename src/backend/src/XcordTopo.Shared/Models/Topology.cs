@@ -9,6 +9,7 @@ public sealed class Topology
     public string? Description { get; set; }
     public string Provider { get; set; } = "linode";
     public Dictionary<string, string> ProviderConfig { get; set; } = new();
+    public Dictionary<string, string> ServiceKeys { get; set; } = new();
     public List<Container> Containers { get; set; } = [];
     public List<Wire> Wires { get; set; } = [];
     public List<TierProfile> TierProfiles { get; set; } = [];

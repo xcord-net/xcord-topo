@@ -15,6 +15,7 @@ function createEmptyTopology(): Topology {
     description: undefined,
     provider: 'linode',
     providerConfig: {},
+    serviceKeys: {},
     containers: [],
     wires: [],
     tierProfiles: [],
@@ -367,6 +368,13 @@ export function useTopology() {
     updateProviderConfig(config: Record<string, string>): void {
       store.setTopology(produce(t => {
         t.providerConfig = { ...config };
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    updateServiceKeys(keys: Record<string, string>): void {
+      store.setTopology(produce(t => {
+        t.serviceKeys = { ...t.serviceKeys, ...keys };
         t.updatedAt = new Date().toISOString();
       }));
     },

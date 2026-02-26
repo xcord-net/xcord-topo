@@ -83,6 +83,7 @@ export interface Topology {
   description?: string;
   provider: string;
   providerConfig: Record<string, string>;
+  serviceKeys: Record<string, string>;
   containers: Container[];
   wires: Wire[];
   tierProfiles: TierProfile[];

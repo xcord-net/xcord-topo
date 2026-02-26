@@ -154,6 +154,13 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
 
   const isMultiProvider = () => activeProviderKeys().length > 1;
 
+  // Service key state
+  const [serviceKeySchema, setServiceKeySchema] = createSignal<CredentialField[]>([]);
+  const [serviceKeyStatus, setServiceKeyStatus] = createSignal<CredentialStatus | null>(null);
+  const [serviceKeyValues, setServiceKeyValues] = createSignal<Record<string, string>>({});
+  const [serviceKeyErrors, setServiceKeyErrors] = createSignal<Record<string, string>>({});
+  const [serviceKeyTouched, setServiceKeyTouched] = createSignal<Set<string>>(new Set());
+
   // Migration state
   const [migrationSourceId, setMigrationSourceId] = createSignal('');
   const [migrationDiff, setMigrationDiff] = createSignal<MigrationDiffResult | null>(null);
@@ -279,6 +286,23 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         setCredentialValues(prefill);
       }
 
+      // Fetch service key schema and status in parallel
+      const [skSchema, skStatus] = await Promise.all([
+        deployApi.getServiceKeySchema(),
+        deployApi.getServiceKeyStatus(),
+      ]);
+      setServiceKeySchema(skSchema);
+      setServiceKeyStatus(skStatus);
+
+      // Pre-fill non-sensitive values from saved status
+      const skPrefill: Record<string, string> = {};
+      if (skStatus.nonSensitiveValues) {
+        for (const [k, v] of Object.entries(skStatus.nonSensitiveValues)) {
+          skPrefill[k] = v;
+        }
+      }
+      setServiceKeyValues(skPrefill);
+
       setStep('configure');
     } catch (e: any) {
       setError(e.message);
@@ -350,6 +374,18 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       }
     }
 
+    // Validate service keys
+    const skSchema = serviceKeySchema();
+    const allSkKeys = new Set(skSchema.map(f => f.key));
+    setServiceKeyTouched(allSkKeys);
+    const skSavedKeys = new Set(serviceKeyStatus()?.setVariables ?? []);
+    const skErrors = validateAllFields(skSchema, serviceKeyValues(), skSavedKeys);
+    setServiceKeyErrors(skErrors);
+    if (Object.keys(skErrors).length > 0) {
+      setError('Please fix the service key validation errors below');
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
@@ -393,6 +429,25 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         }
         topo.updateProviderConfig(nonSensitive);
       }
+
+      // Save service keys
+      const skVars: Record<string, string> = {};
+      for (const [k, v] of Object.entries(serviceKeyValues())) {
+        if (v) skVars[k] = v;
+      }
+      if (Object.keys(skVars).length > 0) {
+        await deployApi.saveServiceKeys(skVars);
+      }
+
+      // Persist non-sensitive service keys to topology
+      const skNonSensitive: Record<string, string> = {};
+      for (const [k, v] of Object.entries(skVars)) {
+        const field = serviceKeySchema().find(f => f.key === k);
+        if (field && !field.sensitive) {
+          skNonSensitive[k] = v;
+        }
+      }
+      topo.updateServiceKeys(skNonSensitive);
 
       // Generate HCL
       const hclResult = await deployApi.generateHcl(topo.topology.id);
@@ -717,6 +772,68 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     );
   };
 
+  // --- Service key field rendering ---
+  const setServiceKeyVal = (key: string, value: string) => {
+    setServiceKeyValues(prev => ({ ...prev, [key]: value }));
+    setServiceKeyErrors(prev => { const next = { ...prev }; delete next[key]; return next; });
+  };
+
+  const handleServiceKeyBlur = (field: CredentialField) => {
+    setServiceKeyTouched(prev => new Set(prev).add(field.key));
+    const value = serviceKeyValues()[field.key] ?? '';
+    const isSaved = serviceKeyStatus()?.setVariables.includes(field.key) ?? false;
+    const err = validateField(field, value, isSaved);
+    setServiceKeyErrors(prev => {
+      const next = { ...prev };
+      if (err) next[field.key] = err; else delete next[field.key];
+      return next;
+    });
+  };
+
+  const renderServiceKeyField = (field: CredentialField) => {
+    const isSaved = () => serviceKeyStatus()?.setVariables.includes(field.key);
+    const hasError = () => serviceKeyTouched().has(field.key) && serviceKeyErrors()[field.key];
+    const borderClass = () => hasError() ? 'border-topo-error' : 'border-topo-border';
+
+    return (
+      <div>
+        <label class="flex items-center text-xs text-topo-text-muted mb-1">
+          {field.label}
+          <Show when={!field.required}>
+            <span class="ml-1 text-topo-text-muted/50">(optional)</span>
+          </Show>
+          <Show when={isSaved()}>
+            <span class="ml-2 text-topo-success">(saved)</span>
+          </Show>
+          <Show when={field.help}>
+            <FieldHelp help={field.help!} />
+          </Show>
+        </label>
+        {field.type === 'textarea' ? (
+          <textarea
+            class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand font-mono h-16 resize-none`}
+            placeholder={field.placeholder}
+            value={serviceKeyValues()[field.key] ?? ''}
+            onInput={(e) => setServiceKeyVal(field.key, e.currentTarget.value)}
+            onBlur={() => handleServiceKeyBlur(field)}
+          />
+        ) : (
+          <input
+            type={field.type === 'password' ? 'password' : 'text'}
+            class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand`}
+            placeholder={isSaved() && field.sensitive ? '••••••••' : (field.placeholder ?? '')}
+            value={serviceKeyValues()[field.key] ?? ''}
+            onInput={(e) => setServiceKeyVal(field.key, e.currentTarget.value)}
+            onBlur={() => handleServiceKeyBlur(field)}
+          />
+        )}
+        <Show when={hasError()}>
+          <p class="text-xs text-topo-error mt-0.5">{serviceKeyErrors()[field.key]}</p>
+        </Show>
+      </div>
+    );
+  };
+
   // --- Multi-provider field rendering ---
   const renderMultiProviderField = (
     providerKey: string,
@@ -970,6 +1087,50 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                   <For each={credentialSchema()}>
                     {(field) => renderField(field)}
                   </For>
+                </Show>
+
+                {/* Service Configuration */}
+                <Show when={serviceKeySchema().length > 0}>
+                  <div class="border-t border-topo-border mt-4 pt-4">
+                    <h3 class="text-sm font-semibold text-topo-text-primary mb-1">Service Configuration</h3>
+                    <p class="text-xs text-topo-text-muted mb-3">Third-party service credentials distributed to all provisioned instances.</p>
+
+                    {/* Stripe */}
+                    <Show when={serviceKeySchema().some(f => f.key.startsWith('stripe_'))}>
+                      <div class="mb-3">
+                        <h4 class="text-xs font-medium text-topo-text-secondary mb-2">Stripe</h4>
+                        <div class="space-y-2">
+                          <For each={serviceKeySchema().filter(f => f.key.startsWith('stripe_'))}>
+                            {(field) => renderServiceKeyField(field)}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+
+                    {/* SMTP */}
+                    <Show when={serviceKeySchema().some(f => f.key.startsWith('smtp_'))}>
+                      <div class="mb-3">
+                        <h4 class="text-xs font-medium text-topo-text-secondary mb-2">Email (SMTP)</h4>
+                        <div class="space-y-2">
+                          <For each={serviceKeySchema().filter(f => f.key.startsWith('smtp_'))}>
+                            {(field) => renderServiceKeyField(field)}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+
+                    {/* Tenor */}
+                    <Show when={serviceKeySchema().some(f => f.key.startsWith('tenor_'))}>
+                      <div class="mb-3">
+                        <h4 class="text-xs font-medium text-topo-text-secondary mb-2">GIF Search (Optional)</h4>
+                        <div class="space-y-2">
+                          <For each={serviceKeySchema().filter(f => f.key.startsWith('tenor_'))}>
+                            {(field) => renderServiceKeyField(field)}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+                  </div>
                 </Show>
 
                 {renderNav(

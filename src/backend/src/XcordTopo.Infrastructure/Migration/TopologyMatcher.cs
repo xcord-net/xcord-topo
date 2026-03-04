@@ -9,7 +9,6 @@ namespace XcordTopo.Infrastructure.Migration;
 public sealed record FlatImage(
     Image Image,
     Container Host,
-    Container? FederationGroup,
     string HostPath
 );
 
@@ -71,34 +70,33 @@ public sealed class TopologyMatcher
 
     /// <summary>
     /// Flatten all images from a topology with their host context.
-    /// Recursively walks containers, tracking the nearest Host ancestor and any FederationGroup ancestor.
+    /// Recursively walks containers, tracking the nearest Host ancestor.
     /// </summary>
     public static List<FlatImage> FlattenImages(Topology topology)
     {
         var result = new List<FlatImage>();
-        FlattenContainers(topology.Containers, null, null, "", result);
+        FlattenContainers(topology.Containers, null, "", result);
         return result;
     }
 
     private static void FlattenContainers(
-        List<Container> containers, Container? hostAncestor, Container? fedGroupAncestor,
+        List<Container> containers, Container? hostAncestor,
         string pathPrefix, List<FlatImage> result)
     {
         foreach (var container in containers)
         {
             var currentHost = container.Kind == ContainerKind.Host ? container : hostAncestor;
-            var currentFedGroup = container.Kind == ContainerKind.FederationGroup ? container : fedGroupAncestor;
             var currentPath = string.IsNullOrEmpty(pathPrefix) ? container.Name : $"{pathPrefix}/{container.Name}";
 
             foreach (var image in container.Images)
             {
                 if (currentHost != null)
                 {
-                    result.Add(new FlatImage(image, currentHost, currentFedGroup, currentPath));
+                    result.Add(new FlatImage(image, currentHost, currentPath));
                 }
             }
 
-            FlattenContainers(container.Children, currentHost, currentFedGroup, currentPath, result);
+            FlattenContainers(container.Children, currentHost, currentPath, result);
         }
     }
 
@@ -263,7 +261,7 @@ public sealed class TopologyMatcher
                         TargetHostName = t.Host.Name,
                         Kind = ImageMatchKind.Split,
                         SplitConsumerId = consumer.Id,
-                        TargetIsFederation = t.FederationGroup != null
+
                     });
                     break;
                 }
@@ -288,7 +286,6 @@ public sealed class TopologyMatcher
                 TargetHostId = t.Host.Id,
                 TargetHostName = t.Host.Name,
                 Kind = ImageMatchKind.Split,
-                TargetIsFederation = t.FederationGroup != null
             });
         }
 
@@ -335,7 +332,7 @@ public sealed class TopologyMatcher
             TargetHostId = target.Host.Id,
             TargetHostName = target.Host.Name,
             Kind = kind,
-            TargetIsFederation = target.FederationGroup != null
+
         };
     }
 
@@ -347,7 +344,6 @@ public sealed class TopologyMatcher
         TargetHostId = target.Host.Id,
         TargetHostName = target.Host.Name,
         Kind = ImageMatchKind.Added,
-        TargetIsFederation = target.FederationGroup != null
     };
 
     private static ImageMatch CreateRemovedMatch(FlatImage source) => new()
@@ -519,7 +515,7 @@ public sealed class TopologyMatcher
         // Check for hub database migration (PG relocated or split, non-federation target)
         var hubPgMatches = imageMatches.Where(m =>
             m.SourceImageKind == ImageKind.PostgreSQL &&
-            !m.TargetIsFederation &&
+
             m.Kind is ImageMatchKind.Relocated or ImageMatchKind.Split).ToList();
 
         if (hubPgMatches.Count > 0)
@@ -558,7 +554,7 @@ public sealed class TopologyMatcher
         // Check for hub Redis migration
         var hubRedisMatches = imageMatches.Where(m =>
             m.SourceImageKind == ImageKind.Redis &&
-            !m.TargetIsFederation &&
+
             m.Kind is ImageMatchKind.Relocated or ImageMatchKind.Split).ToList();
 
         if (hubRedisMatches.Count > 0)

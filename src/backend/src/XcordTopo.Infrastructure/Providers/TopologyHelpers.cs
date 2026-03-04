@@ -10,29 +10,21 @@ public static class TopologyHelpers
 {
     // --- Records ---
 
-    public record HostEntry(Container Host, Container? FedGroup);
+    public record HostEntry(Container Host);
     public record ComputePoolEntry(Container Pool, TierProfile TierProfile, int TargetTenants);
     public record SecretEntry(string ResourceName, string Description);
 
     // --- Tree-walking ---
 
-    public static List<HostEntry> CollectHosts(List<Container> containers, Container? fedGroup)
+    public static List<HostEntry> CollectHosts(List<Container> containers)
     {
         var result = new List<HostEntry>();
         foreach (var container in containers)
         {
             if (container.Kind == ContainerKind.Host)
             {
-                result.Add(new HostEntry(container, fedGroup));
-                result.AddRange(CollectHosts(container.Children, fedGroup));
-            }
-            else if (container.Kind == ContainerKind.FederationGroup)
-            {
-                result.AddRange(CollectHosts(container.Children, container));
-            }
-            else if (container.Kind == ContainerKind.Network)
-            {
-                result.AddRange(CollectHosts(container.Children, fedGroup));
+                result.Add(new HostEntry(container));
+                result.AddRange(CollectHosts(container.Children));
             }
             // ComputePool and Dns containers are handled separately
         }
@@ -59,10 +51,6 @@ public static class TopologyHelpers
 
                 result.Add(new ComputePoolEntry(container, tierProfile, targetTenants));
             }
-            else if (container.Kind == ContainerKind.Network)
-            {
-                result.AddRange(CollectComputePools(container.Children, topology));
-            }
         }
         return result;
     }
@@ -72,8 +60,7 @@ public static class TopologyHelpers
         var images = new List<Image>(container.Images);
         foreach (var child in container.Children)
         {
-            if (child.Kind != ContainerKind.FederationGroup)
-                images.AddRange(CollectImages(child));
+            images.AddRange(CollectImages(child));
         }
         return images;
     }
@@ -85,7 +72,7 @@ public static class TopologyHelpers
         {
             if (child.Kind == ContainerKind.Caddy)
                 caddies.Add(child);
-            else if (child.Kind != ContainerKind.FederationGroup)
+            else
                 caddies.AddRange(CollectCaddyContainers(child));
         }
         return caddies;
@@ -101,8 +88,6 @@ public static class TopologyHelpers
         {
             if (container.Kind == ContainerKind.Dns)
                 result.Add(container);
-            else if (container.Kind == ContainerKind.Network)
-                result.AddRange(CollectDnsContainers(container.Children));
         }
         return result;
     }
@@ -143,22 +128,17 @@ public static class TopologyHelpers
 
     public static bool IsReplicatedHost(HostEntry entry)
     {
-        if (entry.FedGroup != null) return true;
         var (literal, varRef) = ParseHostReplicas(entry.Host);
         return varRef != null || (literal.HasValue && literal.Value > 1);
     }
 
     /// <summary>
     /// Get the Terraform count expression for a replicated host.
-    /// FedGroup hosts use the federation instance_count variable.
     /// Host-replicated hosts use a literal or variable reference.
     /// Returns null for non-replicated hosts.
     /// </summary>
     public static string? GetHostCountExpression(HostEntry entry)
     {
-        if (entry.FedGroup != null)
-            return $"var.{SanitizeName(entry.FedGroup.Name)}_instance_count";
-
         var (literal, varRef) = ParseHostReplicas(entry.Host);
         if (varRef != null)
             return $"var.{SanitizeName(varRef)}";
@@ -196,8 +176,6 @@ public static class TopologyHelpers
 
     public static List<SecretEntry> CollectSecrets(HostEntry entry, WireResolver resolver)
     {
-        if (entry.FedGroup != null) return [];
-
         var secrets = new List<SecretEntry>();
         var hostName = SanitizeName(entry.Host.Name);
         var images = CollectImages(entry.Host);

@@ -30,7 +30,7 @@ public sealed class EstimateCostHandler(
         if (provider is null)
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{topology.Provider}' not found");
 
-        var hosts = TopologyHelpers.CollectHosts(topology.Containers, null);
+        var hosts = TopologyHelpers.CollectHosts(topology.Containers);
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology);
         var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         var entries = new List<HostCostEntry>();
@@ -43,16 +43,8 @@ public sealed class EstimateCostHandler(
 
             // Determine count
             var count = 1;
-            if (entry.FedGroup != null)
-            {
-                var instanceCount = entry.FedGroup.Config.GetValueOrDefault("instanceCount", "1");
-                if (int.TryParse(instanceCount, out var n)) count = n;
-            }
-            else
-            {
-                var (literal, _) = TopologyHelpers.ParseHostReplicas(entry.Host);
-                if (literal.HasValue) count = literal.Value;
-            }
+            var (literal, _) = TopologyHelpers.ParseHostReplicas(entry.Host);
+            if (literal.HasValue) count = literal.Value;
 
             var lineTotal = selectedPlan.PriceMonthly * count;
             entries.Add(new HostCostEntry(
@@ -68,14 +60,25 @@ public sealed class EstimateCostHandler(
         // ComputePool cost estimation with tier-aware density
         foreach (var pool in pools)
         {
-            var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
-            var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
-            var minHostRam = sharedOverhead + fedMemory;
+            var poolImages = TopologyHelpers.CollectImages(pool.Pool);
+            var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb(poolImages);
+
+            // Calculate per-tenant memory for min host RAM sizing
+            var perTenantMb = 0;
+            foreach (var image in poolImages)
+            {
+                if (image.Scaling != ImageScaling.PerTenant) continue;
+                var spec = pool.TierProfile.ImageSpecs.GetValueOrDefault(image.Kind.ToString());
+                perTenantMb += spec?.MemoryMb ?? 256;
+            }
+
+            var minHostRam = sharedOverhead + perTenantMb;
             var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
-            var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile);
+            var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(
+                selectedPlan.MemoryMb, pool.TierProfile, poolImages);
             var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
 
-            var ramPerHost = sharedOverhead + (tenantsPerHost * fedMemory);
+            var ramPerHost = sharedOverhead + (tenantsPerHost * perTenantMb);
             var lineTotal = selectedPlan.PriceMonthly * hostsRequired;
             entries.Add(new HostCostEntry(
                 pool.Pool.Name,

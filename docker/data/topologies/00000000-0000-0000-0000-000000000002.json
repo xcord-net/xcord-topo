@@ -1,7 +1,7 @@
 {
   "id": "00000000-0000-0000-0000-000000000002",
   "name": "Single Host — Good Enough",
-  "description": "Minimal single-host deployment: everything on one server. Hub, Federation, PG, Redis, MinIO all singleton and shared. For multi-instance, wrap Fed/PG/Redis in a FederationGroup and leave MinIO at host level for shared storage.",
+  "description": "Minimal single-host deployment: everything on one server. Hub, Federation, PG, Redis, MinIO all singleton and shared. For multi-instance, increase the Federation Server replicas and leave MinIO at host level for shared storage.",
   "provider": "linode",
   "providerConfig": {},
   "serviceKeys": {},
@@ -32,7 +32,8 @@
             { "id": "d1000000-0000-0000-0000-000000000010", "name": "postgres", "type": "Database", "direction": "In", "side": "Top", "offset": 0.5 }
           ],
           "dockerImage": "postgres:17-alpine",
-          "config": { "replicas": "1", "volumeSize": "25" }
+          "config": { "replicas": "1", "volumeSize": "25" },
+          "scaling": "Shared"
         },
         {
           "id": "c1000000-0000-0000-0000-000000000011",
@@ -46,7 +47,8 @@
             { "id": "d1000000-0000-0000-0000-000000000020", "name": "redis", "type": "Database", "direction": "In", "side": "Top", "offset": 0.5 }
           ],
           "dockerImage": "redis:7-alpine",
-          "config": { "replicas": "1", "volumeSize": "10" }
+          "config": { "replicas": "1", "volumeSize": "10" },
+          "scaling": "Shared"
         },
         {
           "id": "c1000000-0000-0000-0000-000000000012",
@@ -60,7 +62,8 @@
             { "id": "d1000000-0000-0000-0000-000000000030", "name": "s3", "type": "Storage", "direction": "In", "side": "Top", "offset": 0.5 }
           ],
           "dockerImage": "minio/minio:latest",
-          "config": { "replicas": "1", "volumeSize": "50" }
+          "config": { "replicas": "1", "volumeSize": "50" },
+          "scaling": "Shared"
         }
       ],
       "children": [
@@ -92,7 +95,8 @@
                 { "id": "d1000000-0000-0000-0000-000000000042", "name": "redis_connection", "type": "Database", "direction": "Out", "side": "Bottom", "offset": 0.7 }
               ],
               "dockerImage": "ghcr.io/xcord/hub:latest",
-              "config": { "replicas": "1", "upstreamPath": "/hub/*" }
+              "config": { "replicas": "1", "upstreamPath": "/hub/*" },
+              "scaling": "Shared"
             },
             {
               "id": "c1000000-0000-0000-0000-000000000001",
@@ -109,7 +113,8 @@
                 { "id": "d1000000-0000-0000-0000-000000000004", "name": "minio_connection", "type": "Storage", "direction": "Out", "side": "Bottom", "offset": 0.8 }
               ],
               "dockerImage": "ghcr.io/xcord/fed:latest",
-              "config": { "replicas": "1", "upstreamPath": "/*" }
+              "config": { "replicas": "1", "upstreamPath": "/*" },
+              "scaling": "PerTenant"
             }
           ],
           "children": [],

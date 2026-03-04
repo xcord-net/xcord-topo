@@ -1,6 +1,8 @@
-import { Component, For, Show } from 'solid-js';
+import { Component, For, Show, createSignal, onMount } from 'solid-js';
 import { useInteraction } from '../stores/interaction.store';
 import { useCanvas } from '../stores/canvas.store';
+import { useTopology } from '../stores/topology.store';
+import { useHistory } from '../stores/history.store';
 import { screenToCanvas } from '../lib/geometry';
 import type { Container as ContainerType } from '../types/topology';
 import { containerDefinitions } from '../catalog/containers';
@@ -16,6 +18,8 @@ const ContainerNode: Component<{
 }> = (props) => {
   const interaction = useInteraction();
   const canvas = useCanvas();
+  const topo = useTopology();
+  const history = useHistory();
 
   const offX = () => props.offsetX ?? 0;
   const offY = () => props.offsetY ?? 0;
@@ -25,6 +29,36 @@ const ContainerNode: Component<{
   const def = () => containerDefinitions.find(d => d.kind === props.container.kind);
   const isSelected = () => interaction.selectedNodeIds.has(props.container.id);
   const isDropTarget = () => interaction.dropTargetId === props.container.id;
+
+  let kindTextRef!: SVGTextElement;
+  const [kindWidth, setKindWidth] = createSignal(40);
+  onMount(() => {
+    if (kindTextRef) setKindWidth(kindTextRef.getComputedTextLength());
+  });
+  const fitBtnX = () => absX() + props.container.width - 12 - kindWidth() - 8 - 20;
+
+  /** Sort images so the dragged one renders last (on top in SVG) */
+  const sortedImages = () => {
+    const images = props.container.images;
+    const dragId = interaction.selectedNodeId;
+    if (interaction.mode !== 'dragging' || !dragId) return images;
+    return [...images].sort((a, b) => (a.id === dragId ? 1 : 0) - (b.id === dragId ? 1 : 0));
+  };
+
+  /** Sort children so the one containing the dragged element renders last */
+  const sortedChildren = () => {
+    const children = props.container.children;
+    const dragId = interaction.selectedNodeId;
+    if (interaction.mode !== 'dragging' || !dragId) return children;
+    const containsDragged = (c: ContainerType): boolean => {
+      if (c.id === dragId) return true;
+      if (c.images.some(i => i.id === dragId)) return true;
+      return c.children.some(containsDragged);
+    };
+    return [...children].sort((a, b) =>
+      (containsDragged(a) ? 1 : 0) - (containsDragged(b) ? 1 : 0)
+    );
+  };
 
   const handleHeaderPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
@@ -113,6 +147,7 @@ const ContainerNode: Component<{
 
       {/* Kind badge */}
       <text
+        ref={kindTextRef}
         x={absX() + props.container.width - 12}
         y={absY() + HEADER_HEIGHT / 2 + 1}
         fill="rgba(255,255,255,0.6)"
@@ -123,6 +158,36 @@ const ContainerNode: Component<{
       >
         {props.container.kind}
       </text>
+
+      {/* Fit-to-contents button — positioned to the left of the kind badge */}
+      <g
+        style={{ cursor: 'pointer' }}
+        opacity={0.4}
+        onMouseEnter={(e) => { (e.currentTarget as SVGGElement).setAttribute('opacity', '1'); }}
+        onMouseLeave={(e) => { (e.currentTarget as SVGGElement).setAttribute('opacity', '0.4'); }}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          history.push(topo.getSnapshot());
+          topo.fitToContents(props.container.id);
+        }}
+      >
+        <rect
+          x={fitBtnX()}
+          y={absY() + 6}
+          width={20}
+          height={20}
+          rx={3}
+          fill="rgba(255,255,255,0.1)"
+        />
+        <path
+          d={`M${fitBtnX() + 5} ${absY() + 11} l4 4 -4 4 M${fitBtnX() + 15} ${absY() + 11} l-4 4 4 4`}
+          stroke="white"
+          stroke-width={1.5}
+          fill="none"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </g>
 
       {/* Clickable content area — rendered before children so children are on top */}
       <rect
@@ -139,7 +204,7 @@ const ContainerNode: Component<{
       />
 
       {/* Nested images */}
-      <For each={props.container.images}>
+      <For each={sortedImages()}>
         {(image) => (
           <ImageNode
             image={image}
@@ -151,7 +216,7 @@ const ContainerNode: Component<{
       </For>
 
       {/* Nested child containers */}
-      <For each={props.container.children}>
+      <For each={sortedChildren()}>
         {(child) => (
           <ContainerNode
             container={child}

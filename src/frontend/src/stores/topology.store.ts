@@ -46,6 +46,16 @@ function getAbsolutePos(containers: Container[], id: string, offX = 0, offY = 0)
   return null;
 }
 
+/** Find the parent container of a child by id (works on mutable draft inside produce) */
+function findParentIn(containers: Container[], childId: string): Container | null {
+  for (const c of containers) {
+    if (c.children.some(ch => ch.id === childId)) return c;
+    const found = findParentIn(c.children, childId);
+    if (found) return found;
+  }
+  return null;
+}
+
 /** Walk all containers recursively */
 function forEachContainer(containers: Container[], fn: (c: Container, absX: number, absY: number) => void, offX = 0, offY = 0): void {
   for (const c of containers) {
@@ -260,6 +270,19 @@ export function useTopology() {
       return !!found && found.siblings !== store.topology.containers;
     },
 
+    /** Find the parent container ID of a nested container */
+    findParentContainerId(childId: string): string | null {
+      const search = (containers: Container[]): string | null => {
+        for (const c of containers) {
+          if (c.children.some(ch => ch.id === childId)) return c.id;
+          const found = search(c.children);
+          if (found) return found;
+        }
+        return null;
+      };
+      return search(store.topology.containers);
+    },
+
     /** Get the absolute position of a container (accounting for parent nesting) */
     getAbsolutePosition(id: string): { x: number; y: number } | null {
       return getAbsolutePos(store.topology.containers, id);
@@ -278,10 +301,38 @@ export function useTopology() {
       return search(store.topology.containers);
     },
 
-    /** Expand a container so all children/images fit with padding */
-    growToFit(parentId: string): void {
+    /** Expand a container so all children/images fit, then propagate up through ancestors */
+    growToFit(containerId: string): void {
       store.setTopology(produce(t => {
-        const found = findContainerDeep(t.containers, parentId);
+        const PAD = 20;
+        let id: string | null = containerId;
+        while (id) {
+          const found = findContainerDeep(t.containers, id);
+          if (!found) break;
+          const c = found.container;
+          let maxRight = 0;
+          let maxBottom = 0;
+          for (const child of c.children) {
+            maxRight = Math.max(maxRight, child.x + child.width + PAD);
+            maxBottom = Math.max(maxBottom, HEADER_HEIGHT + child.y + child.height + PAD);
+          }
+          for (const img of c.images) {
+            maxRight = Math.max(maxRight, img.x + img.width + PAD);
+            maxBottom = Math.max(maxBottom, HEADER_HEIGHT + img.y + img.height + PAD);
+          }
+          if (maxRight > c.width) c.width = maxRight;
+          if (maxBottom > c.height) c.height = maxBottom;
+          const parent = findParentIn(t.containers, id);
+          id = parent?.id ?? null;
+        }
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    /** Resize a container to tightly fit its children/images (shrink + grow) */
+    fitToContents(containerId: string): void {
+      store.setTopology(produce(t => {
+        const found = findContainerDeep(t.containers, containerId);
         if (!found) return;
         const parent = found.container;
         const PAD = 20;
@@ -297,8 +348,34 @@ export function useTopology() {
           maxBottom = Math.max(maxBottom, HEADER_HEIGHT + img.y + img.height + PAD);
         }
 
-        if (maxRight > parent.width) parent.width = maxRight;
-        if (maxBottom > parent.height) parent.height = maxBottom;
+        parent.width = Math.max(200, maxRight);
+        parent.height = Math.max(120, maxBottom);
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    /** Fit all containers to their contents (recursive, bottom-up) */
+    fitAllToContents(): void {
+      store.setTopology(produce(t => {
+        const PAD = 20;
+        function fitRecursive(containers: Container[]) {
+          for (const c of containers) {
+            fitRecursive(c.children);
+            let maxRight = 0;
+            let maxBottom = 0;
+            for (const child of c.children) {
+              maxRight = Math.max(maxRight, child.x + child.width + PAD);
+              maxBottom = Math.max(maxBottom, HEADER_HEIGHT + child.y + child.height + PAD);
+            }
+            for (const img of c.images) {
+              maxRight = Math.max(maxRight, img.x + img.width + PAD);
+              maxBottom = Math.max(maxBottom, HEADER_HEIGHT + img.y + img.height + PAD);
+            }
+            c.width = Math.max(200, maxRight);
+            c.height = Math.max(120, maxBottom);
+          }
+        }
+        fitRecursive(t.containers);
         t.updatedAt = new Date().toISOString();
       }));
     },
@@ -343,6 +420,34 @@ export function useTopology() {
             img.y = y;
           }
         }
+      }));
+    },
+
+    /** Transfer an image from one container to another, preserving absolute position */
+    transferImage(imageId: string, fromContainerId: string, toContainerId: string): void {
+      if (fromContainerId === toContainerId) return;
+      store.setTopology(produce(t => {
+        const fromResult = findContainerDeep(t.containers, fromContainerId);
+        if (!fromResult) return;
+        const imgIndex = fromResult.container.images.findIndex(i => i.id === imageId);
+        if (imgIndex === -1) return;
+
+        const fromAbs = getAbsolutePos(t.containers, fromContainerId)!;
+        const toAbs = getAbsolutePos(t.containers, toContainerId)!;
+        if (!fromAbs || !toAbs) return;
+
+        const [image] = fromResult.container.images.splice(imgIndex, 1);
+
+        // Convert from source-relative to target-relative coordinates
+        const absX = fromAbs.x + image.x;
+        const absY = fromAbs.y + HEADER_HEIGHT + image.y;
+        image.x = absX - toAbs.x;
+        image.y = absY - (toAbs.y + HEADER_HEIGHT);
+
+        // Re-find target (indices may have shifted after splice)
+        const toResult = findContainerDeep(t.containers, toContainerId);
+        if (toResult) toResult.container.images.push(image);
+        t.updatedAt = new Date().toISOString();
       }));
     },
 

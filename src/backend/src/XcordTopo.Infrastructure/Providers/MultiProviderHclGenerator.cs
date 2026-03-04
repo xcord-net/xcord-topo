@@ -53,7 +53,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             foreach (var container in containers)
             {
                 // Only top-level provisionable containers get partitioned
-                if (container.Kind is ContainerKind.Host or ContainerKind.FederationGroup
+                if (container.Kind is ContainerKind.Host
                     or ContainerKind.ComputePool or ContainerKind.Dns)
                 {
                     var key = TopologyHelpers.ResolveProviderKey(container, topology);
@@ -63,11 +63,6 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
                         result[key] = list;
                     }
                     list.Add(container);
-                }
-                else if (container.Kind == ContainerKind.Network)
-                {
-                    // Walk into network containers but don't partition networks themselves
-                    Walk(container.Children);
                 }
             }
         }

@@ -98,8 +98,7 @@ public sealed class MigrationPlanGenerator
 
         // New volumes for relocated images with volumeSize config
         var relocatedWithVolumes = diff.ImageMatches
-            .Where(m => m.Kind is ImageMatchKind.Relocated or ImageMatchKind.Split &&
-                        !m.TargetIsFederation)
+            .Where(m => m.Kind is ImageMatchKind.Relocated or ImageMatchKind.Split)
             .ToList();
 
         if (relocatedWithVolumes.Count > 0)
@@ -156,7 +155,6 @@ public sealed class MigrationPlanGenerator
         // Hub PostgreSQL migration
         var hubPgRelocated = diff.ImageMatches.Any(m =>
             m.SourceImageKind == ImageKind.PostgreSQL &&
-            !m.TargetIsFederation &&
             m.Kind is ImageMatchKind.Relocated or ImageMatchKind.Split);
 
         if (hubPgRelocated && decisionMap.TryGetValue("hub-db-migration", out var dbDecision))
@@ -227,7 +225,6 @@ public sealed class MigrationPlanGenerator
         // Hub Redis migration
         var hubRedisRelocated = diff.ImageMatches.Any(m =>
             m.SourceImageKind == ImageKind.Redis &&
-            !m.TargetIsFederation &&
             m.Kind is ImageMatchKind.Relocated or ImageMatchKind.Split);
 
         if (hubRedisRelocated && decisionMap.TryGetValue("hub-redis-migration", out var redisDecision))
@@ -274,26 +271,6 @@ public sealed class MigrationPlanGenerator
                     });
                     break;
             }
-        }
-
-        // Federation is always fresh — add informational step
-        var hasFedSplits = diff.ImageMatches.Any(m =>
-            m.TargetIsFederation &&
-            m.Kind is ImageMatchKind.Split or ImageMatchKind.Relocated);
-
-        if (hasFedSplits)
-        {
-            steps.Add(new MigrationStep
-            {
-                Order = order++,
-                Type = MigrationStepType.Manual,
-                Description = "Federation instances — no data migration needed (hub provisions fresh instances at runtime)",
-                Script = "# Federation PG/Redis/MinIO are always fresh\n" +
-                         "# The hub will provision new federation instances after cutover\n" +
-                         "# No data needs to be migrated for federation-tier services",
-                CausesDowntime = false,
-                EstimatedDuration = "0s"
-            });
         }
 
         // Secret handling
@@ -368,7 +345,6 @@ public sealed class MigrationPlanGenerator
         // Start services on new hosts
         var addedImages = diff.ImageMatches
             .Where(m => m.Kind is ImageMatchKind.Added or ImageMatchKind.Relocated)
-            .Where(m => !m.TargetIsFederation)
             .GroupBy(m => m.TargetHostName)
             .ToList();
 

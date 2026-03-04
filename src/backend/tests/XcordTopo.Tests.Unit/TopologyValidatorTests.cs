@@ -173,44 +173,25 @@ public class TopologyValidatorTests
     }
 
     [Fact]
-    public void Validate_InvalidFederationGroupInstanceCount_ReturnsError()
-    {
-        var topology = new Topology { Name = "Test" };
-        var fedGroup = new Container
-        {
-            Name = "Federation",
-            Kind = ContainerKind.FederationGroup,
-            Width = 500,
-            Height = 350,
-            Config = new Dictionary<string, string> { ["instanceCount"] = "0" }
-        };
-        topology.Containers.Add(fedGroup);
-
-        var errors = _validator.Validate(topology);
-
-        Assert.Contains(errors, e => e.Contains("invalid instanceCount"));
-    }
-
-    [Fact]
     public void Validate_RecursesIntoChildren()
     {
         var topology = new Topology { Name = "Test" };
-        var network = new Container
+        var parent = new Container
         {
-            Name = "Network",
-            Kind = ContainerKind.Network,
+            Name = "Parent",
+            Kind = ContainerKind.Host,
             Width = 800,
             Height = 600
         };
-        var host = new Container
+        var child = new Container
         {
             Name = "", // invalid — no name
             Kind = ContainerKind.Host,
             Width = 300,
             Height = 200
         };
-        network.Children.Add(host);
-        topology.Containers.Add(network);
+        parent.Children.Add(child);
+        topology.Containers.Add(parent);
 
         var errors = _validator.Validate(topology);
 

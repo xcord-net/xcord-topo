@@ -105,10 +105,7 @@ public sealed class ImageMatch
     /// </summary>
     public Guid? SplitConsumerId { get; set; }
 
-    /// <summary>
-    /// Whether the target is in a FederationGroup (always fresh, no data migration needed).
-    /// </summary>
-    public bool TargetIsFederation { get; set; }
+
 }
 
 public sealed class ContainerMatch

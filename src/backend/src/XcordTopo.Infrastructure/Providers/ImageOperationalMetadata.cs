@@ -164,6 +164,26 @@ public static class ImageOperationalMetadata
     }
 
     /// <summary>
+    /// Calculates shared infrastructure overhead for a compute pool host
+    /// based on actual images marked as Shared scaling.
+    /// </summary>
+    public static int CalculateSharedOverheadMb(List<Image> poolImages)
+    {
+        var overhead = 0;
+        foreach (var image in poolImages)
+        {
+            if (image.Scaling == ImageScaling.Shared &&
+                Images.TryGetValue(image.Kind, out var meta))
+            {
+                overhead += Math.Max(meta.MinRamMb, meta.SharedOverheadMb);
+            }
+        }
+        // Always include Caddy overhead for compute pools
+        overhead += Caddy.MinRamMb;
+        return overhead;
+    }
+
+    /// <summary>
     /// Calculates how many tenants of a given tier can fit on a compute host with the given total memory.
     /// </summary>
     public static int CalculateTenantsPerHost(int hostMemoryMb, TierProfile tierProfile)
@@ -176,6 +196,33 @@ public static class ImageOperationalMetadata
         if (fedSpec == null || fedSpec.MemoryMb <= 0) return 0;
 
         return available / fedSpec.MemoryMb;
+    }
+
+    /// <summary>
+    /// Calculates how many tenants fit per host based on actual pool images and their scaling.
+    /// </summary>
+    public static int CalculateTenantsPerHost(int hostMemoryMb, TierProfile tierProfile, List<Image> poolImages)
+    {
+        var sharedOverhead = CalculateSharedOverheadMb(poolImages);
+        var available = hostMemoryMb - sharedOverhead;
+        if (available <= 0) return 0;
+
+        // Sum per-tenant memory from all PerTenant images using tier profile specs
+        var perTenantMb = 0;
+        foreach (var image in poolImages)
+        {
+            if (image.Scaling != ImageScaling.PerTenant) continue;
+            var spec = tierProfile.ImageSpecs.GetValueOrDefault(image.Kind.ToString());
+            if (spec != null)
+                perTenantMb += spec.MemoryMb;
+            else if (Images.TryGetValue(image.Kind, out var meta))
+                perTenantMb += meta.MinRamMb;
+            else
+                perTenantMb += 256;
+        }
+
+        if (perTenantMb <= 0) return 0;
+        return available / perTenantMb;
     }
 
     /// <summary>

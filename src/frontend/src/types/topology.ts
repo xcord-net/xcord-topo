@@ -4,9 +4,7 @@ export type PortSide = 'Top' | 'Right' | 'Bottom' | 'Left';
 
 export type ContainerKind =
   | 'Host'
-  | 'Network'
   | 'Caddy'
-  | 'FederationGroup'
   | 'ComputePool'
   | 'Dns';
 
@@ -18,6 +16,8 @@ export type ImageKind =
   | 'MinIO'
   | 'LiveKit'
   | 'Custom';
+
+export type ImageScaling = 'Shared' | 'PerTenant';
 
 export interface Port {
   id: string;
@@ -39,6 +39,7 @@ export interface Image {
   ports: Port[];
   dockerImage?: string;
   config: Record<string, string>;
+  scaling: ImageScaling;
 }
 
 export interface Container {

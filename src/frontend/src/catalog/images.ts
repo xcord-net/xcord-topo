@@ -16,6 +16,10 @@ export const imageDefinitions: ImageDefinition[] = [
     configFields: [
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
       { key: 'upstreamPath', label: 'Upstream Path', placeholder: '/hub/*', parentKinds: ['Caddy'] },
+      { key: 'scaling', label: 'Scaling', type: 'select', options: [
+        { value: 'Shared', label: 'Shared (1 per host)' },
+        { value: 'PerTenant', label: 'Per Tenant' },
+      ], parentKinds: ['ComputePool'] },
     ],
     description: 'xcord hub control plane',
   },
@@ -35,7 +39,12 @@ export const imageDefinitions: ImageDefinition[] = [
     configFields: [
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
       { key: 'upstreamPath', label: 'Upstream Path', placeholder: '/*', parentKinds: ['Caddy'] },
+      { key: 'scaling', label: 'Scaling', type: 'select', options: [
+        { value: 'Shared', label: 'Shared (1 per host)' },
+        { value: 'PerTenant', label: 'Per Tenant' },
+      ], parentKinds: ['ComputePool'] },
     ],
+    defaultScaling: 'PerTenant',
     description: 'xcord federation instance',
   },
   {
@@ -53,6 +62,10 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'volumeSize', label: 'Volume (GB)', placeholder: '25' },
       { key: 'backupFrequency', label: 'Backup Frequency', placeholder: 'daily' },
       { key: 'backupRetention', label: 'Backup Retention', placeholder: '7' },
+      { key: 'scaling', label: 'Scaling', type: 'select', options: [
+        { value: 'Shared', label: 'Shared (1 per host)' },
+        { value: 'PerTenant', label: 'Per Tenant' },
+      ], parentKinds: ['ComputePool'] },
     ],
     description: 'Redis in-memory data store',
   },
@@ -71,6 +84,10 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'volumeSize', label: 'Volume (GB)', placeholder: '25' },
       { key: 'backupFrequency', label: 'Backup Frequency', placeholder: 'daily' },
       { key: 'backupRetention', label: 'Backup Retention', placeholder: '7' },
+      { key: 'scaling', label: 'Scaling', type: 'select', options: [
+        { value: 'Shared', label: 'Shared (1 per host)' },
+        { value: 'PerTenant', label: 'Per Tenant' },
+      ], parentKinds: ['ComputePool'] },
     ],
     description: 'PostgreSQL database',
   },
@@ -89,6 +106,10 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'volumeSize', label: 'Volume (GB)', placeholder: '25' },
       { key: 'backupFrequency', label: 'Backup Frequency', placeholder: 'daily' },
       { key: 'backupRetention', label: 'Backup Retention', placeholder: '7' },
+      { key: 'scaling', label: 'Scaling', type: 'select', options: [
+        { value: 'Shared', label: 'Shared (1 per host)' },
+        { value: 'PerTenant', label: 'Per Tenant' },
+      ], parentKinds: ['ComputePool'] },
     ],
     description: 'S3-compatible object storage',
   },
@@ -106,6 +127,10 @@ export const imageDefinitions: ImageDefinition[] = [
     defaultDockerImage: 'livekit/livekit-server:latest',
     configFields: [
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
+      { key: 'scaling', label: 'Scaling', type: 'select', options: [
+        { value: 'Shared', label: 'Shared (1 per host)' },
+        { value: 'PerTenant', label: 'Per Tenant' },
+      ], parentKinds: ['ComputePool'] },
     ],
     description: 'LiveKit WebRTC SFU',
   },
@@ -121,6 +146,10 @@ export const imageDefinitions: ImageDefinition[] = [
     configFields: [
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
       { key: 'upstreamPath', label: 'Upstream Path', placeholder: '/service/*', parentKinds: ['Caddy'] },
+      { key: 'scaling', label: 'Scaling', type: 'select', options: [
+        { value: 'Shared', label: 'Shared (1 per host)' },
+        { value: 'PerTenant', label: 'Per Tenant' },
+      ], parentKinds: ['ComputePool'] },
     ],
     description: 'Custom Docker image',
   },

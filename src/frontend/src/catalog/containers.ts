@@ -13,7 +13,11 @@ export const containerDefinitions: ContainerDefinition[] = [
       { id: '', name: 'private', type: 'Network', direction: 'InOut', side: 'Right', offset: 0.7 },
     ],
     configFields: [
-      { key: 'provider', label: 'Provider Override', placeholder: '' },
+      { key: 'provider', label: 'Provider Override', type: 'select', options: [
+        { value: '', label: 'Default' },
+        { value: 'linode', label: 'Linode' },
+        { value: 'aws', label: 'AWS' },
+      ] },
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
       { key: 'minReplicas', label: 'Min Replicas', placeholder: '' },
       { key: 'maxReplicas', label: 'Max Replicas', placeholder: '' },
@@ -21,18 +25,6 @@ export const containerDefinitions: ContainerDefinition[] = [
       { key: 'backupRetention', label: 'Backup Retention', placeholder: '7' },
     ],
     description: 'Server or VM — deployment decides the architecture',
-  },
-  {
-    kind: 'Network',
-    label: 'Network',
-    color: '#0db7ed',
-    defaultWidth: 350,
-    defaultHeight: 200,
-    defaultPorts: [
-      { id: '', name: 'gateway', type: 'Network', direction: 'InOut', side: 'Left', offset: 0.5 },
-    ],
-    configFields: [],
-    description: 'Logical network grouping',
   },
   {
     kind: 'Caddy',
@@ -51,23 +43,6 @@ export const containerDefinitions: ContainerDefinition[] = [
     description: 'Caddy reverse proxy with auto-TLS',
   },
   {
-    kind: 'FederationGroup',
-    label: 'Federation Group',
-    color: '#9ece6a',
-    defaultWidth: 500,
-    defaultHeight: 350,
-    defaultPorts: [
-      { id: '', name: 'federation', type: 'Network', direction: 'InOut', side: 'Right', offset: 0.5 },
-      { id: '', name: 'control', type: 'Control', direction: 'In', side: 'Left', offset: 0.5 },
-    ],
-    configFields: [
-      { key: 'provider', label: 'Provider Override', placeholder: '' },
-      { key: 'domain', label: 'Domain', placeholder: 'chat.example.com' },
-      { key: 'instanceCount', label: 'Instance Count', placeholder: '3' },
-    ],
-    description: 'Group of federated xcord instances',
-  },
-  {
     kind: 'ComputePool',
     label: 'Compute Pool',
     color: '#e0af68',
@@ -78,9 +53,18 @@ export const containerDefinitions: ContainerDefinition[] = [
       { id: '', name: 'control', type: 'Control', direction: 'In', side: 'Left', offset: 0.5 },
     ],
     configFields: [
-      { key: 'provider', label: 'Provider Override', placeholder: '' },
-      { key: 'tierProfile', label: 'Tier Profile', placeholder: 'free' },
-      { key: 'targetTenants', label: 'Target Tenants', placeholder: '100' },
+      { key: 'provider', label: 'Provider Override', type: 'select', options: [
+        { value: '', label: 'Default' },
+        { value: 'linode', label: 'Linode' },
+        { value: 'aws', label: 'AWS' },
+      ] },
+      { key: 'tierProfile', label: 'Tier Profile', type: 'select', options: [
+        { value: 'free', label: 'Free' },
+        { value: 'basic', label: 'Basic' },
+        { value: 'pro', label: 'Pro' },
+        { value: 'enterprise', label: 'Enterprise' },
+      ] },
+      { key: 'targetTenants', label: 'Target Tenants', placeholder: '100', tooltip: 'Total tenants this pool should support. The number of hosts is calculated automatically: each host fits as many tenants as its RAM allows after shared infrastructure overhead (PG, Redis, MinIO, Caddy), based on the selected tier profile.' },
     ],
     description: 'Shared-infrastructure host pool with tier-based tenant packing',
   },
@@ -94,7 +78,11 @@ export const containerDefinitions: ContainerDefinition[] = [
       { id: '', name: 'records', type: 'Network', direction: 'In', side: 'Left', offset: 0.5 },
     ],
     configFields: [
-      { key: 'provider', label: 'Provider Override', placeholder: '' },
+      { key: 'provider', label: 'Provider Override', type: 'select', options: [
+        { value: '', label: 'Default' },
+        { value: 'linode', label: 'Linode' },
+        { value: 'aws', label: 'AWS' },
+      ] },
       { key: 'domain', label: 'Domain', placeholder: 'example.com' },
     ],
     description: 'DNS zone — wire hosts here to create A records',

@@ -86,21 +86,39 @@ const PortCircle: Component<{
     }
   };
 
+  const labelX = () => pos().x + (props.port.side === 'Left' ? -8 : props.port.side === 'Right' ? 8 : 0);
+  const labelY = () => pos().y + (props.port.side === 'Top' ? -10 : props.port.side === 'Bottom' ? 14 : 0);
+  const labelAnchor = () => props.port.side === 'Left' ? 'end' : props.port.side === 'Right' ? 'start' : 'middle';
+  const labelBaseline = () => props.port.side === 'Top' ? 'auto' : props.port.side === 'Bottom' ? 'hanging' : 'middle';
+
   return (
-    <circle
-      cx={pos().x}
-      cy={pos().y}
-      r={radius()}
-      fill={PORT_COLORS[props.port.type] ?? '#a9b1d6'}
-      stroke="#1a1b26"
-      stroke-width={2}
-      style={{ cursor: 'crosshair' }}
-      onPointerDown={handlePointerDown}
-      onPointerEnter={() => interaction.setHoveredPort(props.port.id)}
-      onPointerLeave={() => interaction.setHoveredPort(null)}
-    >
-      <title>{`${props.port.name} (${props.port.type})`}</title>
-    </circle>
+    <>
+      <circle
+        cx={pos().x}
+        cy={pos().y}
+        r={radius()}
+        fill={PORT_COLORS[props.port.type] ?? '#a9b1d6'}
+        stroke="#1a1b26"
+        stroke-width={2}
+        style={{ cursor: 'crosshair' }}
+        onPointerDown={handlePointerDown}
+        onPointerEnter={() => interaction.setHoveredPort(props.port.id)}
+        onPointerLeave={() => interaction.setHoveredPort(null)}
+      >
+        <title>{`${props.port.name} (${props.port.type})`}</title>
+      </circle>
+      <text
+        x={labelX()}
+        y={labelY()}
+        fill="#565f89"
+        font-size="8"
+        text-anchor={labelAnchor()}
+        dominant-baseline={labelBaseline()}
+        style={{ 'pointer-events': 'none', 'user-select': 'none' }}
+      >
+        {props.port.name}
+      </text>
+    </>
   );
 };
 

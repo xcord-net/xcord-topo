@@ -78,16 +78,6 @@ public sealed class TopologyValidator : ITopologyValidator
             if (container.Width <= 0 || container.Height <= 0)
                 errors.Add($"Container '{container.Name}' must have positive dimensions.");
 
-            // Validate FederationGroup instanceCount
-            if (container.Kind == ContainerKind.FederationGroup)
-            {
-                if (container.Config.TryGetValue("instanceCount", out var instanceCount) && !string.IsNullOrEmpty(instanceCount))
-                {
-                    if (!IsValidReplicaValue(instanceCount))
-                        errors.Add($"FederationGroup '{container.Name}' has invalid instanceCount value '{instanceCount}'. Must be a positive integer or a $VARIABLE reference.");
-                }
-            }
-
             // Recurse into children
             ValidateContainers(container.Children, errors, allPorts, allNodeIds);
         }

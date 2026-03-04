@@ -1,4 +1,5 @@
-import { Component, Show, For, createMemo } from 'solid-js';
+import { Component, Show, For, createMemo, createSignal } from 'solid-js';
+import type { ConfigField } from '../types/catalog';
 import { useTopology } from '../stores/topology.store';
 import { useInteraction } from '../stores/interaction.store';
 import { useHistory } from '../stores/history.store';
@@ -34,6 +35,37 @@ function findParentKind(containers: Container[], imageId: string): ContainerKind
   }
   return null;
 }
+
+const FieldTooltip: Component<{ text: string }> = (props) => {
+  const [open, setOpen] = createSignal(false);
+  return (
+    <span class="relative inline-block ml-1 align-middle">
+      <button
+        type="button"
+        class="w-3.5 h-3.5 rounded-full bg-topo-text-muted/20 text-topo-text-muted hover:bg-topo-brand/20 hover:text-topo-brand text-[9px] font-bold leading-none inline-flex items-center justify-center"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={() => setOpen(v => !v)}
+      >
+        ?
+      </button>
+      <Show when={open()}>
+        <div class="absolute left-5 top-0 z-50 w-52 bg-topo-bg-primary border border-topo-border rounded-lg shadow-xl p-2 text-xs text-topo-text-secondary">
+          {props.text}
+        </div>
+      </Show>
+    </span>
+  );
+};
+
+const FieldLabel: Component<{ field: ConfigField }> = (props) => (
+  <label class="text-xs text-topo-text-muted">
+    {props.field.label}
+    <Show when={props.field.tooltip}>
+      <FieldTooltip text={props.field.tooltip!} />
+    </Show>
+  </label>
+);
 
 const PropertiesPanel: Component = () => {
   const topo = useTopology();
@@ -125,43 +157,31 @@ const PropertiesPanel: Component = () => {
                   <For each={configFields()}>
                     {(field) => (
                       <div>
-                        <label class="text-xs text-topo-text-muted">{field.label}</label>
-                        <input
-                          class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
-                          value={container().config[field.key] ?? ''}
-                          placeholder={field.placeholder}
-                          onInput={(e) => updateContainerConfig(field.key, e.currentTarget.value)}
-                        />
+                        <FieldLabel field={field} />
+                        {field.type === 'select' ? (
+                          <select
+                            class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                            value={container().config[field.key] ?? ''}
+                            onChange={(e) => updateContainerConfig(field.key, e.currentTarget.value)}
+                          >
+                            <For each={field.options ?? []}>
+                              {(opt) => <option value={opt.value}>{opt.label}</option>}
+                            </For>
+                          </select>
+                        ) : (
+                          <input
+                            class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                            value={container().config[field.key] ?? ''}
+                            placeholder={field.placeholder}
+                            onInput={(e) => updateContainerConfig(field.key, e.currentTarget.value)}
+                          />
+                        )}
                       </div>
                     )}
                   </For>
                 </div>
               </div>
             </Show>
-
-            <div class="border-t border-topo-border pt-3 mt-3">
-              <h4 class="text-xs font-semibold text-topo-text-muted uppercase tracking-wider mb-2">Layout</h4>
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label class="text-xs text-topo-text-muted">Width</label>
-                  <input
-                    type="number"
-                    class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
-                    value={container().width}
-                    onInput={(e) => updateContainerProp('width', Number(e.currentTarget.value))}
-                  />
-                </div>
-                <div>
-                  <label class="text-xs text-topo-text-muted">Height</label>
-                  <input
-                    type="number"
-                    class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
-                    value={container().height}
-                    onInput={(e) => updateContainerProp('height', Number(e.currentTarget.value))}
-                  />
-                </div>
-              </div>
-            </div>
 
             <div>
               <label class="text-xs text-topo-text-muted">Ports</label>
@@ -211,17 +231,38 @@ const PropertiesPanel: Component = () => {
                 <h4 class="text-xs font-semibold text-topo-text-muted uppercase tracking-wider mb-2">Configuration</h4>
                 <div class="space-y-2">
                   <For each={imageConfigFields()}>
-                    {(field) => (
-                      <div>
-                        <label class="text-xs text-topo-text-muted">{field.label}</label>
-                        <input
-                          class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
-                          value={imgData().image.config[field.key] ?? ''}
-                          placeholder={field.placeholder}
-                          onInput={(e) => updateImageConfig(field.key, e.currentTarget.value)}
-                        />
-                      </div>
-                    )}
+                    {(field) => {
+                      const isTopLevel = field.key === 'scaling';
+                      const getValue = () => isTopLevel
+                        ? (imgData().image as unknown as Record<string, unknown>)[field.key] as string ?? ''
+                        : imgData().image.config[field.key] ?? '';
+                      const setValue = (v: string) => isTopLevel
+                        ? updateImageProp(field.key as keyof Image, v)
+                        : updateImageConfig(field.key, v);
+                      return (
+                        <div>
+                          <FieldLabel field={field} />
+                          {field.type === 'select' ? (
+                            <select
+                              class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                              value={getValue()}
+                              onChange={(e) => setValue(e.currentTarget.value)}
+                            >
+                              <For each={field.options ?? []}>
+                                {(opt) => <option value={opt.value}>{opt.label}</option>}
+                              </For>
+                            </select>
+                          ) : (
+                            <input
+                              class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                              value={getValue()}
+                              placeholder={field.placeholder}
+                              onInput={(e) => setValue(e.currentTarget.value)}
+                            />
+                          )}
+                        </div>
+                      );
+                    }}
                   </For>
                 </div>
               </div>

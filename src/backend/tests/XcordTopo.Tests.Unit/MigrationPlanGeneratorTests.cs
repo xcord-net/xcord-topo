@@ -25,31 +25,31 @@ public class MigrationPlanGeneratorTests
                 {
                     SourceImageKind = ImageKind.HubServer, TargetImageKind = ImageKind.HubServer,
                     SourceHostName = "server", TargetHostName = "hub-host",
-                    Kind = ImageMatchKind.Relocated, TargetIsFederation = false
+                    Kind = ImageMatchKind.Relocated
                 },
                 new ImageMatch
                 {
                     SourceImageKind = ImageKind.PostgreSQL, TargetImageKind = ImageKind.PostgreSQL,
                     SourceHostName = "server", TargetHostName = "hub-host",
-                    Kind = ImageMatchKind.Split, TargetIsFederation = false
+                    Kind = ImageMatchKind.Split
                 },
                 new ImageMatch
                 {
                     SourceImageKind = ImageKind.PostgreSQL, TargetImageKind = ImageKind.PostgreSQL,
-                    SourceHostName = "server", TargetHostName = "fed-host",
-                    Kind = ImageMatchKind.Split, TargetIsFederation = true
+                    SourceHostName = "server", TargetHostName = "dedicated-host",
+                    Kind = ImageMatchKind.Split
                 },
                 new ImageMatch
                 {
                     SourceImageKind = ImageKind.Redis, TargetImageKind = ImageKind.Redis,
                     SourceHostName = "server", TargetHostName = "hub-host",
-                    Kind = ImageMatchKind.Split, TargetIsFederation = false
+                    Kind = ImageMatchKind.Split
                 },
                 new ImageMatch
                 {
                     SourceImageKind = ImageKind.Redis, TargetImageKind = ImageKind.Redis,
-                    SourceHostName = "server", TargetHostName = "fed-host",
-                    Kind = ImageMatchKind.Split, TargetIsFederation = true
+                    SourceHostName = "server", TargetHostName = "dedicated-host",
+                    Kind = ImageMatchKind.Split
                 },
                 new ImageMatch
                 {
@@ -168,26 +168,6 @@ public class MigrationPlanGeneratorTests
 
         var dataPhase = plan.Phases.First(p => p.Type == MigrationPhaseType.DataMigration);
         Assert.DoesNotContain(dataPhase.Steps, s => s.Type == MigrationStepType.DatabaseDump);
-    }
-
-    [Fact]
-    public void Generate_FederationIsAlwaysFresh_InformationalStep()
-    {
-        var diff = BuildDiffWithRelocatedHubPg();
-        var decisions = new List<MigrationDecision>
-        {
-            new() { Id = "hub-db-migration", Kind = DecisionKind.HubDatabaseMigration, SelectedOptionKey = "pg_dump_restore" },
-            new() { Id = "dns-cutover", Kind = DecisionKind.DnsCutover, SelectedOptionKey = "manual" },
-            new() { Id = "secret-handling", Kind = DecisionKind.SecretHandling, SelectedOptionKey = "rotate" },
-            new() { Id = "downtime-tolerance", Kind = DecisionKind.DowntimeTolerance, SelectedOptionKey = "brief_outage" }
-        };
-
-        var plan = _generator.Generate(SimpleSource(), RobustTarget(), diff, decisions);
-
-        var dataPhase = plan.Phases.First(p => p.Type == MigrationPhaseType.DataMigration);
-        Assert.Contains(dataPhase.Steps, s =>
-            s.Description.Contains("Federation") &&
-            s.Description.Contains("no data migration"));
     }
 
     [Fact]

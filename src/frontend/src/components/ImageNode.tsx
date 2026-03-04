@@ -19,6 +19,7 @@ const ImageNode: Component<{
   const absX = () => props.containerX + props.image.x;
   const absY = () => props.containerY + props.image.y;
   const isSelected = () => interaction.selectedNodeIds.has(props.image.id);
+  const isDragging = () => interaction.mode === 'dragging' && interaction.selectedNodeId === props.image.id && !!props.containerId;
 
   const replicaLabel = () => {
     const r = props.image.config?.replicas;
@@ -45,7 +46,35 @@ const ImageNode: Component<{
   };
 
   return (
-    <g>
+    <g style={{ opacity: isDragging() ? 0 : 1 }}>
+      {/* Per-tenant stacked card effect */}
+      <Show when={props.image.scaling === 'PerTenant'}>
+        <rect
+          x={absX() + 6}
+          y={absY() + 6}
+          width={props.image.width}
+          height={props.image.height}
+          rx={4}
+          fill="#24283b"
+          stroke={def()?.color ?? '#565f89'}
+          stroke-width={0.5}
+          opacity={0.3}
+          style={{ 'pointer-events': 'none' }}
+        />
+        <rect
+          x={absX() + 3}
+          y={absY() + 3}
+          width={props.image.width}
+          height={props.image.height}
+          rx={4}
+          fill="#24283b"
+          stroke={def()?.color ?? '#565f89'}
+          stroke-width={0.5}
+          opacity={0.5}
+          style={{ 'pointer-events': 'none' }}
+        />
+      </Show>
+
       <rect
         x={absX()}
         y={absY()}

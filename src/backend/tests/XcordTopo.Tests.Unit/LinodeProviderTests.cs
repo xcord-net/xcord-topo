@@ -121,67 +121,6 @@ public class LinodeProviderTests
     }
 
     [Fact]
-    public void GenerateHcl_WithFederationGroup_GeneratesCountedInstances()
-    {
-        var topology = new Topology { Name = "test-topo" };
-        var network = new Container
-        {
-            Name = "xcord-net",
-            Kind = ContainerKind.Network,
-            Width = 1000,
-            Height = 700
-        };
-
-        var fedGroup = new Container
-        {
-            Name = "federation",
-            Kind = ContainerKind.FederationGroup,
-            Width = 800,
-            Height = 400,
-            Config = new Dictionary<string, string> { ["instanceCount"] = "3" }
-        };
-
-        var fedHost = new Container
-        {
-            Name = "fed-host",
-            Kind = ContainerKind.Host,
-            Width = 700,
-            Height = 300
-        };
-        fedHost.Images.Add(new Image
-        {
-            Name = "Fed Server",
-            Kind = ImageKind.FederationServer,
-            Width = 140,
-            Height = 60,
-            Config = new Dictionary<string, string> { ["replicas"] = "1" }
-        });
-
-        fedGroup.Children.Add(fedHost);
-        network.Children.Add(fedGroup);
-        topology.Containers.Add(network);
-
-        var files = _provider.GenerateHcl(topology);
-
-        // Instances should have count
-        Assert.Contains("count", files["instances.tf"]);
-        Assert.Contains("var.federation_instance_count", files["instances.tf"]);
-
-        // Variables should have instance_count
-        Assert.Contains("federation_instance_count", files["variables.tf"]);
-
-        // Outputs should use splat for public IPs
-        Assert.Contains("[*]", files["outputs.tf"]);
-
-        // Federation host should have Docker install only, no docker run
-        Assert.Contains("docker", files["provisioning.tf"]);
-        Assert.DoesNotContain("docker run", files["provisioning.tf"]);
-
-        // No secrets for federation hosts
-        Assert.DoesNotContain("random_password", files["secrets.tf"]);
-    }
-
-    [Fact]
     public void GenerateHcl_SkipsCaddyContainersAsCompute()
     {
         var topology = new Topology { Name = "test-topo" };
@@ -398,46 +337,6 @@ public class LinodeProviderTests
     }
 
     [Fact]
-    public void GenerateHcl_FederationHost_OnlyDockerInstall()
-    {
-        var topology = new Topology { Name = "test-topo" };
-        var fedGroup = new Container
-        {
-            Name = "federation",
-            Kind = ContainerKind.FederationGroup,
-            Width = 800, Height = 400,
-            Config = new() { ["instanceCount"] = "3" }
-        };
-        var fedHost = new Container
-        {
-            Name = "fed-host",
-            Kind = ContainerKind.Host,
-            Width = 700, Height = 300
-        };
-        fedHost.Images.Add(new Image
-        {
-            Name = "Fed Server", Kind = ImageKind.FederationServer,
-            Width = 140, Height = 60
-        });
-        fedHost.Images.Add(new Image
-        {
-            Name = "PostgreSQL", Kind = ImageKind.PostgreSQL,
-            Width = 120, Height = 50
-        });
-        fedGroup.Children.Add(fedHost);
-        topology.Containers.Add(fedGroup);
-
-        var files = _provider.GenerateHcl(topology);
-
-        // Should have Docker install
-        Assert.Contains("get.docker.com", files["provisioning.tf"]);
-        // Should NOT have docker run (hub provisions at runtime)
-        Assert.DoesNotContain("docker run", files["provisioning.tf"]);
-        // Should NOT have bridge network creation
-        Assert.DoesNotContain("docker network create", files["provisioning.tf"]);
-    }
-
-    [Fact]
     public void GenerateHcl_Variables_HasFourCoreVariables()
     {
         var topology = new Topology { Name = "test-topo" };
@@ -453,55 +352,6 @@ public class LinodeProviderTests
         Assert.Contains("variable \"region\"", vars);
         Assert.Contains("variable \"domain\"", vars);
         Assert.Contains("variable \"ssh_public_key\"", vars);
-    }
-
-    [Fact]
-    public void GenerateHcl_Variables_HasFedGroupInstanceCounts()
-    {
-        var topology = new Topology { Name = "test-topo" };
-        var fedGroup = new Container
-        {
-            Name = "federation",
-            Kind = ContainerKind.FederationGroup,
-            Width = 500, Height = 350,
-            Config = new() { ["instanceCount"] = "5" }
-        };
-        fedGroup.Children.Add(new Container
-        {
-            Name = "fed-host", Kind = ContainerKind.Host, Width = 400, Height = 300
-        });
-        topology.Containers.Add(fedGroup);
-
-        var files = _provider.GenerateHcl(topology);
-        var vars = files["variables.tf"];
-
-        Assert.Contains("federation_instance_count", vars);
-        Assert.Contains("default = 5", vars);
-    }
-
-    [Fact]
-    public void GenerateHcl_FederationOutputs_HasPublicAndPrivateIps()
-    {
-        var topology = new Topology { Name = "test-topo" };
-        var fedGroup = new Container
-        {
-            Name = "federation", Kind = ContainerKind.FederationGroup,
-            Width = 500, Height = 350,
-            Config = new() { ["instanceCount"] = "2" }
-        };
-        fedGroup.Children.Add(new Container
-        {
-            Name = "fed-host", Kind = ContainerKind.Host,
-            Width = 400, Height = 300
-        });
-        topology.Containers.Add(fedGroup);
-
-        var files = _provider.GenerateHcl(topology);
-        var outputs = files["outputs.tf"];
-
-        Assert.Contains("fed_host_ips", outputs);
-        Assert.Contains("fed_host_private_ips", outputs);
-        Assert.Contains("private_ip_address", outputs);
     }
 
     [Fact]
@@ -783,16 +633,6 @@ public class LinodeProviderTests
     }
 
     [Fact]
-    public void IsReplicatedHost_FedGroup_ReturnsTrue()
-    {
-        var host = new Container { Name = "fed-host", Kind = ContainerKind.Host, Width = 300, Height = 200 };
-        var fedGroup = new Container { Name = "federation", Kind = ContainerKind.FederationGroup, Width = 500, Height = 350 };
-        var entry = new TopologyHelpers.HostEntry(host, fedGroup);
-
-        Assert.True(TopologyHelpers.IsReplicatedHost(entry));
-    }
-
-    [Fact]
     public void IsReplicatedHost_HostReplicas_ReturnsTrue()
     {
         var host = new Container
@@ -800,7 +640,7 @@ public class LinodeProviderTests
             Name = "media-host", Kind = ContainerKind.Host, Width = 300, Height = 200,
             Config = new() { ["replicas"] = "3" }
         };
-        var entry = new TopologyHelpers.HostEntry(host, null);
+        var entry = new TopologyHelpers.HostEntry(host);
 
         Assert.True(TopologyHelpers.IsReplicatedHost(entry));
     }
@@ -813,7 +653,7 @@ public class LinodeProviderTests
             Name = "media-host", Kind = ContainerKind.Host, Width = 300, Height = 200,
             Config = new() { ["replicas"] = "$MEDIA_HOSTS" }
         };
-        var entry = new TopologyHelpers.HostEntry(host, null);
+        var entry = new TopologyHelpers.HostEntry(host);
 
         Assert.True(TopologyHelpers.IsReplicatedHost(entry));
     }
@@ -826,7 +666,7 @@ public class LinodeProviderTests
             Name = "web-host", Kind = ContainerKind.Host, Width = 300, Height = 200,
             Config = new() { ["replicas"] = "1" }
         };
-        var entry = new TopologyHelpers.HostEntry(host, null);
+        var entry = new TopologyHelpers.HostEntry(host);
 
         Assert.False(TopologyHelpers.IsReplicatedHost(entry));
     }
@@ -835,7 +675,7 @@ public class LinodeProviderTests
     public void IsReplicatedHost_NoReplicasConfig_ReturnsFalse()
     {
         var host = new Container { Name = "web-host", Kind = ContainerKind.Host, Width = 300, Height = 200 };
-        var entry = new TopologyHelpers.HostEntry(host, null);
+        var entry = new TopologyHelpers.HostEntry(host);
 
         Assert.False(TopologyHelpers.IsReplicatedHost(entry));
     }

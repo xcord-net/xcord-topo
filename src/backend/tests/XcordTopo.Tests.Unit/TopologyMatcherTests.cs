@@ -89,7 +89,7 @@ public class TopologyMatcherTests
 
     /// <summary>
     /// Build a "Robust" topology: proxy-host (Caddy), hub-host (Hub + PG + Redis),
-    /// media-host (LiveKit), FederationGroup with fed-host template (Fed + PG + Redis + MinIO).
+    /// media-host (LiveKit), dedicated-host template (Fed + PG + Redis + MinIO, replicas=3).
     /// </summary>
     private static Topology BuildRobustTopology()
     {
@@ -149,7 +149,7 @@ public class TopologyMatcherTests
             Config = new() { ["replicas"] = "2" }
         };
 
-        // --- FederationGroup with fed-host template ---
+        // --- dedicated-host: Fed Server + PG + Redis + MinIO (replicas=3) ---
         var fedPgPort = new Port { Name = "postgres", Type = PortType.Database, Direction = PortDirection.In };
         var fedPg = new Image
         {
@@ -181,16 +181,11 @@ public class TopologyMatcherTests
             Ports = [fedHttp, fedPgOut, fedRedisOut, fedMinioOut], Width = 140, Height = 60
         };
 
-        var fedHost = new Container
+        var dedicatedHost = new Container
         {
-            Name = "fed-host", Kind = ContainerKind.Host,
-            Images = [fedServer, fedPg, fedRedis, fedMinio], Width = 500, Height = 400
-        };
-
-        var fedGroup = new Container
-        {
-            Name = "federation", Kind = ContainerKind.FederationGroup,
-            Children = [fedHost], Width = 600, Height = 500
+            Name = "dedicated-host", Kind = ContainerKind.Host,
+            Images = [fedServer, fedPg, fedRedis, fedMinio], Width = 500, Height = 400,
+            Config = new() { ["replicas"] = "3" }
         };
 
         // Wires within hub-host
@@ -200,7 +195,7 @@ public class TopologyMatcherTests
             new() { FromNodeId = hubServer.Id, FromPortId = hubRedisOut.Id, ToNodeId = hubRedis.Id, ToPortId = hubRedisPort.Id },
         };
 
-        // Wires within fed-host
+        // Wires within dedicated-host
         var fedWires = new List<Wire>
         {
             new() { FromNodeId = fedServer.Id, FromPortId = fedPgOut.Id, ToNodeId = fedPg.Id, ToPortId = fedPgPort.Id },
@@ -211,7 +206,7 @@ public class TopologyMatcherTests
         return new Topology
         {
             Name = "Robust",
-            Containers = [proxyHost, hubHost, mediaHost, fedGroup],
+            Containers = [proxyHost, hubHost, mediaHost, dedicatedHost],
             Wires = [.. hubWires, .. fedWires]
         };
     }
@@ -245,7 +240,7 @@ public class TopologyMatcherTests
 
         Assert.NotNull(fedMatch);
         Assert.Equal(ImageMatchKind.Relocated, fedMatch.Kind);
-        Assert.True(fedMatch.TargetIsFederation);
+        Assert.Equal("dedicated-host", fedMatch.TargetHostName);
     }
 
     [Fact]
@@ -259,13 +254,8 @@ public class TopologyMatcherTests
         var pgMatches = result.ImageMatches.Where(m =>
             m.SourceImageKind == ImageKind.PostgreSQL && m.Kind == ImageMatchKind.Split).ToList();
 
-        // 1 source PG → 2 targets (hub PG + fed PG)
+        // 1 source PG → 2 targets (hub PG + dedicated-host PG)
         Assert.Equal(2, pgMatches.Count);
-
-        // One target should be in federation (fresh, no migration)
-        Assert.Contains(pgMatches, m => m.TargetIsFederation);
-        // One should be hub's PG (needs migration)
-        Assert.Contains(pgMatches, m => !m.TargetIsFederation);
     }
 
     [Fact]
@@ -280,8 +270,6 @@ public class TopologyMatcherTests
             m.SourceImageKind == ImageKind.Redis && m.Kind == ImageMatchKind.Split).ToList();
 
         Assert.Equal(2, redisMatches.Count);
-        Assert.Contains(redisMatches, m => m.TargetIsFederation);
-        Assert.Contains(redisMatches, m => !m.TargetIsFederation);
     }
 
     [Fact]
@@ -312,9 +300,9 @@ public class TopologyMatcherTests
             m.SourceImageKind == ImageKind.MinIO);
 
         Assert.NotNull(minioMatch);
-        // MinIO goes from server → federation's fed-host (relocated, 1:1)
+        // MinIO goes from server → dedicated-host (relocated, 1:1)
         Assert.Equal(ImageMatchKind.Relocated, minioMatch.Kind);
-        Assert.True(minioMatch.TargetIsFederation);
+        Assert.Equal("dedicated-host", minioMatch.TargetHostName);
     }
 
     [Fact]
@@ -429,15 +417,15 @@ public class TopologyMatcherTests
     }
 
     [Fact]
-    public void FlattenImages_RobustTopology_FederationImagesHaveFedGroup()
+    public void FlattenImages_RobustTopology_DedicatedHostImagesAreFlattenedCorrectly()
     {
         var robust = BuildRobustTopology();
 
         var flat = TopologyMatcher.FlattenImages(robust);
-        var fedImages = flat.Where(f => f.FederationGroup != null).ToList();
+        var dedicatedImages = flat.Where(f => f.Host.Name == "dedicated-host").ToList();
 
-        // Fed Server, PG, Redis, MinIO all inside FederationGroup
-        Assert.Equal(4, fedImages.Count);
+        // Fed Server, PG, Redis, MinIO all inside dedicated-host
+        Assert.Equal(4, dedicatedImages.Count);
     }
 
     [Fact]
@@ -455,18 +443,5 @@ public class TopologyMatcherTests
 
         // At least one PG split should have a consumer ID (the one matched by wire analysis)
         Assert.NotEmpty(pgSplitsWithConsumer);
-    }
-
-    [Fact]
-    public void Match_FederationTargets_MarkedAsFresh()
-    {
-        var simple = BuildSimpleTopology();
-        var robust = BuildRobustTopology();
-
-        var result = _matcher.Match(simple, robust);
-
-        // All federation-side targets should be marked as such
-        var fedTargets = result.ImageMatches.Where(m => m.TargetIsFederation).ToList();
-        Assert.True(fedTargets.Count >= 4); // Fed Server + PG + Redis + MinIO
     }
 }

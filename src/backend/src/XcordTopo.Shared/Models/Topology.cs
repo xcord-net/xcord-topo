@@ -32,9 +32,7 @@ public enum DeployStatus
 public enum ContainerKind
 {
     Host,
-    Network,
     Caddy,
-    FederationGroup,
     ComputePool,
     Dns
 }
@@ -49,6 +47,13 @@ public enum ImageKind
     MinIO,
     LiveKit,
     Custom
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ImageScaling
+{
+    Shared,
+    PerTenant
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -105,6 +110,7 @@ public sealed class Image
     public List<Port> Ports { get; set; } = [];
     public string? DockerImage { get; set; }
     public Dictionary<string, string> Config { get; set; } = new();
+    public ImageScaling Scaling { get; set; } = ImageScaling.Shared;
 }
 
 public sealed class Port

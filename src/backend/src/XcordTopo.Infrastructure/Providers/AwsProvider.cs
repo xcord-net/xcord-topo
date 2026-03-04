@@ -12,7 +12,7 @@ public sealed class AwsProvider : ICloudProvider
         Key = "aws",
         Name = "Amazon Web Services",
         Description = "AWS EC2 instances with VPC networking. The most widely used cloud platform.",
-        SupportedContainerKinds = ["Host", "Network", "Caddy", "FederationGroup", "ComputePool", "Dns"]
+        SupportedContainerKinds = ["Host", "Caddy", "ComputePool", "Dns"]
     };
 
     public List<Region> GetRegions() =>
@@ -156,7 +156,7 @@ public sealed class AwsProvider : ICloudProvider
     public Dictionary<string, string> GenerateHcl(Topology topology)
     {
         var files = new Dictionary<string, string>();
-        var hosts = TopologyHelpers.CollectHosts(topology.Containers, null);
+        var hosts = TopologyHelpers.CollectHosts(topology.Containers);
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology);
         var dnsContainers = TopologyHelpers.CollectDnsContainers(topology.Containers);
         var resolver = new WireResolver(topology);
@@ -181,7 +181,7 @@ public sealed class AwsProvider : ICloudProvider
         IReadOnlyList<Container> ownedContainers)
     {
         var files = new Dictionary<string, string>();
-        var hosts = TopologyHelpers.CollectHosts(ownedContainers.ToList(), null);
+        var hosts = TopologyHelpers.CollectHosts(ownedContainers.ToList());
         var pools = TopologyHelpers.CollectComputePools(ownedContainers.ToList(), topology);
         var dnsContainers = ownedContainers.Where(c => c.Kind == ContainerKind.Dns).ToList();
         var resolver = new WireResolver(topology);
@@ -195,7 +195,7 @@ public sealed class AwsProvider : ICloudProvider
         files["provisioning_aws.tf"] = GenerateProvisioning(hosts, resolver, topology, pools);
         files["outputs_aws.tf"] = GenerateOutputs(hosts, pools);
 
-        var allHosts = TopologyHelpers.CollectHosts(topology.Containers, null);
+        var allHosts = TopologyHelpers.CollectHosts(topology.Containers);
         if (dnsContainers.Count > 0)
             files["dns_aws.tf"] = GenerateDnsRecords(dnsContainers, allHosts, resolver, topology);
 
@@ -334,11 +334,8 @@ public sealed class AwsProvider : ICloudProvider
             b.Attribute("description", "SSH public key for instance access");
         });
 
-        // FederationGroup instance_count variables
-        CollectFedGroupVariables(topology.Containers, vars);
-
         // Host replica variables
-        var hosts = TopologyHelpers.CollectHosts(topology.Containers, null);
+        var hosts = TopologyHelpers.CollectHosts(topology.Containers);
         CollectHostReplicaVariables(hosts, vars);
 
         // ComputePool variables
@@ -388,39 +385,10 @@ public sealed class AwsProvider : ICloudProvider
         return vars.ToString();
     }
 
-    private static void CollectFedGroupVariables(List<Container> containers, HclBuilder vars)
-    {
-        foreach (var container in containers)
-        {
-            if (container.Kind == ContainerKind.FederationGroup)
-            {
-                var countValue = container.Config.GetValueOrDefault("instanceCount", "1");
-                var varName = $"{TopologyHelpers.SanitizeName(container.Name)}_instance_count";
-                vars.Line();
-                vars.Block($"variable \"{varName}\"", b =>
-                {
-                    b.Attribute("type", "number");
-                    if (TopologyHelpers.IsVariableRef(countValue))
-                        b.Attribute("default", 1);
-                    else
-                        b.Attribute("default", int.TryParse(countValue, out var n) ? n : 1);
-                    b.Attribute("description", $"Number of instances in federation group '{container.Name}'");
-                });
-            }
-            foreach (var child in container.Children)
-            {
-                if (child.Kind == ContainerKind.FederationGroup)
-                    CollectFedGroupVariables([child], vars);
-            }
-        }
-    }
-
     private static void CollectHostReplicaVariables(List<TopologyHelpers.HostEntry> hosts, HclBuilder vars)
     {
         foreach (var entry in hosts)
         {
-            if (entry.FedGroup != null) continue;
-
             var (literal, varRef) = TopologyHelpers.ParseHostReplicas(entry.Host);
             var hasMinMax = entry.Host.Config.ContainsKey("minReplicas") || entry.Host.Config.ContainsKey("maxReplicas");
             var needsVariable = varRef != null || (literal.HasValue && literal.Value > 1 && hasMinMax);
@@ -560,7 +528,7 @@ public sealed class AwsProvider : ICloudProvider
         var sg = new HclBuilder();
 
         var hasLiveKit = hosts.Any(e =>
-            e.FedGroup == null && TopologyHelpers.CollectImages(e.Host).Any(i => i.Kind == ImageKind.LiveKit));
+            TopologyHelpers.CollectImages(e.Host).Any(i => i.Kind == ImageKind.LiveKit));
 
         sg.Block($"resource \"aws_security_group\" \"{name}\"", b =>
         {
@@ -764,7 +732,6 @@ public sealed class AwsProvider : ICloudProvider
             var hostName = TopologyHelpers.SanitizeName(entry.Host.Name);
             var images = TopologyHelpers.CollectImages(entry.Host);
             var caddies = TopologyHelpers.CollectCaddyContainers(entry.Host);
-            var isFederation = entry.FedGroup != null;
             var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
 
             if (images.Count == 0 && caddies.Count == 0) continue;
@@ -777,12 +744,9 @@ public sealed class AwsProvider : ICloudProvider
                 if (countExpr != null)
                     b.RawAttribute("count", countExpr);
 
-                if (!isFederation)
-                {
-                    var secrets = TopologyHelpers.CollectSecrets(entry, resolver);
-                    foreach (var secret in secrets)
-                        depsList.Add($"random_password.{secret.ResourceName}");
-                }
+                var secrets = TopologyHelpers.CollectSecrets(entry, resolver);
+                foreach (var secret in secrets)
+                    depsList.Add($"random_password.{secret.ResourceName}");
 
                 b.RawAttribute("depends_on", $"[{string.Join(", ", depsList)}]");
                 b.Line();
@@ -806,61 +770,58 @@ public sealed class AwsProvider : ICloudProvider
                     b.Line("  \"sudo systemctl enable docker\",");
                     b.Line("  \"sudo systemctl start docker\",");
 
-                    if (!isFederation)
+                    b.Line("  \"sudo docker network create xcord-bridge\",");
+
+                    foreach (var image in images)
                     {
-                        b.Line("  \"sudo docker network create xcord-bridge\",");
+                        var dockerImage = image.DockerImage ?? TopologyHelpers.GetDefaultDockerImage(image.Kind);
+                        var containerName = TopologyHelpers.SanitizeName(image.Name);
+                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
 
-                        foreach (var image in images)
+                        var flags = new List<string>
                         {
-                            var dockerImage = image.DockerImage ?? TopologyHelpers.GetDefaultDockerImage(image.Kind);
-                            var containerName = TopologyHelpers.SanitizeName(image.Name);
-                            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+                            "-d",
+                            $"--name {containerName}",
+                            "--network xcord-bridge",
+                            "--restart unless-stopped"
+                        };
 
-                            var flags = new List<string>
-                            {
-                                "-d",
-                                $"--name {containerName}",
-                                "--network xcord-bridge",
-                                "--restart unless-stopped"
-                            };
+                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, topology);
+                        foreach (var (key, value) in envVars)
+                            flags.Add($"-e {key}={value}");
 
-                            var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, topology);
-                            foreach (var (key, value) in envVars)
-                                flags.Add($"-e {key}={value}");
+                        var volumeSize = image.Config.GetValueOrDefault("volumeSize", "");
+                        if (!string.IsNullOrEmpty(volumeSize) && meta?.MountPath != null)
+                            flags.Add($"-v {containerName}_data:{meta.MountPath}");
 
-                            var volumeSize = image.Config.GetValueOrDefault("volumeSize", "");
-                            if (!string.IsNullOrEmpty(volumeSize) && meta?.MountPath != null)
-                                flags.Add($"-v {containerName}_data:{meta.MountPath}");
-
-                            if (image.Kind == ImageKind.LiveKit && meta != null)
-                            {
-                                foreach (var port in meta.Ports)
-                                    flags.Add($"-p {port}:{port}");
-                            }
-
-                            var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver);
-                            var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
-
-                            var flagStr = string.Join(" ", flags);
-                            b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
+                        if (image.Kind == ImageKind.LiveKit && meta != null)
+                        {
+                            foreach (var port in meta.Ports)
+                                flags.Add($"-p {port}:{port}");
                         }
 
-                        foreach (var caddy in caddies)
-                        {
-                            var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver);
-                            var caddyName = TopologyHelpers.SanitizeName(caddy.Name);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver);
+                        var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
-                            b.Line($"  \"sudo mkdir -p /opt/caddy\",");
-                            var escapedCaddyfile = caddyfile.Replace("\"", "\\\"").Replace("$", "\\$");
-                            var caddyfileLines = escapedCaddyfile.Split('\n');
-                            b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
-                            b.Line($"  \"sudo docker run -d --name {caddyName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
-                        }
-
-                        var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host);
-                        foreach (var cmd in backupCommands)
-                            b.Line($"  \"{cmd}\",");
+                        var flagStr = string.Join(" ", flags);
+                        b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
                     }
+
+                    foreach (var caddy in caddies)
+                    {
+                        var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver);
+                        var caddyName = TopologyHelpers.SanitizeName(caddy.Name);
+
+                        b.Line($"  \"sudo mkdir -p /opt/caddy\",");
+                        var escapedCaddyfile = caddyfile.Replace("\"", "\\\"").Replace("$", "\\$");
+                        var caddyfileLines = escapedCaddyfile.Split('\n');
+                        b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                        b.Line($"  \"sudo docker run -d --name {caddyName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                    }
+
+                    var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host);
+                    foreach (var cmd in backupCommands)
+                        b.Line($"  \"{cmd}\",");
 
                     pb.Line("]");
                 });

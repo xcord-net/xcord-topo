@@ -1,9 +1,12 @@
-import type { ContainerKind, ImageKind, Port, PortType } from './topology';
+import type { ContainerKind, ImageKind, ImageScaling, Port, PortType } from './topology';
 
 export interface ConfigField {
   key: string;
   label: string;
+  type?: 'text' | 'select';
   placeholder?: string;
+  tooltip?: string;
+  options?: { value: string; label: string }[];
   parentKinds?: ContainerKind[];
 }
 
@@ -27,5 +30,6 @@ export interface ImageDefinition {
   defaultPorts: Port[];
   defaultDockerImage?: string;
   configFields?: ConfigField[];
+  defaultScaling?: ImageScaling;
   description: string;
 }

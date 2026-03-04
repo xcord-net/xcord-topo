@@ -11,7 +11,8 @@ public static class TopologyHelpers
     // --- Records ---
 
     public record HostEntry(Container Host);
-    public record ComputePoolEntry(Container Pool, TierProfile TierProfile, int TargetTenants);
+    public record ComputePoolEntry(Container Pool, TierProfile TierProfile, int TargetTenants, string? SelectedPlanId = null);
+    public record PoolSelection(string PoolName, string PlanId, int TargetTenants);
     public record SecretEntry(string ResourceName, string Description);
 
     // --- Tree-walking ---
@@ -31,7 +32,8 @@ public static class TopologyHelpers
         return result;
     }
 
-    public static List<ComputePoolEntry> CollectComputePools(List<Container> containers, Topology topology)
+    public static List<ComputePoolEntry> CollectComputePools(
+        List<Container> containers, Topology topology, List<PoolSelection>? selections = null)
     {
         var result = new List<ComputePoolEntry>();
         var tierProfiles = topology.TierProfiles.Count > 0
@@ -43,13 +45,16 @@ public static class TopologyHelpers
             if (container.Kind == ContainerKind.ComputePool)
             {
                 var tierProfileId = container.Config.GetValueOrDefault("tierProfile", "free");
-                var targetTenantsStr = container.Config.GetValueOrDefault("targetTenants", "10");
-                var targetTenants = int.TryParse(targetTenantsStr, out var n) ? n : 10;
-
                 var tierProfile = tierProfiles.FirstOrDefault(t => t.Id == tierProfileId)
                     ?? tierProfiles.First();
 
-                result.Add(new ComputePoolEntry(container, tierProfile, targetTenants));
+                // Use deploy-time pool selection if available, otherwise default to 0
+                var selection = selections?.FirstOrDefault(s =>
+                    string.Equals(s.PoolName, container.Name, StringComparison.OrdinalIgnoreCase));
+                var targetTenants = selection?.TargetTenants ?? 0;
+                var selectedPlanId = selection?.PlanId;
+
+                result.Add(new ComputePoolEntry(container, tierProfile, targetTenants, selectedPlanId));
             }
         }
         return result;
@@ -257,7 +262,7 @@ public static class TopologyHelpers
             }
             case ImageKind.HubServer:
             {
-                var pgTarget = resolver.ResolveWiredImage(image.Id, "pg_connection");
+                var pgTarget = resolver.ResolveWiredImage(image.Id, "pg");
                 if (pgTarget != null)
                 {
                     var pgContainer = SanitizeName(pgTarget.Name);
@@ -269,7 +274,7 @@ public static class TopologyHelpers
                         $"Host={pgContainer};Port=5432;Database={dbName};Username=postgres;Password={pgSecretRef}"));
                 }
 
-                var redisTarget = resolver.ResolveWiredImage(image.Id, "redis_connection");
+                var redisTarget = resolver.ResolveWiredImage(image.Id, "redis");
                 if (redisTarget != null)
                 {
                     var redisContainer = SanitizeName(redisTarget.Name);
@@ -296,7 +301,7 @@ public static class TopologyHelpers
             }
             case ImageKind.FederationServer:
             {
-                var pgTarget = resolver.ResolveWiredImage(image.Id, "pg_connection");
+                var pgTarget = resolver.ResolveWiredImage(image.Id, "pg");
                 if (pgTarget != null)
                 {
                     var pgContainer = SanitizeName(pgTarget.Name);
@@ -308,7 +313,7 @@ public static class TopologyHelpers
                         $"Host={pgContainer};Port=5432;Database={dbName};Username=postgres;Password={pgSecretRef}"));
                 }
 
-                var redisTarget = resolver.ResolveWiredImage(image.Id, "redis_connection");
+                var redisTarget = resolver.ResolveWiredImage(image.Id, "redis");
                 if (redisTarget != null)
                 {
                     var redisContainer = SanitizeName(redisTarget.Name);
@@ -319,7 +324,7 @@ public static class TopologyHelpers
                         $"{redisContainer}:6379,password={redisSecretRef}"));
                 }
 
-                var minioTarget = resolver.ResolveWiredImage(image.Id, "minio_connection");
+                var minioTarget = resolver.ResolveWiredImage(image.Id, "minio");
                 if (minioTarget != null)
                 {
                     var minioContainer = SanitizeName(minioTarget.Name);

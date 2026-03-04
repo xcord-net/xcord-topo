@@ -39,8 +39,18 @@ export async function deleteTopology(id: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete topology: ${res.statusText}`);
 }
 
-export async function generateHcl(topologyId: string): Promise<{ files: Record<string, string> }> {
-  const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/generate`, { method: 'POST' });
+export async function generateHcl(
+  topologyId: string,
+  poolSelections?: import('../types/deploy').PoolSelection[],
+): Promise<{ files: Record<string, string> }> {
+  const hasBody = poolSelections && poolSelections.length > 0;
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/generate`, {
+    method: 'POST',
+    ...(hasBody ? {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ poolSelections }),
+    } : {}),
+  });
   if (!res.ok) throw new Error(`Failed to generate HCL: ${res.statusText}`);
   return res.json();
 }

@@ -1,4 +1,4 @@
-export type DeployStep = 'provider' | 'configure' | 'review' | 'migrate' | 'execute';
+export type DeployStep = 'provider' | 'configure' | 'hosting' | 'review' | 'migrate' | 'execute';
 export type DeployMode = 'fresh' | 'update' | 'migrate' | 'destroy';
 
 export interface CredentialStatus {
@@ -58,4 +58,33 @@ export interface CredentialField {
   placeholder?: string;
   help?: CredentialFieldHelp;
   validation: ValidationRule[];
+}
+
+// --- Hosting options ---
+
+export interface PoolHostingOption {
+  planId: string;
+  planLabel: string;
+  memoryMb: number;
+  vCpus: number;
+  priceMonthly: number;
+  tenantsPerHost: number;
+  costPerTenant: number;
+}
+
+export interface PoolHostingEntry {
+  poolName: string;
+  tierProfileId: string;
+  tierProfileName: string;
+  options: PoolHostingOption[];
+}
+
+export interface HostingOptions {
+  pools: PoolHostingEntry[];
+}
+
+export interface PoolSelection {
+  poolName: string;
+  planId: string;
+  targetTenants: number;
 }

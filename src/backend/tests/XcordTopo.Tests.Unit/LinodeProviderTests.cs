@@ -426,7 +426,7 @@ public class LinodeProviderTests
     public void DeriveDbName_HubServerConsumer_ReturnsXcordHub()
     {
         var pgPort = new Port { Id = Guid.NewGuid(), Name = "postgres", Type = PortType.Database, Direction = PortDirection.In };
-        var hubPgPort = new Port { Id = Guid.NewGuid(), Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubPgPort = new Port { Id = Guid.NewGuid(), Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
 
         var pg = new Image { Id = Guid.NewGuid(), Name = "PG", Kind = ImageKind.PostgreSQL, Ports = [pgPort], Width = 100, Height = 50 };
         var hub = new Image { Id = Guid.NewGuid(), Name = "Hub", Kind = ImageKind.HubServer, Ports = [hubPgPort], Width = 100, Height = 50 };
@@ -446,7 +446,7 @@ public class LinodeProviderTests
     public void DeriveDbName_FedServerConsumer_ReturnsXcord()
     {
         var pgPort = new Port { Id = Guid.NewGuid(), Name = "postgres", Type = PortType.Database, Direction = PortDirection.In };
-        var fedPgPort = new Port { Id = Guid.NewGuid(), Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
+        var fedPgPort = new Port { Id = Guid.NewGuid(), Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
 
         var pg = new Image { Id = Guid.NewGuid(), Name = "PG", Kind = ImageKind.PostgreSQL, Ports = [pgPort], Width = 100, Height = 50 };
         var fed = new Image { Id = Guid.NewGuid(), Name = "Fed", Kind = ImageKind.FederationServer, Ports = [fedPgPort], Width = 100, Height = 50 };
@@ -936,9 +936,9 @@ public class LinodeProviderTests
         var redisPort = new Port { Id = Guid.NewGuid(), Name = "redis", Type = PortType.Database, Direction = PortDirection.In };
         var minioPort = new Port { Id = Guid.NewGuid(), Name = "minio", Type = PortType.Storage, Direction = PortDirection.In };
 
-        var fedPgPort = new Port { Id = Guid.NewGuid(), Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var fedRedisPort = new Port { Id = Guid.NewGuid(), Name = "redis_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var fedMinioPort = new Port { Id = Guid.NewGuid(), Name = "minio_connection", Type = PortType.Storage, Direction = PortDirection.Out };
+        var fedPgPort = new Port { Id = Guid.NewGuid(), Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
+        var fedRedisPort = new Port { Id = Guid.NewGuid(), Name = "redis", Type = PortType.Database, Direction = PortDirection.Out };
+        var fedMinioPort = new Port { Id = Guid.NewGuid(), Name = "minio", Type = PortType.Storage, Direction = PortDirection.Out };
 
         var pg = new Image { Id = Guid.NewGuid(), Name = "PostgreSQL", Kind = ImageKind.PostgreSQL, Ports = [pgPort], Width = 120, Height = 50 };
         var redis = new Image { Id = Guid.NewGuid(), Name = "Redis", Kind = ImageKind.Redis, Ports = [redisPort], Width = 120, Height = 50 };
@@ -1050,8 +1050,8 @@ public class LinodeProviderTests
         var pgPort = new Port { Id = Guid.NewGuid(), Name = "postgres", Type = PortType.Database, Direction = PortDirection.In };
         var redisPort = new Port { Id = Guid.NewGuid(), Name = "redis", Type = PortType.Database, Direction = PortDirection.In };
 
-        var hubPgPort = new Port { Id = Guid.NewGuid(), Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var hubRedisPort = new Port { Id = Guid.NewGuid(), Name = "redis_connection", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubPgPort = new Port { Id = Guid.NewGuid(), Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubRedisPort = new Port { Id = Guid.NewGuid(), Name = "redis", Type = PortType.Database, Direction = PortDirection.Out };
         var hubHttpPort = new Port { Id = Guid.NewGuid(), Name = "http", Type = PortType.Network, Direction = PortDirection.In };
 
         var pg = new Image

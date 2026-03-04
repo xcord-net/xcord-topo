@@ -9,7 +9,8 @@ namespace XcordTopo.Infrastructure.Providers;
 /// </summary>
 public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
 {
-    public Dictionary<string, string> Generate(Topology topology)
+    public Dictionary<string, string> Generate(
+        Topology topology, List<TopologyHelpers.PoolSelection>? poolSelections = null)
     {
         var activeKeys = TopologyHelpers.CollectActiveProviderKeys(topology);
 
@@ -19,7 +20,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             var provider = registry.Get(topology.Provider);
             if (provider == null)
                 throw new InvalidOperationException($"Provider '{topology.Provider}' is not registered");
-            return provider.GenerateHcl(topology);
+            return provider.GenerateHcl(topology, poolSelections);
         }
 
         // Multi-provider — partition containers by provider, call each
@@ -31,7 +32,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             var provider = registry.Get(providerKey);
             if (provider == null) continue;
 
-            var files = provider.GenerateHclForContainers(topology, containers);
+            var files = provider.GenerateHclForContainers(topology, containers, poolSelections);
             foreach (var (fileName, content) in files)
             {
                 if (mergedFiles.TryGetValue(fileName, out var existing))

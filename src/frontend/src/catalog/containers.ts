@@ -64,7 +64,6 @@ export const containerDefinitions: ContainerDefinition[] = [
         { value: 'pro', label: 'Pro' },
         { value: 'enterprise', label: 'Enterprise' },
       ] },
-      { key: 'targetTenants', label: 'Target Tenants', placeholder: '100', tooltip: 'Total tenants this pool should support. The number of hosts is calculated automatically: each host fits as many tenants as its RAM allows after shared infrastructure overhead (PG, Redis, MinIO, Caddy), based on the selected tier profile.' },
     ],
     description: 'Shared-infrastructure host pool with tier-based tenant packing',
   },

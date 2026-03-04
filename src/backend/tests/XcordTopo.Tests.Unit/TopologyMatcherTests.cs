@@ -35,8 +35,8 @@ public class TopologyMatcherTests
         };
 
         // Hub Server image (inside Caddy)
-        var hubPgOut = new Port { Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var hubRedisOut = new Port { Name = "redis_connection", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubPgOut = new Port { Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubRedisOut = new Port { Name = "redis", Type = PortType.Database, Direction = PortDirection.Out };
         var hubHttp = new Port { Name = "http", Type = PortType.Network, Direction = PortDirection.In };
         var hub = new Image
         {
@@ -46,9 +46,9 @@ public class TopologyMatcherTests
         };
 
         // Federation Server image (inside Caddy)
-        var fedPgOut = new Port { Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var fedRedisOut = new Port { Name = "redis_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var fedMinioOut = new Port { Name = "s3_connection", Type = PortType.Storage, Direction = PortDirection.Out };
+        var fedPgOut = new Port { Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
+        var fedRedisOut = new Port { Name = "redis", Type = PortType.Database, Direction = PortDirection.Out };
+        var fedMinioOut = new Port { Name = "minio", Type = PortType.Storage, Direction = PortDirection.Out };
         var fedHttp = new Port { Name = "http", Type = PortType.Network, Direction = PortDirection.In };
         var fed = new Image
         {
@@ -120,8 +120,8 @@ public class TopologyMatcherTests
             Ports = [hubRedisPort], Width = 120, Height = 50
         };
 
-        var hubPgOut = new Port { Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var hubRedisOut = new Port { Name = "redis_connection", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubPgOut = new Port { Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubRedisOut = new Port { Name = "redis", Type = PortType.Database, Direction = PortDirection.Out };
         var hubHttp = new Port { Name = "http", Type = PortType.Network, Direction = PortDirection.In };
         var hubServer = new Image
         {
@@ -171,9 +171,9 @@ public class TopologyMatcherTests
             Ports = [fedMinioPort], Width = 120, Height = 50
         };
 
-        var fedPgOut = new Port { Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var fedRedisOut = new Port { Name = "redis_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var fedMinioOut = new Port { Name = "s3_connection", Type = PortType.Storage, Direction = PortDirection.Out };
+        var fedPgOut = new Port { Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
+        var fedRedisOut = new Port { Name = "redis", Type = PortType.Database, Direction = PortDirection.Out };
+        var fedMinioOut = new Port { Name = "minio", Type = PortType.Storage, Direction = PortDirection.Out };
         var fedHttp = new Port { Name = "http", Type = PortType.Network, Direction = PortDirection.In };
         var fedServer = new Image
         {

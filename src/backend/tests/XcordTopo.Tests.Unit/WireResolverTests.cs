@@ -11,8 +11,8 @@ public class WireResolverTests
         var pgPort = new Port { Id = Guid.NewGuid(), Name = "postgres", Type = PortType.Database, Direction = PortDirection.In };
         var redisPort = new Port { Id = Guid.NewGuid(), Name = "redis", Type = PortType.Database, Direction = PortDirection.In };
 
-        var hubPgPort = new Port { Id = Guid.NewGuid(), Name = "pg_connection", Type = PortType.Database, Direction = PortDirection.Out };
-        var hubRedisPort = new Port { Id = Guid.NewGuid(), Name = "redis_connection", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubPgPort = new Port { Id = Guid.NewGuid(), Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubRedisPort = new Port { Id = Guid.NewGuid(), Name = "redis", Type = PortType.Database, Direction = PortDirection.Out };
         var hubHttpPort = new Port { Id = Guid.NewGuid(), Name = "http", Type = PortType.Network, Direction = PortDirection.In };
 
         var pg = new Image
@@ -59,7 +59,7 @@ public class WireResolverTests
         var hub = topology.Containers[0].Images[0]; // Hub Server
         var pg = topology.Containers[0].Images[1]; // PostgreSQL
 
-        var result = resolver.ResolveOutgoing(hub.Id, "pg_connection");
+        var result = resolver.ResolveOutgoing(hub.Id, "pg");
 
         Assert.NotNull(result);
         Assert.Equal(pg.Id, ((Image)result.Value.Node).Id);
@@ -169,7 +169,7 @@ public class WireResolverTests
         var hub = topology.Containers[0].Images[0]; // Hub Server
         var pg = topology.Containers[0].Images[1]; // PostgreSQL
 
-        var result = resolver.ResolveWiredImage(hub.Id, "pg_connection");
+        var result = resolver.ResolveWiredImage(hub.Id, "pg");
 
         Assert.NotNull(result);
         Assert.Equal(pg.Id, result.Id);

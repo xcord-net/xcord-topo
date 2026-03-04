@@ -1,6 +1,6 @@
 {
   "id": "00000000-0000-0000-0000-000000000002",
-  "name": "Single Host — Good Enough",
+  "name": "Single Host \u2014 Good Enough",
   "description": "Minimal single-host deployment: everything on one server. Hub, Federation, PG, Redis, MinIO all singleton and shared. For multi-instance, increase the Federation Server replicas and leave MinIO at host level for shared storage.",
   "provider": "linode",
   "providerConfig": {},
@@ -15,9 +15,30 @@
       "width": 500,
       "height": 550,
       "ports": [
-        { "id": "b1000000-0000-0000-0000-000000000001", "name": "ssh", "type": "Control", "direction": "In", "side": "Left", "offset": 0.5 },
-        { "id": "b1000000-0000-0000-0000-000000000002", "name": "public", "type": "Network", "direction": "InOut", "side": "Right", "offset": 0.3 },
-        { "id": "b1000000-0000-0000-0000-000000000003", "name": "private", "type": "Network", "direction": "InOut", "side": "Right", "offset": 0.7 }
+        {
+          "id": "b1000000-0000-0000-0000-000000000001",
+          "name": "ssh",
+          "type": "Control",
+          "direction": "In",
+          "side": "Left",
+          "offset": 0.5
+        },
+        {
+          "id": "b1000000-0000-0000-0000-000000000002",
+          "name": "public",
+          "type": "Network",
+          "direction": "InOut",
+          "side": "Right",
+          "offset": 0.3
+        },
+        {
+          "id": "b1000000-0000-0000-0000-000000000003",
+          "name": "private",
+          "type": "Network",
+          "direction": "InOut",
+          "side": "Right",
+          "offset": 0.7
+        }
       ],
       "images": [
         {
@@ -29,10 +50,20 @@
           "width": 120,
           "height": 50,
           "ports": [
-            { "id": "d1000000-0000-0000-0000-000000000010", "name": "postgres", "type": "Database", "direction": "In", "side": "Top", "offset": 0.5 }
+            {
+              "id": "d1000000-0000-0000-0000-000000000010",
+              "name": "postgres",
+              "type": "Database",
+              "direction": "In",
+              "side": "Left",
+              "offset": 0.5
+            }
           ],
           "dockerImage": "postgres:17-alpine",
-          "config": { "replicas": "1", "volumeSize": "25" },
+          "config": {
+            "replicas": "1",
+            "volumeSize": "25"
+          },
           "scaling": "Shared"
         },
         {
@@ -44,10 +75,20 @@
           "width": 120,
           "height": 50,
           "ports": [
-            { "id": "d1000000-0000-0000-0000-000000000020", "name": "redis", "type": "Database", "direction": "In", "side": "Top", "offset": 0.5 }
+            {
+              "id": "d1000000-0000-0000-0000-000000000020",
+              "name": "redis",
+              "type": "Database",
+              "direction": "In",
+              "side": "Left",
+              "offset": 0.5
+            }
           ],
           "dockerImage": "redis:7-alpine",
-          "config": { "replicas": "1", "volumeSize": "10" },
+          "config": {
+            "replicas": "1",
+            "volumeSize": "10"
+          },
           "scaling": "Shared"
         },
         {
@@ -59,10 +100,20 @@
           "width": 120,
           "height": 50,
           "ports": [
-            { "id": "d1000000-0000-0000-0000-000000000030", "name": "s3", "type": "Storage", "direction": "In", "side": "Top", "offset": 0.5 }
+            {
+              "id": "d1000000-0000-0000-0000-000000000030",
+              "name": "s3",
+              "type": "Storage",
+              "direction": "In",
+              "side": "Left",
+              "offset": 0.5
+            }
           ],
           "dockerImage": "minio/minio:latest",
-          "config": { "replicas": "1", "volumeSize": "50" },
+          "config": {
+            "replicas": "1",
+            "volumeSize": "50"
+          },
           "scaling": "Shared"
         }
       ],
@@ -76,9 +127,30 @@
           "width": 450,
           "height": 230,
           "ports": [
-            { "id": "b1000000-0000-0000-0000-000000000010", "name": "http_in", "type": "Network", "direction": "In", "side": "Top", "offset": 0.3 },
-            { "id": "b1000000-0000-0000-0000-000000000011", "name": "https_in", "type": "Network", "direction": "In", "side": "Top", "offset": 0.7 },
-            { "id": "b1000000-0000-0000-0000-000000000012", "name": "upstream", "type": "Network", "direction": "Out", "side": "Bottom", "offset": 0.5 }
+            {
+              "id": "b1000000-0000-0000-0000-000000000010",
+              "name": "http_in",
+              "type": "Network",
+              "direction": "In",
+              "side": "Top",
+              "offset": 0.3
+            },
+            {
+              "id": "b1000000-0000-0000-0000-000000000011",
+              "name": "https_in",
+              "type": "Network",
+              "direction": "In",
+              "side": "Top",
+              "offset": 0.7
+            },
+            {
+              "id": "b1000000-0000-0000-0000-000000000012",
+              "name": "upstream",
+              "type": "Network",
+              "direction": "Out",
+              "side": "Bottom",
+              "offset": 0.5
+            }
           ],
           "images": [
             {
@@ -90,12 +162,36 @@
               "width": 140,
               "height": 60,
               "ports": [
-                { "id": "d1000000-0000-0000-0000-000000000040", "name": "http", "type": "Network", "direction": "In", "side": "Top", "offset": 0.5 },
-                { "id": "d1000000-0000-0000-0000-000000000041", "name": "pg_connection", "type": "Database", "direction": "Out", "side": "Bottom", "offset": 0.3 },
-                { "id": "d1000000-0000-0000-0000-000000000042", "name": "redis_connection", "type": "Database", "direction": "Out", "side": "Bottom", "offset": 0.7 }
+                {
+                  "id": "d1000000-0000-0000-0000-000000000040",
+                  "name": "http",
+                  "type": "Network",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                },
+                {
+                  "id": "d1000000-0000-0000-0000-000000000041",
+                  "name": "pg",
+                  "type": "Database",
+                  "direction": "Out",
+                  "side": "Right",
+                  "offset": 0.33
+                },
+                {
+                  "id": "d1000000-0000-0000-0000-000000000042",
+                  "name": "redis",
+                  "type": "Database",
+                  "direction": "Out",
+                  "side": "Right",
+                  "offset": 0.67
+                }
               ],
               "dockerImage": "ghcr.io/xcord/hub:latest",
-              "config": { "replicas": "1", "upstreamPath": "/hub/*" },
+              "config": {
+                "replicas": "1",
+                "upstreamPath": "/hub/*"
+              },
               "scaling": "Shared"
             },
             {
@@ -107,13 +203,44 @@
               "width": 140,
               "height": 60,
               "ports": [
-                { "id": "d1000000-0000-0000-0000-000000000001", "name": "http", "type": "Network", "direction": "In", "side": "Top", "offset": 0.5 },
-                { "id": "d1000000-0000-0000-0000-000000000002", "name": "pg_connection", "type": "Database", "direction": "Out", "side": "Bottom", "offset": 0.2 },
-                { "id": "d1000000-0000-0000-0000-000000000003", "name": "redis_connection", "type": "Database", "direction": "Out", "side": "Bottom", "offset": 0.5 },
-                { "id": "d1000000-0000-0000-0000-000000000004", "name": "minio_connection", "type": "Storage", "direction": "Out", "side": "Bottom", "offset": 0.8 }
+                {
+                  "id": "d1000000-0000-0000-0000-000000000001",
+                  "name": "http",
+                  "type": "Network",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                },
+                {
+                  "id": "d1000000-0000-0000-0000-000000000002",
+                  "name": "pg",
+                  "type": "Database",
+                  "direction": "Out",
+                  "side": "Right",
+                  "offset": 0.25
+                },
+                {
+                  "id": "d1000000-0000-0000-0000-000000000003",
+                  "name": "redis",
+                  "type": "Database",
+                  "direction": "Out",
+                  "side": "Right",
+                  "offset": 0.5
+                },
+                {
+                  "id": "d1000000-0000-0000-0000-000000000004",
+                  "name": "minio",
+                  "type": "Storage",
+                  "direction": "Out",
+                  "side": "Right",
+                  "offset": 0.75
+                }
               ],
               "dockerImage": "ghcr.io/xcord/fed:latest",
-              "config": { "replicas": "1", "upstreamPath": "/*" },
+              "config": {
+                "replicas": "1",
+                "upstreamPath": "/*"
+              },
               "scaling": "PerTenant"
             }
           ],

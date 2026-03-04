@@ -37,17 +37,19 @@ const ContainerNode: Component<{
   });
   const fitBtnX = () => absX() + props.container.width - 12 - kindWidth() - 8 - 20;
 
-  /** Sort images so the dragged one renders last (on top in SVG) */
+  /** Sort images so the dragged one renders last (on top in SVG).
+   *  Always returns a new array to avoid SolidJS <For> reconciliation issues
+   *  when switching between store proxy and plain array. */
   const sortedImages = () => {
-    const images = props.container.images;
+    const images = [...props.container.images];
     const dragId = interaction.selectedNodeId;
     if (interaction.mode !== 'dragging' || !dragId) return images;
-    return [...images].sort((a, b) => (a.id === dragId ? 1 : 0) - (b.id === dragId ? 1 : 0));
+    return images.sort((a, b) => (a.id === dragId ? 1 : 0) - (b.id === dragId ? 1 : 0));
   };
 
   /** Sort children so the one containing the dragged element renders last */
   const sortedChildren = () => {
-    const children = props.container.children;
+    const children = [...props.container.children];
     const dragId = interaction.selectedNodeId;
     if (interaction.mode !== 'dragging' || !dragId) return children;
     const containsDragged = (c: ContainerType): boolean => {
@@ -55,7 +57,7 @@ const ContainerNode: Component<{
       if (c.images.some(i => i.id === dragId)) return true;
       return c.children.some(containsDragged);
     };
-    return [...children].sort((a, b) =>
+    return children.sort((a, b) =>
       (containsDragged(a) ? 1 : 0) - (containsDragged(b) ? 1 : 0)
     );
   };

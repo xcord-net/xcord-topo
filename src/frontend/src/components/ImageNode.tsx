@@ -19,7 +19,11 @@ const ImageNode: Component<{
   const absX = () => props.containerX + props.image.x;
   const absY = () => props.containerY + props.image.y;
   const isSelected = () => interaction.selectedNodeIds.has(props.image.id);
-  const isDragging = () => interaction.mode === 'dragging' && interaction.selectedNodeId === props.image.id && !!props.containerId;
+  const isDragging = () =>
+    interaction.mode === 'dragging' &&
+    interaction.selectedNodeId === props.image.id &&
+    !!interaction.dragParentId &&
+    !!props.containerId;
 
   const replicaLabel = () => {
     const r = props.image.config?.replicas;

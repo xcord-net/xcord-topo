@@ -7,7 +7,10 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Features.Terraform;
 
-public sealed record CostEstimateRequest(Guid TopologyId);
+public sealed record CostEstimateRequest(
+    Guid TopologyId, List<TopologyHelpers.PoolSelection>? PoolSelections = null);
+
+public sealed record CostEstimateBody(List<TopologyHelpers.PoolSelection>? PoolSelections);
 
 public sealed record HostCostEntry(
     string HostName, string PlanId, string PlanLabel, int RamMb, int Count, decimal PricePerMonth,
@@ -31,7 +34,8 @@ public sealed class EstimateCostHandler(
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{topology.Provider}' not found");
 
         var hosts = TopologyHelpers.CollectHosts(topology.Containers);
-        var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology);
+        var pools = TopologyHelpers.CollectComputePools(
+            topology.Containers, topology, request.PoolSelections);
         var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         var entries = new List<HostCostEntry>();
         var total = 0m;
@@ -72,8 +76,20 @@ public sealed class EstimateCostHandler(
                 perTenantMb += spec?.MemoryMb ?? 256;
             }
 
-            var minHostRam = sharedOverhead + perTenantMb;
-            var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
+            // Use selected plan if specified, otherwise auto-select cheapest viable
+            ComputePlan selectedPlan;
+            if (pool.SelectedPlanId is not null)
+            {
+                selectedPlan = plans.FirstOrDefault(p => p.Id == pool.SelectedPlanId)
+                    ?? plans.FirstOrDefault(p => p.MemoryMb >= sharedOverhead + perTenantMb)
+                    ?? plans.Last();
+            }
+            else
+            {
+                var minHostRam = sharedOverhead + perTenantMb;
+                selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
+            }
+
             var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(
                 selectedPlan.MemoryMb, pool.TierProfile, poolImages);
             var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
@@ -100,10 +116,18 @@ public sealed class EstimateCostHandler(
     {
         return app.MapPost("/api/v1/topologies/{topologyId:guid}/terraform/estimate", async (
             Guid topologyId,
+            HttpRequest httpRequest,
             EstimateCostHandler handler,
             CancellationToken ct) =>
         {
-            return await handler.ExecuteAsync(new CostEstimateRequest(topologyId), ct);
+            List<TopologyHelpers.PoolSelection>? selections = null;
+            if (httpRequest.ContentLength is > 0)
+            {
+                var body = await httpRequest.ReadFromJsonAsync<CostEstimateBody>(ct);
+                selections = body?.PoolSelections;
+            }
+            return await handler.ExecuteAsync(
+                new CostEstimateRequest(topologyId, selections), ct);
         })
         .WithName("EstimateCost")
         .WithTags("Terraform");

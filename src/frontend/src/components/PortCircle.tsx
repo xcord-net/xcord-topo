@@ -86,10 +86,11 @@ const PortCircle: Component<{
     }
   };
 
-  const labelX = () => pos().x + (props.port.side === 'Left' ? -8 : props.port.side === 'Right' ? 8 : 0);
-  const labelY = () => pos().y + (props.port.side === 'Top' ? -10 : props.port.side === 'Bottom' ? 14 : 0);
-  const labelAnchor = () => props.port.side === 'Left' ? 'end' : props.port.side === 'Right' ? 'start' : 'middle';
-  const labelBaseline = () => props.port.side === 'Top' ? 'auto' : props.port.side === 'Bottom' ? 'hanging' : 'middle';
+  // Labels render inside the node, inset from the port circle toward center
+  const labelX = () => pos().x + (props.port.side === 'Left' ? 10 : props.port.side === 'Right' ? -10 : 0);
+  const labelY = () => pos().y + (props.port.side === 'Top' ? 12 : props.port.side === 'Bottom' ? -12 : 0);
+  const labelAnchor = () => props.port.side === 'Left' ? 'start' : props.port.side === 'Right' ? 'end' : 'middle';
+  const labelBaseline = () => props.port.side === 'Top' ? 'hanging' : props.port.side === 'Bottom' ? 'auto' : 'middle';
 
   return (
     <>

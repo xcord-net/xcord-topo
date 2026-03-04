@@ -1,6 +1,7 @@
 import { createRoot } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
 import type { Topology, Container, Image, Wire, Port, DeployStatus } from '../types/topology';
+import { imageDefinitions } from '../catalog/images';
 
 const HEADER_HEIGHT = 32;
 
@@ -84,6 +85,22 @@ function loadFromStorage(): Topology {
       backfill(parsed.containers);
       // Backfill serviceKeys for topologies saved before service key support
       if (!parsed.serviceKeys) parsed.serviceKeys = {};
+      // Migrate image ports to current catalog definitions (names, sides, offsets)
+      const migrateImagePorts = (containers: Container[]) => {
+        for (const c of containers) {
+          for (const img of c.images) {
+            const def = imageDefinitions.find(d => d.kind === img.kind);
+            if (!def) continue;
+            // Replace ports with catalog defaults, preserving IDs by position
+            img.ports = def.defaultPorts.map((dp, i) => ({
+              ...dp,
+              id: img.ports[i]?.id || crypto.randomUUID(),
+            }));
+          }
+          migrateImagePorts(c.children);
+        }
+      };
+      migrateImagePorts(parsed.containers);
       return parsed;
     }
   } catch { /* ignore corrupt data */ }

@@ -6,7 +6,7 @@ import { useHistory } from '../stores/history.store';
 import { screenToCanvas } from '../lib/geometry';
 import { containerDefinitions } from '../catalog/containers';
 import { imageDefinitions } from '../catalog/images';
-import type { Container, Image, Port } from '../types/topology';
+import type { Container, Image, Port, Wire as WireType } from '../types/topology';
 import ContainerNode from './ContainerNode';
 import ImageNode from './ImageNode';
 import Wire from './Wire';
@@ -18,8 +18,58 @@ function createPort(template: Port): Port {
   return { ...template, id: crypto.randomUUID() };
 }
 
+/** Deep-clone a container tree, generating fresh IDs. Returns the clone and an old→new ID map. */
+function cloneContainer(c: Container): { clone: Container; idMap: Map<string, string> } {
+  const idMap = new Map<string, string>();
+  const cloneC = (src: Container): Container => {
+    const newId = crypto.randomUUID();
+    idMap.set(src.id, newId);
+    return {
+      ...src,
+      id: newId,
+      ports: src.ports.map(p => {
+        const newPid = crypto.randomUUID();
+        idMap.set(p.id, newPid);
+        return { ...p, id: newPid };
+      }),
+      images: src.images.map(img => {
+        const newImgId = crypto.randomUUID();
+        idMap.set(img.id, newImgId);
+        return {
+          ...img,
+          id: newImgId,
+          ports: img.ports.map(p => {
+            const newPid = crypto.randomUUID();
+            idMap.set(p.id, newPid);
+            return { ...p, id: newPid };
+          }),
+          config: { ...img.config },
+        };
+      }),
+      children: src.children.map(cloneC),
+      config: { ...src.config },
+    };
+  };
+  return { clone: cloneC(c), idMap };
+}
+
+/** Deep-clone an image, generating fresh IDs. */
+function cloneImage(img: Image): Image {
+  return {
+    ...img,
+    id: crypto.randomUUID(),
+    ports: img.ports.map(p => ({ ...p, id: crypto.randomUUID() })),
+    config: { ...img.config },
+  };
+}
+
+type Clipboard =
+  | { type: 'container'; data: Container; wires: WireType[] }
+  | { type: 'image'; data: Image; parentId: string };
+
 const Canvas: Component = () => {
   let svgRef: SVGSVGElement | undefined;
+  let clipboard: Clipboard | null = null;
   const topo = useTopology();
   const canvas = useCanvas();
   const interaction = useInteraction();
@@ -31,9 +81,11 @@ const Canvas: Component = () => {
     return screenToCanvas({ x: clientX - rect.left, y: clientY - rect.top }, canvas.transform);
   };
 
-  /** Reorder top-level containers so the one containing the dragged element renders last (on top in SVG) */
+  /** Reorder top-level containers so the one containing the dragged element renders last (on top in SVG).
+   *  Always returns a new array to avoid SolidJS <For> reconciliation issues
+   *  when switching between store proxy and plain array. */
   const sortedContainers = createMemo(() => {
-    const containers = topo.topology.containers;
+    const containers = [...topo.topology.containers];
     if (interaction.mode !== 'dragging') return containers;
     const dragId = interaction.selectedNodeId;
     if (!dragId) return containers;
@@ -42,7 +94,7 @@ const Canvas: Component = () => {
       if (c.images.some(i => i.id === dragId)) return true;
       return c.children.some(containsDragged);
     };
-    return [...containers].sort((a, b) =>
+    return containers.sort((a, b) =>
       (containsDragged(a) ? 1 : 0) - (containsDragged(b) ? 1 : 0)
     );
   });
@@ -361,6 +413,86 @@ const Canvas: Component = () => {
         e.preventDefault();
         history.push(topo.getSnapshot());
         topo.fitAllToContents();
+      } else if (e.key === 'c') {
+        e.preventDefault();
+        const nodeId = interaction.selectedNodeId;
+        if (!nodeId) return;
+        const imageOwner = topo.findImageOwner(nodeId);
+        if (imageOwner) {
+          const findImg = (containers: readonly Container[]): Image | undefined => {
+            for (const c of containers) {
+              if (c.id === imageOwner) return c.images.find(i => i.id === nodeId);
+              const found = findImg(c.children);
+              if (found) return found;
+            }
+            return undefined;
+          };
+          const img = findImg(topo.topology.containers);
+          if (img) clipboard = { type: 'image', data: JSON.parse(JSON.stringify(img)), parentId: imageOwner };
+        } else {
+          const findC = (containers: readonly Container[]): Container | undefined => {
+            for (const c of containers) {
+              if (c.id === nodeId) return c;
+              const found = findC(c.children);
+              if (found) return found;
+            }
+            return undefined;
+          };
+          const container = findC(topo.topology.containers);
+          if (container) {
+            // Collect internal wires (both endpoints inside this container tree)
+            const collectIds = (c: Container): Set<string> => {
+              const ids = new Set<string>([c.id]);
+              c.images.forEach(i => ids.add(i.id));
+              c.children.forEach(ch => { for (const id of collectIds(ch)) ids.add(id); });
+              return ids;
+            };
+            const nodeIds = collectIds(container);
+            const wires = topo.topology.wires.filter(
+              w => nodeIds.has(w.fromNodeId) && nodeIds.has(w.toNodeId)
+            );
+            clipboard = {
+              type: 'container',
+              data: JSON.parse(JSON.stringify(container)),
+              wires: JSON.parse(JSON.stringify(wires)),
+            };
+          }
+        }
+      } else if (e.key === 'v') {
+        e.preventDefault();
+        if (!clipboard) return;
+        history.push(topo.getSnapshot());
+        const OFFSET = 30;
+        if (clipboard.type === 'image') {
+          const copy = cloneImage(clipboard.data);
+          copy.x += OFFSET;
+          copy.y += OFFSET;
+          topo.addImage(clipboard.parentId, copy);
+          topo.growToFit(clipboard.parentId);
+          interaction.select(copy.id);
+        } else {
+          const { clone, idMap } = cloneContainer(clipboard.data);
+          clone.x += OFFSET;
+          clone.y += OFFSET;
+          topo.addContainer(clone);
+          // Recreate internal wires with mapped IDs
+          for (const w of clipboard.wires) {
+            const fromNode = idMap.get(w.fromNodeId);
+            const fromPort = idMap.get(w.fromPortId);
+            const toNode = idMap.get(w.toNodeId);
+            const toPort = idMap.get(w.toPortId);
+            if (fromNode && fromPort && toNode && toPort) {
+              topo.addWire({
+                id: crypto.randomUUID(),
+                fromNodeId: fromNode,
+                fromPortId: fromPort,
+                toNodeId: toNode,
+                toPortId: toPort,
+              });
+            }
+          }
+          interaction.select(clone.id);
+        }
       }
     }
 

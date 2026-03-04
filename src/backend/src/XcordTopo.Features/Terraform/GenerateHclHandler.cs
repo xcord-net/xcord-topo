@@ -7,7 +7,10 @@ using XcordTopo.Infrastructure.Terraform;
 
 namespace XcordTopo.Features.Terraform;
 
-public sealed record GenerateHclRequest(Guid TopologyId);
+public sealed record GenerateHclRequest(
+    Guid TopologyId, List<TopologyHelpers.PoolSelection>? PoolSelections = null);
+
+public sealed record GenerateHclBody(List<TopologyHelpers.PoolSelection>? PoolSelections);
 
 public sealed record GenerateHclResponse(Dictionary<string, string> Files);
 
@@ -23,7 +26,7 @@ public sealed class GenerateHclHandler(
         if (topology is null)
             return Error.NotFound("TOPOLOGY_NOT_FOUND", $"Topology {request.TopologyId} not found");
 
-        var files = hclGenerator.Generate(topology);
+        var files = hclGenerator.Generate(topology, request.PoolSelections);
         await hclFileManager.WriteFilesAsync(request.TopologyId, files, ct);
 
         return new GenerateHclResponse(files);
@@ -32,9 +35,16 @@ public sealed class GenerateHclHandler(
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)
     {
         return app.MapPost("/api/v1/topologies/{topologyId:guid}/terraform/generate", async (
-            Guid topologyId, GenerateHclHandler handler, CancellationToken ct) =>
+            Guid topologyId, HttpRequest httpRequest, GenerateHclHandler handler, CancellationToken ct) =>
         {
-            return await handler.ExecuteAsync(new GenerateHclRequest(topologyId), ct);
+            List<TopologyHelpers.PoolSelection>? selections = null;
+            if (httpRequest.ContentLength is > 0)
+            {
+                var body = await httpRequest.ReadFromJsonAsync<GenerateHclBody>(ct);
+                selections = body?.PoolSelections;
+            }
+            return await handler.ExecuteAsync(
+                new GenerateHclRequest(topologyId, selections), ct);
         })
         .WithName("GenerateHcl")
         .WithTags("Terraform");

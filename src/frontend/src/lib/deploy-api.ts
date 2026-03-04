@@ -1,4 +1,4 @@
-import type { CredentialStatus, CredentialField, CostEstimate, DeployedTopology, TerraformOutputLine } from '../types/deploy';
+import type { CredentialStatus, CredentialField, CostEstimate, DeployedTopology, TerraformOutputLine, HostingOptions, PoolSelection } from '../types/deploy';
 
 const API_BASE = '/api/v1';
 
@@ -68,10 +68,27 @@ export async function getActiveDeployments(): Promise<DeployedTopology[]> {
   return res.json();
 }
 
+// --- Hosting options ---
+
+export async function getHostingOptions(topologyId: string): Promise<HostingOptions> {
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/hosting-options`);
+  if (!res.ok) throw new Error(`Failed to get hosting options: ${res.statusText}`);
+  return res.json();
+}
+
 // --- Cost estimate ---
 
-export async function estimateCost(topologyId: string): Promise<CostEstimate> {
-  const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/estimate`, { method: 'POST' });
+export async function estimateCost(
+  topologyId: string, poolSelections?: PoolSelection[],
+): Promise<CostEstimate> {
+  const hasBody = poolSelections && poolSelections.length > 0;
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/estimate`, {
+    method: 'POST',
+    ...(hasBody ? {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ poolSelections }),
+    } : {}),
+  });
   if (!res.ok) throw new Error(`Failed to estimate cost: ${res.statusText}`);
   return res.json();
 }

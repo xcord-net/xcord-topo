@@ -3,7 +3,7 @@ import { useTopology } from '../stores/topology.store';
 import * as deployApi from '../lib/deploy-api';
 import { saveTopology } from '../lib/serialization';
 import { validateField, validateAllFields } from '../lib/credential-validation';
-import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, CostEstimate, TerraformOutputLine } from '../types/deploy';
+import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, CostEstimate, TerraformOutputLine, HostingOptions, PoolSelection } from '../types/deploy';
 import type { MigrationDiffResult, MigrationDecision, MigrationPlan } from '../types/migration';
 import type { Topology, Container } from '../types/topology';
 
@@ -37,6 +37,7 @@ function collectActiveProviders(topology: Topology): string[] {
 const STEPS: { key: DeployStep; label: string }[] = [
   { key: 'provider', label: 'Provider' },
   { key: 'configure', label: 'Configure' },
+  { key: 'hosting', label: 'Hosting' },
   { key: 'review', label: 'Review' },
   { key: 'migrate', label: 'Migrate' },
   { key: 'execute', label: 'Execute' },
@@ -138,6 +139,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   const [hclFiles, setHclFiles] = createSignal<Record<string, string>>({});
   const [activeDeployments, setActiveDeployments] = createSignal<DeployedTopology[]>([]);
   const [deployMode, setDeployMode] = createSignal<DeployMode>('fresh');
+
+  // Hosting step state
+  const [hostingOptions, setHostingOptions] = createSignal<HostingOptions | null>(null);
+  const [poolSelections, setPoolSelections] = createSignal<Record<string, PoolSelection>>({});
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
   const [fieldErrors, setFieldErrors] = createSignal<Record<string, string>>({});
@@ -458,31 +463,85 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       }
       topo.updateServiceKeys(skNonSensitive);
 
-      // Generate HCL
-      const hclResult = await deployApi.generateHcl(topo.topology.id);
-      setHclFiles(hclResult.files);
+      // Fetch hosting options for ComputePools
+      const hosting = await deployApi.getHostingOptions(topo.topology.id);
+      setHostingOptions(hosting);
 
-      // Fetch cost estimate and active deployments in parallel
-      const [cost, deployments] = await Promise.all([
-        deployApi.estimateCost(topo.topology.id),
-        deployApi.getActiveDeployments(),
-      ]);
-      setCostEstimate(cost);
-      setActiveDeployments(deployments);
-
-      // Determine deploy mode
-      const currentDeploy = deployments.find(d => d.topologyId === topo.topology.id);
-      const otherDeploy = deployments.find(d => d.topologyId !== topo.topology.id);
-      if (currentDeploy) {
-        setDeployMode('update');
-      } else if (otherDeploy) {
-        setDeployMode('migrate');
-        setMigrationSourceId(otherDeploy.topologyId);
+      if (hosting.pools.length > 0) {
+        // Pre-select cheapest viable plan for each pool
+        const defaults: Record<string, PoolSelection> = {};
+        for (const pool of hosting.pools) {
+          if (pool.options.length > 0) {
+            defaults[pool.poolName] = {
+              poolName: pool.poolName,
+              planId: pool.options[0].planId,
+              targetTenants: 10,
+            };
+          }
+        }
+        setPoolSelections(defaults);
+        setStep('hosting');
       } else {
-        setDeployMode('fresh');
+        // No ComputePools — skip hosting, go straight to review
+        await generateAndEstimate();
       }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      setStep('review');
+  // --- Generate HCL + estimate cost helper ---
+  const generateAndEstimate = async (selections?: PoolSelection[]) => {
+    const selArr = selections && selections.length > 0 ? selections : undefined;
+    const [hclResult, cost, deployments] = await Promise.all([
+      deployApi.generateHcl(topo.topology.id, selArr),
+      deployApi.estimateCost(topo.topology.id, selArr),
+      deployApi.getActiveDeployments(),
+    ]);
+    setHclFiles(hclResult.files);
+    setCostEstimate(cost);
+    setActiveDeployments(deployments);
+
+    const currentDeploy = deployments.find(d => d.topologyId === topo.topology.id);
+    const otherDeploy = deployments.find(d => d.topologyId !== topo.topology.id);
+    if (currentDeploy) {
+      setDeployMode('update');
+    } else if (otherDeploy) {
+      setDeployMode('migrate');
+      setMigrationSourceId(otherDeploy.topologyId);
+    } else {
+      setDeployMode('fresh');
+    }
+
+    setStep('review');
+  };
+
+  // --- Step 2.5: Hosting ---
+  const handleHostingNext = async () => {
+    const sels = poolSelections();
+    const options = hostingOptions();
+    if (!options) return;
+
+    // Validate all pools have selections with targetTenants > 0
+    for (const pool of options.pools) {
+      const sel = sels[pool.poolName];
+      if (!sel || !sel.planId) {
+        setError(`Please select a hosting plan for "${pool.poolName}"`);
+        return;
+      }
+      if (!sel.targetTenants || sel.targetTenants < 1) {
+        setError(`Please enter target tenants for "${pool.poolName}"`);
+        return;
+      }
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      const selArr = Object.values(sels);
+      await generateAndEstimate(selArr);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -1189,6 +1248,138 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                   </div>
                 )}
               </Show>
+            </div>
+          </Show>
+
+          {/* Step 2.5: Hosting */}
+          <Show when={step() === 'hosting'}>
+            <div class="space-y-4">
+              <p class="text-xs text-topo-text-muted">
+                Select a hosting plan and target tenant count for each compute pool.
+              </p>
+
+              <For each={hostingOptions()?.pools ?? []}>
+                {(pool) => {
+                  const sel = () => poolSelections()[pool.poolName];
+                  const selectedOption = () => pool.options.find(o => o.planId === sel()?.planId);
+                  const hostsRequired = () => {
+                    const s = sel();
+                    const opt = selectedOption();
+                    if (!s || !opt || s.targetTenants < 1) return 0;
+                    return Math.ceil(s.targetTenants / opt.tenantsPerHost);
+                  };
+
+                  return (
+                    <div class="bg-topo-bg-secondary rounded-lg border border-topo-border p-4 space-y-3">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-semibold text-topo-text-primary">{pool.poolName}</span>
+                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-topo-brand/10 text-topo-brand">
+                          {pool.tierProfileName}
+                        </span>
+                      </div>
+
+                      {/* Plan table */}
+                      <div class="overflow-x-auto">
+                        <table class="w-full text-xs">
+                          <thead>
+                            <tr class="text-topo-text-muted border-b border-topo-border">
+                              <th class="text-left py-1.5 pr-3 font-medium w-6"></th>
+                              <th class="text-left py-1.5 pr-3 font-medium">Plan</th>
+                              <th class="text-right py-1.5 pr-3 font-medium">RAM</th>
+                              <th class="text-right py-1.5 pr-3 font-medium">vCPUs</th>
+                              <th class="text-right py-1.5 pr-3 font-medium">$/mo</th>
+                              <th class="text-right py-1.5 pr-3 font-medium">Tenants/Host</th>
+                              <th class="text-right py-1.5 font-medium">$/Tenant</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <For each={pool.options}>
+                              {(option) => {
+                                const isSelected = () => sel()?.planId === option.planId;
+                                return (
+                                  <tr
+                                    class={`border-b border-topo-border/50 cursor-pointer transition-colors ${
+                                      isSelected() ? 'bg-topo-brand/10' : 'hover:bg-topo-bg-tertiary'
+                                    }`}
+                                    onClick={() => {
+                                      setPoolSelections(prev => ({
+                                        ...prev,
+                                        [pool.poolName]: {
+                                          ...prev[pool.poolName],
+                                          poolName: pool.poolName,
+                                          planId: option.planId,
+                                        },
+                                      }));
+                                    }}
+                                  >
+                                    <td class="py-1.5 pr-3">
+                                      <div class={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
+                                        isSelected() ? 'border-topo-brand' : 'border-topo-text-muted/40'
+                                      }`}>
+                                        <Show when={isSelected()}>
+                                          <div class="w-1.5 h-1.5 rounded-full bg-topo-brand" />
+                                        </Show>
+                                      </div>
+                                    </td>
+                                    <td class="py-1.5 pr-3 text-topo-text-primary font-medium">{option.planLabel}</td>
+                                    <td class="py-1.5 pr-3 text-right text-topo-text-secondary">
+                                      {option.memoryMb >= 1024 ? `${(option.memoryMb / 1024).toFixed(0)} GB` : `${option.memoryMb} MB`}
+                                    </td>
+                                    <td class="py-1.5 pr-3 text-right text-topo-text-secondary">{option.vCpus}</td>
+                                    <td class="py-1.5 pr-3 text-right text-topo-text-secondary">${option.priceMonthly}</td>
+                                    <td class="py-1.5 pr-3 text-right text-topo-text-secondary">{option.tenantsPerHost}</td>
+                                    <td class="py-1.5 text-right text-topo-text-secondary">${option.costPerTenant}</td>
+                                  </tr>
+                                );
+                              }}
+                            </For>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Target tenants + hosts calculation */}
+                      <div class="flex items-center gap-4 pt-1">
+                        <label class="flex items-center gap-2 text-xs text-topo-text-secondary">
+                          Target tenants
+                          <input
+                            type="number"
+                            min="1"
+                            class="w-20 px-2 py-1 text-xs rounded border border-topo-border bg-topo-bg-primary text-topo-text-primary focus:border-topo-brand focus:outline-none"
+                            value={sel()?.targetTenants ?? ''}
+                            onInput={(e) => {
+                              const val = parseInt(e.currentTarget.value, 10);
+                              setPoolSelections(prev => ({
+                                ...prev,
+                                [pool.poolName]: {
+                                  ...prev[pool.poolName],
+                                  poolName: pool.poolName,
+                                  targetTenants: isNaN(val) ? 0 : val,
+                                },
+                              }));
+                            }}
+                          />
+                        </label>
+                        <Show when={hostsRequired() > 0}>
+                          <span class="text-xs text-topo-text-muted">
+                            = <span class="text-topo-brand font-semibold">{hostsRequired()}</span>
+                            {' '}{hostsRequired() === 1 ? 'host' : 'hosts'} required
+                          </span>
+                        </Show>
+                      </div>
+                    </div>
+                  );
+                }}
+              </For>
+
+              {renderNav(
+                <button
+                  class="px-3 py-1 text-xs rounded font-medium bg-topo-brand text-white hover:bg-topo-brand-hover disabled:opacity-50"
+                  disabled={loading()}
+                  onClick={handleHostingNext}
+                >
+                  {loading() ? 'Generating...' : 'Next'}
+                </button>
+              )}
             </div>
           </Show>
 

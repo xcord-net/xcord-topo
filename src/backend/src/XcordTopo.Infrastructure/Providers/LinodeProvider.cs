@@ -130,11 +130,12 @@ public sealed class LinodeProvider : ICloudProvider
         }
     ];
 
-    public Dictionary<string, string> GenerateHcl(Topology topology)
+    public Dictionary<string, string> GenerateHcl(
+        Topology topology, List<TopologyHelpers.PoolSelection>? poolSelections = null)
     {
         var files = new Dictionary<string, string>();
         var hosts = TopologyHelpers.CollectHosts(topology.Containers);
-        var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology);
+        var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology, poolSelections);
         var dnsContainers = TopologyHelpers.CollectDnsContainers(topology.Containers);
         var resolver = new WireResolver(topology);
 
@@ -155,11 +156,12 @@ public sealed class LinodeProvider : ICloudProvider
 
     public Dictionary<string, string> GenerateHclForContainers(
         Topology topology,
-        IReadOnlyList<Container> ownedContainers)
+        IReadOnlyList<Container> ownedContainers,
+        List<TopologyHelpers.PoolSelection>? poolSelections = null)
     {
         var files = new Dictionary<string, string>();
         var hosts = TopologyHelpers.CollectHosts(ownedContainers.ToList());
-        var pools = TopologyHelpers.CollectComputePools(ownedContainers.ToList(), topology);
+        var pools = TopologyHelpers.CollectComputePools(ownedContainers.ToList(), topology, poolSelections);
         var dnsContainers = ownedContainers.Where(c => c.Kind == ContainerKind.Dns).ToList();
         var resolver = new WireResolver(topology);
 
@@ -188,6 +190,23 @@ public sealed class LinodeProvider : ICloudProvider
                 return plan.Id;
         }
         return plans.Last().Id;
+    }
+
+    /// <summary>
+    /// Resolves the compute plan for a pool: uses SelectedPlanId if set, otherwise auto-selects cheapest viable.
+    /// </summary>
+    private static ComputePlan ResolvePoolPlan(TopologyHelpers.ComputePoolEntry pool, List<ComputePlan> plans)
+    {
+        if (pool.SelectedPlanId is not null)
+        {
+            var selected = plans.FirstOrDefault(p => p.Id == pool.SelectedPlanId);
+            if (selected is not null) return selected;
+        }
+
+        var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
+        var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
+        var minHostRam = sharedOverhead + fedMemory;
+        return plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
     }
 
     // --- DNS record generation ---
@@ -333,10 +352,7 @@ public sealed class LinodeProvider : ICloudProvider
         foreach (var pool in pools)
         {
             var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
-            var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
-            var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
-            var minHostRam = sharedOverhead + fedMemory;
-            var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
+            var selectedPlan = ResolvePoolPlan(pool, plans);
             var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile);
             var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
 
@@ -458,10 +474,7 @@ public sealed class LinodeProvider : ICloudProvider
         foreach (var pool in pools)
         {
             var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
-            var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
-            var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
-            var minHostRam = sharedOverhead + fedMemory;
-            var selectedPlan = allPlans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? allPlans.Last();
+            var selectedPlan = ResolvePoolPlan(pool, allPlans);
 
             instances.Block($"resource \"linode_instance\" \"{poolName}\"", b =>
             {

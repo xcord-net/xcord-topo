@@ -216,14 +216,6 @@ const PropertiesPanel: Component = () => {
               <label class="text-xs text-topo-text-muted">Kind</label>
               <p class="text-sm text-topo-text-secondary">{imgData().image.kind}</p>
             </div>
-            <div>
-              <label class="text-xs text-topo-text-muted">Docker Image</label>
-              <input
-                class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
-                value={imgData().image.dockerImage ?? ''}
-                onInput={(e) => updateImageProp('dockerImage', e.currentTarget.value)}
-              />
-            </div>
 
             {/* Image config fields (filtered by parent container kind) */}
             <Show when={imageConfigFields().length > 0}>

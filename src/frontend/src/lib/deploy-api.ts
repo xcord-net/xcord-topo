@@ -1,4 +1,4 @@
-import type { CredentialStatus, CredentialField, CostEstimate, DeployedTopology, TerraformOutputLine, HostingOptions, PoolSelection } from '../types/deploy';
+import type { CredentialStatus, CredentialField, CostEstimate, DeployedTopology, TerraformOutputLine, HostingOptions, PoolSelection, TopologyValidationResult } from '../types/deploy';
 
 const API_BASE = '/api/v1';
 
@@ -57,6 +57,17 @@ export async function saveServiceKeys(variables: Record<string, string>): Promis
 export async function generateSshKeypair(): Promise<{ publicKey: string; privateKey: string }> {
   const res = await fetch(`${API_BASE}/ssh/generate-keypair`, { method: 'POST' });
   if (!res.ok) throw new Error(`Failed to generate SSH keypair: ${res.statusText}`);
+  return res.json();
+}
+
+// --- Topology validation ---
+
+export async function validateTopology(topologyId: string): Promise<TopologyValidationResult> {
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/validate`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.detail ?? `Validation failed: ${res.statusText}`);
+  }
   return res.json();
 }
 

@@ -3,12 +3,17 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Validation;
+using XcordTopo.Models;
 
 namespace XcordTopo.Features.Topologies;
 
 public sealed record ValidateTopologyRequest(Guid Id);
 
-public sealed record ValidateTopologyResponse(bool IsValid, List<string> Errors);
+public sealed record ValidateTopologyResponse(
+    bool IsValid,
+    List<string> Errors,
+    bool CanDeploy,
+    List<TopologyValidationError> Items);
 
 public sealed class ValidateTopologyHandler(ITopologyStore store, ITopologyValidator validator)
     : IRequestHandler<ValidateTopologyRequest, Result<ValidateTopologyResponse>>
@@ -19,8 +24,12 @@ public sealed class ValidateTopologyHandler(ITopologyStore store, ITopologyValid
         if (topology is null)
             return Error.NotFound("TOPOLOGY_NOT_FOUND", $"Topology {request.Id} not found");
 
-        var errors = validator.Validate(topology);
-        return new ValidateTopologyResponse(errors.Count == 0, errors);
+        var result = validator.ValidateFull(topology);
+        return new ValidateTopologyResponse(
+            IsValid: result.CanDeploy,
+            Errors: result.Errors.Select(e => e.Message).ToList(),
+            CanDeploy: result.CanDeploy,
+            Items: result.Items);
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)

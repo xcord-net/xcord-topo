@@ -1,4 +1,19 @@
+using System.Text.Json.Serialization;
+
 namespace XcordTopo.Models;
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ValidationSeverity
+{
+    Error,
+    Warning
+}
+
+public sealed record TopologyValidationError(
+    ValidationSeverity Severity,
+    string Message,
+    string? NodeId = null,
+    string? Field = null);
 
 public sealed class CredentialStatus
 {

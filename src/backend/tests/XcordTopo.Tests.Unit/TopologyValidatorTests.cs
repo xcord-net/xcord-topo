@@ -1,3 +1,4 @@
+using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Validation;
 using XcordTopo.Models;
 
@@ -5,7 +6,15 @@ namespace XcordTopo.Tests.Unit;
 
 public class TopologyValidatorTests
 {
-    private readonly TopologyValidator _validator = new();
+    private readonly TopologyValidator _validator;
+
+    public TopologyValidatorTests()
+    {
+        var registry = new ProviderRegistry([new LinodeProvider(), new AwsProvider()]);
+        _validator = new TopologyValidator(registry);
+    }
+
+    // ─── Existing structural tests (ported) ──────────────────────────
 
     [Fact]
     public void Validate_EmptyName_ReturnsError()
@@ -59,7 +68,7 @@ public class TopologyValidatorTests
         topology.Containers.Add(container);
         topology.Wires.Add(new Wire
         {
-            FromNodeId = Guid.NewGuid(), // non-existent
+            FromNodeId = Guid.NewGuid(),
             FromPortId = Guid.NewGuid(),
             ToNodeId = container.Id,
             ToPortId = Guid.NewGuid()
@@ -159,8 +168,8 @@ public class TopologyValidatorTests
         };
         container.Images.Add(new Image
         {
-            Name = "Fed Server",
-            Kind = ImageKind.FederationServer,
+            Name = "Custom Service",
+            Kind = ImageKind.Custom,
             Width = 140,
             Height = 60,
             Config = new Dictionary<string, string> { ["replicas"] = "$TIER_REPLICAS" }
@@ -185,7 +194,7 @@ public class TopologyValidatorTests
         };
         var child = new Container
         {
-            Name = "", // invalid — no name
+            Name = "",
             Kind = ContainerKind.Host,
             Width = 300,
             Height = 200
@@ -196,5 +205,269 @@ public class TopologyValidatorTests
         var errors = _validator.Validate(topology);
 
         Assert.Contains(errors, e => e.Contains("must have a name"));
+    }
+
+    // ─── New deploy validation tests ─────────────────────────────────
+
+    [Fact]
+    public void ValidateFull_DuplicateSanitizedNames_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container { Name = "my server", Kind = ContainerKind.Host, Width = 300, Height = 200 });
+        topology.Containers.Add(new Container { Name = "my-server", Kind = ContainerKind.Host, Width = 300, Height = 200 });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("my_server") && e.Message.Contains("collision"));
+    }
+
+    [Fact]
+    public void ValidateFull_InvalidProvider_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test", Provider = "azure" };
+        topology.Containers.Add(new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("azure") && e.Message.Contains("not registered"));
+    }
+
+    [Fact]
+    public void ValidateFull_InvalidRegion_ReturnsError()
+    {
+        var topology = new Topology
+        {
+            Name = "Test",
+            Provider = "linode",
+            ProviderConfig = new() { ["region"] = "mars-1" }
+        };
+        topology.Containers.Add(new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("mars-1") && e.Field == "region");
+    }
+
+    [Fact]
+    public void ValidateFull_ValidLinodeRegion_NoRegionError()
+    {
+        var topology = new Topology
+        {
+            Name = "Test",
+            Provider = "linode",
+            ProviderConfig = new() { ["region"] = "us-east" }
+        };
+        topology.Containers.Add(new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.DoesNotContain(result.Errors, e => e.Field == "region");
+    }
+
+    [Fact]
+    public void ValidateFull_CaddyWithEmptyDomain_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container
+        {
+            Name = "Proxy",
+            Kind = ContainerKind.Caddy,
+            Width = 200,
+            Height = 100,
+            Config = new() { ["domain"] = "" }
+        });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("Caddy") && e.Field == "domain");
+    }
+
+    [Fact]
+    public void ValidateFull_CaddyWithInvalidDomain_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container
+        {
+            Name = "Proxy",
+            Kind = ContainerKind.Caddy,
+            Width = 200,
+            Height = 100,
+            Config = new() { ["domain"] = "not a domain" }
+        });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("not a valid domain") && e.Field == "domain");
+    }
+
+    [Fact]
+    public void ValidateFull_ComputePoolWithoutFedServer_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container
+        {
+            Name = "Pool",
+            Kind = ContainerKind.ComputePool,
+            Width = 300,
+            Height = 200,
+            Images = [new Image { Name = "Redis", Kind = ImageKind.Redis, Width = 120, Height = 60 }]
+        });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("FederationServer") && e.Message.Contains("Pool"));
+    }
+
+    [Fact]
+    public void ValidateFull_FedServerWithNoWires_ReturnsErrors()
+    {
+        var topology = new Topology { Name = "Test" };
+        var host = new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 };
+        host.Images.Add(new Image
+        {
+            Name = "Fed",
+            Kind = ImageKind.FederationServer,
+            Width = 120,
+            Height = 60,
+            Ports =
+            [
+                new Port { Name = "pg", Type = PortType.Database, Direction = PortDirection.Out, Side = PortSide.Right, Offset = 0.3 },
+                new Port { Name = "redis", Type = PortType.Database, Direction = PortDirection.Out, Side = PortSide.Right, Offset = 0.5 },
+                new Port { Name = "minio", Type = PortType.Storage, Direction = PortDirection.Out, Side = PortSide.Right, Offset = 0.7 },
+            ]
+        });
+        topology.Containers.Add(host);
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("PostgreSQL"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("Redis"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("MinIO"));
+    }
+
+    [Fact]
+    public void ValidateFull_HubServerWithNoWires_ReturnsErrors()
+    {
+        var topology = new Topology { Name = "Test" };
+        var host = new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 };
+        host.Images.Add(new Image
+        {
+            Name = "Hub",
+            Kind = ImageKind.HubServer,
+            Width = 120,
+            Height = 60,
+            Ports =
+            [
+                new Port { Name = "pg", Type = PortType.Database, Direction = PortDirection.Out, Side = PortSide.Right, Offset = 0.3 },
+                new Port { Name = "redis", Type = PortType.Database, Direction = PortDirection.Out, Side = PortSide.Right, Offset = 0.5 },
+            ]
+        });
+        topology.Containers.Add(host);
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("PostgreSQL"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("Redis"));
+    }
+
+    [Fact]
+    public void ValidateFull_UnknownTierProfile_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container
+        {
+            Name = "Pool",
+            Kind = ContainerKind.ComputePool,
+            Width = 300,
+            Height = 200,
+            Config = new() { ["tierProfile"] = "platinum" },
+            Images = [new Image { Name = "Fed", Kind = ImageKind.FederationServer, Width = 120, Height = 60 }]
+        });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("platinum") && e.Field == "tierProfile");
+    }
+
+    [Fact]
+    public void ValidateFull_InvalidVolumeSize_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        var host = new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 };
+        host.Images.Add(new Image
+        {
+            Name = "PG",
+            Kind = ImageKind.PostgreSQL,
+            Width = 120,
+            Height = 60,
+            Config = new() { ["volumeSize"] = "-5" }
+        });
+        topology.Containers.Add(host);
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("volumeSize") && e.Field == "volumeSize");
+    }
+
+    [Fact]
+    public void ValidateFull_CaddyWithInjectionChars_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container
+        {
+            Name = "Proxy",
+            Kind = ContainerKind.Caddy,
+            Width = 200,
+            Height = 100,
+            Config = new() { ["domain"] = "example.com; rm -rf /" }
+        });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("unsafe characters"));
+    }
+
+    [Fact]
+    public void ValidateFull_WarningsDoNotBlockDeploy()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.TierProfiles.Add(new TierProfile { Id = "unused", Name = "Unused", ImageSpecs = new() });
+        topology.Containers.Add(new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.True(result.CanDeploy);
+        Assert.NotEmpty(result.Warnings);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void ValidateFull_UnusedTierProfile_ReturnsWarning()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.TierProfiles.Add(new TierProfile { Id = "custom", Name = "Custom", ImageSpecs = new() });
+        topology.Containers.Add(new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Warnings, w => w.Message.Contains("custom") && w.Message.Contains("not referenced"));
+    }
+
+    [Fact]
+    public void ValidateFull_InvalidBackupFrequency_ReturnsWarning()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container
+        {
+            Name = "Host",
+            Kind = ContainerKind.Host,
+            Width = 300,
+            Height = 200,
+            Config = new() { ["backupFrequency"] = "monthly" }
+        });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Warnings, w => w.Message.Contains("monthly") && w.Message.Contains("silently ignored"));
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Terraform;
+using XcordTopo.Infrastructure.Validation;
 
 namespace XcordTopo.Features.Terraform;
 
@@ -17,7 +18,8 @@ public sealed record GenerateHclResponse(Dictionary<string, string> Files);
 public sealed class GenerateHclHandler(
     ITopologyStore store,
     MultiProviderHclGenerator hclGenerator,
-    IHclFileManager hclFileManager)
+    IHclFileManager hclFileManager,
+    ITopologyValidator validator)
     : IRequestHandler<GenerateHclRequest, Result<GenerateHclResponse>>
 {
     public async Task<Result<GenerateHclResponse>> Handle(GenerateHclRequest request, CancellationToken ct)
@@ -25,6 +27,14 @@ public sealed class GenerateHclHandler(
         var topology = await store.GetAsync(request.TopologyId, ct);
         if (topology is null)
             return Error.NotFound("TOPOLOGY_NOT_FOUND", $"Topology {request.TopologyId} not found");
+
+        var validation = validator.ValidateFull(topology);
+        if (!validation.CanDeploy)
+        {
+            var summary = string.Join("; ", validation.Errors.Select(e => e.Message));
+            return Error.Validation("VALIDATION_FAILED",
+                $"Topology has {validation.Errors.Count} validation error(s): {summary}");
+        }
 
         var files = hclGenerator.Generate(topology, request.PoolSelections);
         await hclFileManager.WriteFilesAsync(request.TopologyId, files, ct);

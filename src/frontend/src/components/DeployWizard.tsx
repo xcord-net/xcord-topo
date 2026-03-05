@@ -3,7 +3,7 @@ import { useTopology } from '../stores/topology.store';
 import * as deployApi from '../lib/deploy-api';
 import { saveTopology } from '../lib/serialization';
 import { validateField, validateAllFields } from '../lib/credential-validation';
-import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, CostEstimate, TerraformOutputLine, HostingOptions, PoolSelection } from '../types/deploy';
+import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, CostEstimate, TerraformOutputLine, HostingOptions, PoolSelection, TopologyValidationResult, ValidationItem } from '../types/deploy';
 import type { MigrationDiffResult, MigrationDecision, MigrationPlan } from '../types/migration';
 import type { Topology, Container } from '../types/topology';
 
@@ -37,6 +37,7 @@ function collectActiveProviders(topology: Topology): string[] {
 const STEPS: { key: DeployStep; label: string }[] = [
   { key: 'provider', label: 'Provider' },
   { key: 'configure', label: 'Configure' },
+  { key: 'validate', label: 'Validate' },
   { key: 'hosting', label: 'Hosting' },
   { key: 'review', label: 'Review' },
   { key: 'migrate', label: 'Migrate' },
@@ -139,6 +140,9 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   const [hclFiles, setHclFiles] = createSignal<Record<string, string>>({});
   const [activeDeployments, setActiveDeployments] = createSignal<DeployedTopology[]>([]);
   const [deployMode, setDeployMode] = createSignal<DeployMode>('fresh');
+
+  // Validation step state
+  const [validationResult, setValidationResult] = createSignal<TopologyValidationResult | null>(null);
 
   // Hosting step state
   const [hostingOptions, setHostingOptions] = createSignal<HostingOptions | null>(null);
@@ -463,12 +467,31 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       }
       topo.updateServiceKeys(skNonSensitive);
 
-      // Fetch hosting options for ComputePools
+      // Run topology validation before proceeding
+      const validationRes = await deployApi.validateTopology(topo.topology.id);
+      setValidationResult(validationRes);
+      setStep('validate');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Validate step: proceed to hosting/review ---
+  const handleValidateNext = async () => {
+    const vr = validationResult();
+    if (!vr || !vr.canDeploy) {
+      setError('Fix all validation errors before continuing.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
       const hosting = await deployApi.getHostingOptions(topo.topology.id);
       setHostingOptions(hosting);
 
       if (hosting.pools.length > 0) {
-        // Pre-select cheapest viable plan for each pool
         const defaults: Record<string, PoolSelection> = {};
         for (const pool of hosting.pools) {
           if (pool.options.length > 0) {
@@ -482,9 +505,22 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         setPoolSelections(defaults);
         setStep('hosting');
       } else {
-        // No ComputePools — skip hosting, go straight to review
         await generateAndEstimate();
       }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Re-run validation (for retry) ---
+  const handleRevalidate = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const validationRes = await deployApi.validateTopology(topo.topology.id);
+      setValidationResult(validationRes);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -1251,7 +1287,84 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
             </div>
           </Show>
 
-          {/* Step 2.5: Hosting */}
+          {/* Step 2.5: Validate */}
+          <Show when={step() === 'validate'}>
+            <div class="space-y-4">
+              <h3 class="text-sm font-semibold text-topo-text-primary">Topology Validation</h3>
+              <Show when={validationResult()} fallback={
+                <div class="text-sm text-topo-text-secondary">Running validation...</div>
+              }>
+                {(vr) => (
+                  <>
+                    <Show when={vr().canDeploy}>
+                      <div class="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                        <svg class="w-4 h-4 text-emerald-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                        </svg>
+                        <span class="text-emerald-400 text-sm font-medium">Topology is valid and ready to deploy.</span>
+                        <Show when={vr().items.filter((i: ValidationItem) => i.severity === 'Warning').length > 0}>
+                          <span class="text-amber-400 text-xs">
+                            ({vr().items.filter((i: ValidationItem) => i.severity === 'Warning').length} warning{vr().items.filter((i: ValidationItem) => i.severity === 'Warning').length !== 1 ? 's' : ''})
+                          </span>
+                        </Show>
+                      </div>
+                    </Show>
+                    <Show when={!vr().canDeploy}>
+                      <div class="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                        <div class="text-red-400 text-sm font-medium">
+                          {vr().errors.length} error{vr().errors.length !== 1 ? 's' : ''} must be fixed before deployment
+                        </div>
+                      </div>
+                    </Show>
+                    <Show when={vr().items.length > 0}>
+                      <div class="space-y-1.5 max-h-64 overflow-y-auto">
+                        <For each={vr().items}>
+                          {(item: ValidationItem) => (
+                            <div class={`p-2.5 rounded border text-xs flex gap-2 items-start ${
+                              item.severity === 'Error'
+                                ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                                : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                            }`}>
+                              <span class="font-bold shrink-0 uppercase text-[10px] mt-px">{item.severity}</span>
+                              <span>{item.message}</span>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                    <div class="flex gap-2 justify-end pt-2">
+                      <button
+                        class="px-4 py-1.5 rounded text-sm text-topo-text-secondary hover:text-topo-text-primary transition-colors"
+                        onClick={() => setStep('configure')}
+                      >Back</button>
+                      <Show when={!vr().canDeploy}>
+                        <button
+                          class="px-4 py-1.5 rounded text-sm font-medium bg-topo-brand/20 text-topo-brand hover:bg-topo-brand/30 transition-colors"
+                          disabled={loading()}
+                          onClick={handleRevalidate}
+                        >
+                          {loading() ? 'Validating...' : 'Re-validate'}
+                        </button>
+                      </Show>
+                      <button
+                        class={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+                          vr().canDeploy
+                            ? 'bg-topo-brand text-white hover:bg-topo-brand/90'
+                            : 'bg-topo-text-muted/20 text-topo-text-muted cursor-not-allowed'
+                        }`}
+                        disabled={!vr().canDeploy || loading()}
+                        onClick={handleValidateNext}
+                      >
+                        {loading() ? 'Loading...' : vr().canDeploy ? 'Continue' : 'Fix errors to continue'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </Show>
+            </div>
+          </Show>
+
+          {/* Step 3: Hosting */}
           <Show when={step() === 'hosting'}>
             <div class="space-y-4">
               <p class="text-xs text-topo-text-muted">

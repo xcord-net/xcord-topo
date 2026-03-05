@@ -23,6 +23,9 @@ public sealed class GenerateManifestHandler(
             return Error.NotFound("TOPOLOGY_NOT_FOUND", $"Topology {request.TopologyId} not found");
 
         var stateJson = await hclFileManager.ReadStateAsync(request.TopologyId, ct);
+        if (stateJson is null)
+            return Error.Validation("NO_TERRAFORM_STATE",
+                "Cannot generate manifest: Terraform has not been applied for this topology. Run terraform init/plan/apply first.");
 
         var generator = new ManifestGenerator();
         var (publicManifest, gatewaySection) = generator.Generate(topology, stateJson);

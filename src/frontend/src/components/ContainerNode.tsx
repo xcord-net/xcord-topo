@@ -28,6 +28,8 @@ const ContainerNode: Component<{
 
   const drag = () => interaction.dragState;
   const isDropTarget = () => drag()?.dropTargetId === props.container.id;
+  const isDragging = () => interaction.mode === 'dragging';
+  const handleCursor = () => isDragging() ? 'grabbing' : 'grab';
 
   let kindTextRef!: SVGTextElement;
   const [kindWidth, setKindWidth] = createSignal(40);
@@ -75,7 +77,7 @@ const ContainerNode: Component<{
         rx={8}
         fill={def()?.color ?? '#3b4261'}
         opacity={0.8}
-        style={{ cursor: 'default' }}
+        style={{ cursor: handleCursor() }}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           e.stopPropagation();
@@ -91,7 +93,7 @@ const ContainerNode: Component<{
         height={HEADER_HEIGHT / 2}
         fill={def()?.color ?? '#3b4261'}
         opacity={0.8}
-        style={{ cursor: 'default' }}
+        style={{ cursor: handleCursor() }}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           e.stopPropagation();
@@ -168,7 +170,6 @@ const ContainerNode: Component<{
           if (e.button !== 0) return;
           e.stopPropagation();
           interaction.select(props.container.id, e.shiftKey);
-          interaction.setDragIntent(props.container.id, { x: e.clientX, y: e.clientY });
         }}
       />
 

@@ -16,6 +16,8 @@ const ImageNode: Component<{
   const absX = () => props.containerX + props.image.x;
   const absY = () => props.containerY + props.image.y;
   const isSelected = () => interaction.selectedNodeIds.has(props.image.id);
+  const isDragging = () => interaction.mode === 'dragging';
+  const handleCursor = () => isDragging() ? 'grabbing' : 'grab';
 
   const replicaLabel = () => {
     const r = props.image.config?.replicas;
@@ -63,7 +65,7 @@ const ImageNode: Component<{
         fill="#24283b"
         stroke={isSelected() ? '#7aa2f7' : (def()?.color ?? '#565f89')}
         stroke-width={isSelected() ? 2 : 1}
-        style={{ cursor: 'pointer' }}
+        style={{ cursor: handleCursor() }}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           e.stopPropagation();

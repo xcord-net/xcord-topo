@@ -80,3 +80,5 @@ app.MapHandlerEndpoints(typeof(XcordTopo.Features.Topologies.ListTopologiesHandl
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+public partial class Program { }

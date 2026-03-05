@@ -68,6 +68,7 @@ const ImageNode: Component<{
           if (e.button !== 0) return;
           e.stopPropagation();
           interaction.select(props.image.id, e.shiftKey);
+          interaction.setDragIntent(props.image.id, { x: e.clientX, y: e.clientY });
         }}
       />
 

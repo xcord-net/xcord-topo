@@ -118,14 +118,12 @@ public class WireResolverTests
         var hubImage = new Image
         {
             Id = Guid.NewGuid(), Name = "Hub Server", Kind = ImageKind.HubServer,
-            Width = 140, Height = 60,
-            Config = new() { ["upstreamPath"] = "/hub/*" }
+            Width = 140, Height = 60
         };
         var fedImage = new Image
         {
             Id = Guid.NewGuid(), Name = "Fed Server", Kind = ImageKind.FederationServer,
-            Width = 140, Height = 60,
-            Config = new() { ["upstreamPath"] = "/*" }
+            Width = 140, Height = 60
         };
         var caddy = new Container
         {
@@ -143,8 +141,8 @@ public class WireResolverTests
         var upstreams = resolver.ResolveCaddyUpstreams(caddy);
 
         Assert.Equal(2, upstreams.Count);
-        Assert.Contains(upstreams, u => u.UpstreamPath == "/hub/*");
-        Assert.Contains(upstreams, u => u.UpstreamPath == "/*");
+        Assert.Contains(upstreams, u => u.Subdomain == "hub");
+        Assert.Contains(upstreams, u => u.Subdomain == "*");
     }
 
     [Fact]
@@ -185,5 +183,86 @@ public class WireResolverTests
         var result = resolver.ResolveOutgoing(hub.Id, "nonexistent_port");
 
         Assert.Null(result);
+    }
+
+    [Fact]
+    public void ResolveCaddyUpstreams_CustomWithValidSubdomain_Included()
+    {
+        var custom = new Image
+        {
+            Id = Guid.NewGuid(), Name = "My App", Kind = ImageKind.Custom,
+            Width = 120, Height = 50,
+            Config = new() { ["subdomain"] = "myapp" }
+        };
+        var caddy = new Container
+        {
+            Id = Guid.NewGuid(), Name = "Caddy", Kind = ContainerKind.Caddy,
+            Images = [custom], Width = 400, Height = 300
+        };
+        var host = new Container
+        {
+            Id = Guid.NewGuid(), Name = "server", Kind = ContainerKind.Host,
+            Children = [caddy], Width = 500, Height = 500
+        };
+        var topology = new Topology { Containers = [host] };
+        var resolver = new WireResolver(topology);
+
+        var upstreams = resolver.ResolveCaddyUpstreams(caddy);
+
+        Assert.Single(upstreams);
+        Assert.Equal("myapp", upstreams[0].Subdomain);
+    }
+
+    [Fact]
+    public void ResolveCaddyUpstreams_CustomWithInvalidSubdomain_Excluded()
+    {
+        var custom = new Image
+        {
+            Id = Guid.NewGuid(), Name = "My App", Kind = ImageKind.Custom,
+            Width = 120, Height = 50,
+            Config = new() { ["subdomain"] = "INVALID_SUB!" }
+        };
+        var caddy = new Container
+        {
+            Id = Guid.NewGuid(), Name = "Caddy", Kind = ContainerKind.Caddy,
+            Images = [custom], Width = 400, Height = 300
+        };
+        var host = new Container
+        {
+            Id = Guid.NewGuid(), Name = "server", Kind = ContainerKind.Host,
+            Children = [caddy], Width = 500, Height = 500
+        };
+        var topology = new Topology { Containers = [host] };
+        var resolver = new WireResolver(topology);
+
+        var upstreams = resolver.ResolveCaddyUpstreams(caddy);
+
+        Assert.Empty(upstreams);
+    }
+
+    [Fact]
+    public void ResolveCaddyUpstreams_CustomWithNoSubdomain_Excluded()
+    {
+        var custom = new Image
+        {
+            Id = Guid.NewGuid(), Name = "My App", Kind = ImageKind.Custom,
+            Width = 120, Height = 50
+        };
+        var caddy = new Container
+        {
+            Id = Guid.NewGuid(), Name = "Caddy", Kind = ContainerKind.Caddy,
+            Images = [custom], Width = 400, Height = 300
+        };
+        var host = new Container
+        {
+            Id = Guid.NewGuid(), Name = "server", Kind = ContainerKind.Host,
+            Children = [caddy], Width = 500, Height = 500
+        };
+        var topology = new Topology { Containers = [host] };
+        var resolver = new WireResolver(topology);
+
+        var upstreams = resolver.ResolveCaddyUpstreams(caddy);
+
+        Assert.Empty(upstreams);
     }
 }

@@ -1,5 +1,7 @@
 import type { Point, Rect, Transform } from '../types/geometry';
-import type { PortSide } from '../types/topology';
+import type { Container, PortSide } from '../types/topology';
+
+const HEADER_HEIGHT = 32;
 
 export function screenToCanvas(screenPoint: Point, transform: Transform): Point {
   return {
@@ -67,4 +69,43 @@ export function sideNormal(side: PortSide): Point {
     case 'Left':
       return { x: -1, y: 0 };
   }
+}
+
+/** Compute the absolute canvas position of a container by walking the tree. */
+export function absoluteContainerPosition(
+  containers: readonly Container[],
+  targetId: string,
+  offX = 0,
+  offY = 0,
+): Point | null {
+  for (const c of containers) {
+    const ax = offX + c.x;
+    const ay = offY + c.y;
+    if (c.id === targetId) return { x: ax, y: ay };
+    const found = absoluteContainerPosition(c.children, targetId, ax, ay + HEADER_HEIGHT);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Find the deepest container whose bounding rect contains a point. Returns container ID or null.
+ *  Iterates in reverse order so that later (visually on-top in SVG) containers take priority. */
+export function findDeepestContainerAt(
+  containers: readonly Container[],
+  point: Point,
+  exclude?: Set<string>,
+  offX = 0,
+  offY = 0,
+): string | null {
+  for (let i = containers.length - 1; i >= 0; i--) {
+    const c = containers[i];
+    const ax = offX + c.x;
+    const ay = offY + c.y;
+    if (exclude?.has(c.id)) continue;
+    if (rectContainsPoint({ x: ax, y: ay, width: c.width, height: c.height }, point)) {
+      const deeper = findDeepestContainerAt(c.children, point, exclude, ax, ay + HEADER_HEIGHT);
+      return deeper ?? c.id;
+    }
+  }
+  return null;
 }

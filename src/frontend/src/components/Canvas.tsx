@@ -3,7 +3,9 @@ import { useTopology } from '../stores/topology.store';
 import { useCanvas } from '../stores/canvas.store';
 import { useInteraction } from '../stores/interaction.store';
 import { useHistory } from '../stores/history.store';
-import { screenToCanvas } from '../lib/geometry';
+import { screenToCanvas, distance, findDeepestContainerAt, absoluteContainerPosition } from '../lib/geometry';
+import { containerDefinitions } from '../catalog/containers';
+import { imageDefinitions } from '../catalog/images';
 import type { Container, Image, Wire as WireType } from '../types/topology';
 import ContainerNode from './ContainerNode';
 import Wire from './Wire';
@@ -97,6 +99,27 @@ const Canvas: Component = () => {
   };
 
   const handlePointerMove = (e: PointerEvent) => {
+    // Check drag intent threshold (5px in screen space)
+    const intent = interaction.dragIntent;
+    if (intent && interaction.mode !== 'dragging') {
+      const dist = distance({ x: e.clientX, y: e.clientY }, intent.startPos);
+      if (dist >= 5) {
+        // Exceeded threshold — start move drag
+        history.push(topo.getSnapshot());
+        const nodeIds = interaction.selectedNodeIds.has(intent.nodeId)
+          ? [...interaction.selectedNodeIds]
+          : [intent.nodeId];
+        const canvasPos = clientToCanvas(e.clientX, e.clientY);
+        interaction.startDrag({
+          source: { type: 'move', nodeIds },
+          origin: canvasPos,
+          current: canvasPos,
+          dropTargetId: null,
+        });
+      }
+      return;
+    }
+
     const mode = interaction.mode;
 
     if (mode === 'panning') {
@@ -115,9 +138,55 @@ const Canvas: Component = () => {
       interaction.updateSelectionBox(canvasPos);
       return;
     }
+
+    if (mode === 'dragging') {
+      const drag = interaction.dragState;
+      if (!drag) return;
+
+      const canvasPos = clientToCanvas(e.clientX, e.clientY);
+
+      if (drag.source.type === 'move') {
+        const dx = canvasPos.x - drag.origin.x;
+        const dy = canvasPos.y - drag.origin.y;
+        topo.moveNodes(drag.source.nodeIds, dx, dy);
+
+        // Hit-test for drop target (exclude dragged containers + their descendants)
+        const exclude = new Set<string>();
+        for (const nodeId of drag.source.nodeIds) {
+          // Only exclude if it's a container (images can't contain things)
+          if (!topo.findImageOwner(nodeId)) {
+            exclude.add(nodeId);
+            // Also exclude descendants of dragged containers
+            const collectDescendants = (containers: typeof topo.topology.containers) => {
+              for (const c of containers) {
+                if (c.id === nodeId) {
+                  const addAll = (children: typeof topo.topology.containers) => {
+                    for (const ch of children) { exclude.add(ch.id); addAll(ch.children); }
+                  };
+                  addAll(c.children);
+                }
+                collectDescendants(c.children);
+              }
+            };
+            collectDescendants(topo.topology.containers);
+          }
+        }
+
+        const dropTarget = findDeepestContainerAt(topo.topology.containers, canvasPos, exclude);
+        interaction.updateDrag(canvasPos, dropTarget);
+      } else if (drag.source.type === 'palette') {
+        const dropTarget = findDeepestContainerAt(topo.topology.containers, canvasPos);
+        interaction.updateDrag(canvasPos, dropTarget);
+      }
+      return;
+    }
   };
 
   const handlePointerUp = (e: PointerEvent) => {
+    if (interaction.dragIntent) {
+      interaction.clearDragIntent();
+    }
+
     const mode = interaction.mode;
 
     if (mode === 'panning') {
@@ -160,6 +229,127 @@ const Canvas: Component = () => {
 
     if (mode === 'selecting') {
       interaction.endSelectionBox();
+      return;
+    }
+
+    if (mode === 'dragging') {
+      const drag = interaction.dragState;
+      if (!drag) { interaction.endDrag(); return; }
+
+      if (drag.source.type === 'move' && drag.dropTargetId && drag.source.nodeIds.length === 1) {
+        const nodeId = drag.source.nodeIds[0];
+        const imageOwner = topo.findImageOwner(nodeId);
+
+        // Find container parent (if this is a child container)
+        const findContainerParent = (containers: typeof topo.topology.containers): string | null => {
+          for (const c of containers) {
+            if (c.children.some(ch => ch.id === nodeId)) return c.id;
+            const found = findContainerParent(c.children);
+            if (found) return found;
+          }
+          return null;
+        };
+        const containerParent = findContainerParent(topo.topology.containers);
+        const currentParent = imageOwner ?? containerParent;
+
+        if (currentParent !== drag.dropTargetId) {
+          if (imageOwner) {
+            // Reparent image
+            const ownerAbs = absoluteContainerPosition(topo.topology.containers, imageOwner);
+            if (ownerAbs) {
+              // Find the image to get its current relative position
+              const findImg = (containers: typeof topo.topology.containers): { x: number; y: number } | null => {
+                for (const c of containers) {
+                  if (c.id === imageOwner) {
+                    const img = c.images.find(i => i.id === nodeId);
+                    if (img) return { x: ownerAbs.x + img.x, y: ownerAbs.y + 32 + img.y };
+                  }
+                  const found = findImg(c.children);
+                  if (found) return found;
+                }
+                return null;
+              };
+              const absPos = findImg(topo.topology.containers);
+              if (absPos) {
+                topo.reparentImage(nodeId, imageOwner, drag.dropTargetId, absPos.x, absPos.y);
+              }
+            }
+          } else {
+            // Reparent container
+            const absPos = absoluteContainerPosition(topo.topology.containers, nodeId);
+            if (absPos) {
+              topo.reparentContainer(nodeId, drag.dropTargetId, absPos.x, absPos.y);
+            }
+          }
+          topo.growToFit(drag.dropTargetId);
+        }
+      } else if (drag.source.type === 'palette') {
+        const canvasPos = clientToCanvas(e.clientX, e.clientY);
+        const src = drag.source;
+
+        if (src.itemType === 'container') {
+          const def = containerDefinitions.find(d => d.kind === src.kind);
+          if (def) {
+            history.push(topo.getSnapshot());
+            const container: Container = {
+              id: crypto.randomUUID(),
+              name: def.label,
+              kind: def.kind as any,
+              x: canvasPos.x - def.defaultWidth / 2,
+              y: canvasPos.y - def.defaultHeight / 2,
+              width: def.defaultWidth,
+              height: def.defaultHeight,
+              ports: def.defaultPorts.map(p => ({ ...p, id: crypto.randomUUID() })),
+              images: [],
+              children: [],
+              config: {},
+            };
+
+            if (drag.dropTargetId) {
+              // Dropping on a container = make it a child
+              const parentAbs = absoluteContainerPosition(topo.topology.containers, drag.dropTargetId);
+              if (parentAbs) {
+                container.x = canvasPos.x - def.defaultWidth / 2 - parentAbs.x;
+                container.y = canvasPos.y - def.defaultHeight / 2 - (parentAbs.y + 32);
+              }
+              // Add to the target container's children
+              topo.addContainer(container);
+              topo.reparentContainer(container.id, drag.dropTargetId, canvasPos.x - def.defaultWidth / 2, canvasPos.y - def.defaultHeight / 2);
+              topo.growToFit(drag.dropTargetId);
+            } else {
+              topo.addContainer(container);
+            }
+            interaction.select(container.id);
+          }
+        } else {
+          // Image — must drop on a container
+          if (drag.dropTargetId) {
+            const def = imageDefinitions.find(d => d.kind === src.kind);
+            if (def) {
+              history.push(topo.getSnapshot());
+              const parentAbs = absoluteContainerPosition(topo.topology.containers, drag.dropTargetId);
+              const image: Image = {
+                id: crypto.randomUUID(),
+                name: def.label,
+                kind: def.kind as any,
+                x: parentAbs ? canvasPos.x - def.defaultWidth / 2 - parentAbs.x : 20,
+                y: parentAbs ? canvasPos.y - def.defaultHeight / 2 - (parentAbs.y + 32) : 20,
+                width: def.defaultWidth,
+                height: def.defaultHeight,
+                ports: def.defaultPorts.map(p => ({ ...p, id: crypto.randomUUID() })),
+                dockerImage: def.defaultDockerImage,
+                config: {},
+                scaling: def.defaultScaling ?? 'Shared',
+              };
+              topo.addImage(drag.dropTargetId, image);
+              topo.growToFit(drag.dropTargetId);
+              interaction.select(image.id);
+            }
+          }
+          // else: dropped on empty canvas with image — do nothing
+        }
+      }
+      interaction.endDrag();
       return;
     }
   };
@@ -290,6 +480,13 @@ const Canvas: Component = () => {
       }
     }
 
+    if (e.key === 'Escape' && interaction.mode === 'dragging') {
+      const prev = history.undo(topo.getSnapshot());
+      if (prev) topo.load(prev);
+      interaction.cancelDrag();
+      return;
+    }
+
     if (e.key === 'Escape') {
       interaction.deselect();
     }
@@ -316,7 +513,21 @@ const Canvas: Component = () => {
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      style={{ cursor: interaction.mode === 'panning' ? 'grabbing' : 'default', 'touch-action': 'none' }}
+      style={{
+        cursor: (() => {
+          const mode = interaction.mode;
+          if (mode === 'panning') return 'grabbing';
+          if (mode === 'dragging') {
+            const drag = interaction.dragState;
+            if (drag?.source.type === 'palette' && (drag.source as any).itemType === 'image' && !drag.dropTargetId) {
+              return 'not-allowed';
+            }
+            return 'grabbing';
+          }
+          return 'default';
+        })(),
+        'touch-action': 'none',
+      }}
     >
       <DotGrid />
       <g transform={transformStr()}>
@@ -328,6 +539,32 @@ const Canvas: Component = () => {
         </For>
         <Show when={interaction.wiringState}>
           <WirePreview />
+        </Show>
+        <Show when={interaction.dragState?.source.type === 'palette'}>
+          {(() => {
+            const drag = interaction.dragState!;
+            const src = drag.source as { type: 'palette'; itemType: string; kind: string };
+            const defs = src.itemType === 'container' ? containerDefinitions : imageDefinitions;
+            const def = defs.find((d: any) => d.kind === src.kind);
+            if (!def) return null;
+            const w = def.defaultWidth;
+            const h = def.defaultHeight;
+            return (
+              <rect
+                x={drag.current.x - w / 2}
+                y={drag.current.y - h / 2}
+                width={w}
+                height={h}
+                rx={src.itemType === 'container' ? 8 : 4}
+                fill={def.color}
+                opacity={0.3}
+                stroke={def.color}
+                stroke-width={1}
+                stroke-dasharray="4 2"
+                style={{ 'pointer-events': 'none' }}
+              />
+            );
+          })()}
         </Show>
       </g>
       <Show when={interaction.selectionBox}>

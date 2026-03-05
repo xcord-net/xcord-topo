@@ -450,9 +450,8 @@ public static class TopologyHelpers
         var upstreams = resolver.ResolveCaddyUpstreams(caddy);
         var domain = caddy.Config.GetValueOrDefault("domain", "{$DOMAIN}");
 
-        var lines = new List<string>
+        var securityHeaders = new[]
         {
-            $"{domain} {{",
             "  header {",
             "    Strict-Transport-Security \"max-age=31536000; includeSubDomains; preload\"",
             "    X-Content-Type-Options \"nosniff\"",
@@ -462,18 +461,23 @@ public static class TopologyHelpers
             "  }"
         };
 
-        foreach (var (image, upstreamPath) in upstreams)
+        // Each routable image gets its own subdomain block
+        var blocks = new List<string>();
+        foreach (var (image, subdomain) in upstreams)
         {
             var containerName = SanitizeName(image.Name);
             var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
             var port = meta?.Ports.FirstOrDefault() ?? 80;
-            lines.Add($"  handle_path {upstreamPath} {{");
-            lines.Add($"    reverse_proxy {containerName}:{port}");
-            lines.Add("  }");
+            var host = $"{subdomain}.{domain}";
+
+            var block = new List<string> { $"{host} {{" };
+            block.AddRange(securityHeaders);
+            block.Add($"  reverse_proxy {containerName}:{port}");
+            block.Add("}");
+            blocks.Add(string.Join("\n", block));
         }
 
-        lines.Add("}");
-        return string.Join("\n", lines);
+        return string.Join("\n\n", blocks);
     }
 
     // --- Utilities ---

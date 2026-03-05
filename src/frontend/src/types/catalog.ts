@@ -8,6 +8,8 @@ export interface ConfigField {
   tooltip?: string;
   options?: { value: string; label: string }[];
   parentKinds?: ContainerKind[];
+  /** Returns an error message if the value is invalid, or null/undefined if valid. */
+  validate?: (value: string) => string | null | undefined;
 }
 
 export interface ContainerDefinition {

@@ -103,22 +103,39 @@ public sealed class WireResolver
     }
 
     /// <summary>
-    /// For a Caddy container, resolve all upstream images wired to it via its 'upstream' port.
-    /// Returns (Image, upstreamPath) pairs.
+    /// For a Caddy container, resolve all HTTP-routable images.
+    /// Subdomain is derived from image kind (not user-configured).
     /// </summary>
-    public List<(Image Image, string UpstreamPath)> ResolveCaddyUpstreams(Container caddyContainer)
+    public List<(Image Image, string Subdomain)> ResolveCaddyUpstreams(Container caddyContainer)
     {
         var results = new List<(Image, string)>();
 
-        // Caddy's images with upstreamPath config are the upstream targets
         foreach (var image in caddyContainer.Images)
         {
-            var upstreamPath = image.Config.GetValueOrDefault("upstreamPath", "");
-            if (!string.IsNullOrEmpty(upstreamPath))
-                results.Add((image, upstreamPath));
+            var subdomain = GetSubdomain(image);
+            if (subdomain != null)
+                results.Add((image, subdomain));
         }
 
         return results;
+    }
+
+    private static string? GetSubdomain(Image image) => image.Kind switch
+    {
+        ImageKind.HubServer => "hub",
+        ImageKind.FederationServer => "*",
+        ImageKind.LiveKit => "livekit",
+        ImageKind.Custom => ValidateSubdomain(image.Config.GetValueOrDefault("subdomain")),
+        _ => null
+    };
+
+    private static string? ValidateSubdomain(string? subdomain)
+    {
+        if (string.IsNullOrEmpty(subdomain)) return null;
+        if (subdomain.Length > 63) return null;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(subdomain, @"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"))
+            return null;
+        return subdomain;
     }
 
     /// <summary>

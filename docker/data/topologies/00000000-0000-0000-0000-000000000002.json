@@ -189,8 +189,7 @@
               ],
               "dockerImage": "ghcr.io/xcord/hub:latest",
               "config": {
-                "replicas": "1",
-                "upstreamPath": "/hub/*"
+                "replicas": "1"
               },
               "scaling": "Shared"
             },
@@ -238,8 +237,7 @@
               ],
               "dockerImage": "ghcr.io/xcord/fed:latest",
               "config": {
-                "replicas": "1",
-                "upstreamPath": "/*"
+                "replicas": "1"
               },
               "scaling": "PerTenant"
             }

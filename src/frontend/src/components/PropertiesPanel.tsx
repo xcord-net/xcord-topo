@@ -231,6 +231,7 @@ const PropertiesPanel: Component = () => {
                       const setValue = (v: string) => isTopLevel
                         ? updateImageProp(field.key as keyof Image, v)
                         : updateImageConfig(field.key, v);
+                      const error = () => field.validate?.(getValue()) ?? null;
                       return (
                         <div>
                           <FieldLabel field={field} />
@@ -246,12 +247,15 @@ const PropertiesPanel: Component = () => {
                             </select>
                           ) : (
                             <input
-                              class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                              class={`w-full bg-topo-bg-tertiary border rounded px-2 py-1 text-sm text-topo-text-primary mt-1 ${error() ? 'border-red-500' : 'border-topo-border'}`}
                               value={getValue()}
                               placeholder={field.placeholder}
                               onInput={(e) => setValue(e.currentTarget.value)}
                             />
                           )}
+                          <Show when={error()}>
+                            <p class="text-[10px] text-red-400 mt-0.5">{error()}</p>
+                          </Show>
                         </div>
                       );
                     }}

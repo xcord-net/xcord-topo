@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { screenToCanvas, canvasToScreen, clamp, distance, rectContainsPoint, rectsIntersect, portPosition } from '../lib/geometry';
+import { screenToCanvas, canvasToScreen, clamp, distance, rectContainsPoint, rectsIntersect, portPosition, absoluteContainerPosition, findDeepestContainerAt } from '../lib/geometry';
+import type { Container } from '../types/topology';
 
 describe('geometry', () => {
   describe('screenToCanvas', () => {
@@ -82,5 +83,63 @@ describe('geometry', () => {
       const pos = portPosition(100, 100, 200, 100, 'Left', 0.5);
       expect(pos).toEqual({ x: 100, y: 150 });
     });
+  });
+});
+
+describe('absoluteContainerPosition', () => {
+  const HEADER = 32;
+
+  it('returns position for top-level container', () => {
+    const containers: Container[] = [
+      { id: 'c1', name: 'C1', kind: 'Host', x: 100, y: 200, width: 400, height: 300, ports: [], images: [], children: [], config: {} },
+    ];
+    expect(absoluteContainerPosition(containers, 'c1')).toEqual({ x: 100, y: 200 });
+  });
+
+  it('returns position for nested child container', () => {
+    const containers: Container[] = [{
+      id: 'parent', name: 'P', kind: 'Host', x: 50, y: 50, width: 500, height: 400, ports: [], images: [], config: {},
+      children: [{
+        id: 'child', name: 'C', kind: 'Host', x: 20, y: 30, width: 200, height: 150, ports: [], images: [], children: [], config: {},
+      }],
+    }];
+    expect(absoluteContainerPosition(containers, 'child')).toEqual({ x: 70, y: 112 });
+  });
+
+  it('returns null for unknown id', () => {
+    expect(absoluteContainerPosition([], 'nope')).toBeNull();
+  });
+});
+
+describe('findDeepestContainerAt', () => {
+  it('returns null when no container is under point', () => {
+    const containers: Container[] = [
+      { id: 'c1', name: 'C1', kind: 'Host', x: 100, y: 100, width: 200, height: 200, ports: [], images: [], children: [], config: {} },
+    ];
+    expect(findDeepestContainerAt(containers, { x: 50, y: 50 })).toBeNull();
+  });
+
+  it('returns top-level container under point', () => {
+    const containers: Container[] = [
+      { id: 'c1', name: 'C1', kind: 'Host', x: 100, y: 100, width: 200, height: 200, ports: [], images: [], children: [], config: {} },
+    ];
+    expect(findDeepestContainerAt(containers, { x: 150, y: 150 })).toBe('c1');
+  });
+
+  it('returns deepest nested container', () => {
+    const containers: Container[] = [{
+      id: 'outer', name: 'O', kind: 'Host', x: 0, y: 0, width: 500, height: 400, ports: [], images: [], config: {},
+      children: [{
+        id: 'inner', name: 'I', kind: 'Host', x: 10, y: 10, width: 200, height: 150, ports: [], images: [], children: [], config: {},
+      }],
+    }];
+    expect(findDeepestContainerAt(containers, { x: 50, y: 80 })).toBe('inner');
+  });
+
+  it('excludes ids in exclude set', () => {
+    const containers: Container[] = [
+      { id: 'c1', name: 'C1', kind: 'Host', x: 0, y: 0, width: 500, height: 500, ports: [], images: [], children: [], config: {} },
+    ];
+    expect(findDeepestContainerAt(containers, { x: 50, y: 50 }, new Set(['c1']))).toBeNull();
   });
 });

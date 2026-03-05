@@ -1,4 +1,4 @@
-import { Component, For, createSignal, onMount } from 'solid-js';
+import { Component, For, Show, createSignal, onMount } from 'solid-js';
 import { useInteraction } from '../stores/interaction.store';
 import { useTopology } from '../stores/topology.store';
 import { useHistory } from '../stores/history.store';
@@ -26,6 +26,9 @@ const ContainerNode: Component<{
   const def = () => containerDefinitions.find(d => d.kind === props.container.kind);
   const isSelected = () => interaction.selectedNodeIds.has(props.container.id);
 
+  const drag = () => interaction.dragState;
+  const isDropTarget = () => drag()?.dropTargetId === props.container.id;
+
   let kindTextRef!: SVGTextElement;
   const [kindWidth, setKindWidth] = createSignal(40);
   onMount(() => {
@@ -49,6 +52,20 @@ const ContainerNode: Component<{
         style={{ 'pointer-events': 'none' }}
       />
 
+      {/* Drop target highlight */}
+      <Show when={isDropTarget()}>
+        <rect
+          x={absX()}
+          y={absY()}
+          width={props.container.width}
+          height={props.container.height}
+          rx={8}
+          fill="#7aa2f7"
+          opacity={0.15}
+          style={{ 'pointer-events': 'none' }}
+        />
+      </Show>
+
       {/* Header bar */}
       <rect
         x={absX()}
@@ -63,6 +80,7 @@ const ContainerNode: Component<{
           if (e.button !== 0) return;
           e.stopPropagation();
           interaction.select(props.container.id, e.shiftKey);
+          interaction.setDragIntent(props.container.id, { x: e.clientX, y: e.clientY });
         }}
       />
       {/* Bottom half of header - square corners to match body */}
@@ -78,6 +96,7 @@ const ContainerNode: Component<{
           if (e.button !== 0) return;
           e.stopPropagation();
           interaction.select(props.container.id, e.shiftKey);
+          interaction.setDragIntent(props.container.id, { x: e.clientX, y: e.clientY });
         }}
       />
 
@@ -149,6 +168,7 @@ const ContainerNode: Component<{
           if (e.button !== 0) return;
           e.stopPropagation();
           interaction.select(props.container.id, e.shiftKey);
+          interaction.setDragIntent(props.container.id, { x: e.clientX, y: e.clientY });
         }}
       />
 

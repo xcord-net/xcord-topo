@@ -301,8 +301,7 @@ public class LinodeProviderTests
             Ports =
             [
                 new Port { Id = Guid.NewGuid(), Name = "http", Type = PortType.Network, Direction = PortDirection.In }
-            ],
-            Config = new() { ["upstreamPath"] = "/hub/*" }
+            ]
         };
 
         var caddy = new Container

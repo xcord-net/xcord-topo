@@ -41,8 +41,7 @@ public class TopologyMatcherTests
         var hub = new Image
         {
             Name = "Hub Server", Kind = ImageKind.HubServer,
-            Ports = [hubHttp, hubPgOut, hubRedisOut], Width = 140, Height = 60,
-            Config = new() { ["upstreamPath"] = "/hub/*" }
+            Ports = [hubHttp, hubPgOut, hubRedisOut], Width = 140, Height = 60
         };
 
         // Federation Server image (inside Caddy)
@@ -53,8 +52,7 @@ public class TopologyMatcherTests
         var fed = new Image
         {
             Name = "Federation Server", Kind = ImageKind.FederationServer,
-            Ports = [fedHttp, fedPgOut, fedRedisOut, fedMinioOut], Width = 140, Height = 60,
-            Config = new() { ["upstreamPath"] = "/*" }
+            Ports = [fedHttp, fedPgOut, fedRedisOut, fedMinioOut], Width = 140, Height = 60
         };
 
         // Caddy container with Hub + Fed images

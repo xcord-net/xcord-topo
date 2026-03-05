@@ -1,70 +1,33 @@
 import { Component, For } from 'solid-js';
-import { useTopology } from '../stores/topology.store';
-import { useHistory } from '../stores/history.store';
 import { useInteraction } from '../stores/interaction.store';
 import { containerDefinitions } from '../catalog/containers';
 import { imageDefinitions } from '../catalog/images';
-import type { Container, Image, Port } from '../types/topology';
 
 export type PaletteTab = 'containers' | 'images' | 'source';
 
-function createPort(template: Port): Port {
-  return { ...template, id: crypto.randomUUID() };
-}
-
 const Palette: Component<{ tab: PaletteTab; onTabChange: (t: PaletteTab) => void }> = (props) => {
-  const topo = useTopology();
-  const history = useHistory();
   const interaction = useInteraction();
 
-  const addContainer = (kind: string) => {
-    const def = containerDefinitions.find(d => d.kind === kind);
-    if (!def) return;
-
-    history.push(topo.getSnapshot());
-    const container: Container = {
-      id: crypto.randomUUID(),
-      name: def.label,
-      kind: def.kind,
-      x: 100 + Math.random() * 200,
-      y: 100 + Math.random() * 200,
-      width: def.defaultWidth,
-      height: def.defaultHeight,
-      ports: def.defaultPorts.map(createPort),
-      images: [],
-      children: [],
-      config: {},
-    };
-    topo.addContainer(container);
-    interaction.select(container.id);
+  const startContainerDrag = (kind: string, e: PointerEvent) => {
+    e.preventDefault();
+    (e.target as Element)?.setPointerCapture?.(e.pointerId);
+    interaction.startDrag({
+      source: { type: 'palette', itemType: 'container', kind },
+      origin: { x: 0, y: 0 },
+      current: { x: 0, y: 0 },
+      dropTargetId: null,
+    });
   };
 
-  const addImage = (kind: string) => {
-    const def = imageDefinitions.find(d => d.kind === kind);
-    if (!def) return;
-
-    // Add to first selected container, or first container
-    const containers = topo.topology.containers;
-    if (containers.length === 0) return;
-
-    const targetId = containers[0].id;
-    history.push(topo.getSnapshot());
-
-    const image: Image = {
-      id: crypto.randomUUID(),
-      name: def.label,
-      kind: def.kind,
-      x: 20 + Math.random() * 50,
-      y: 20 + Math.random() * 50,
-      width: def.defaultWidth,
-      height: def.defaultHeight,
-      ports: def.defaultPorts.map(createPort),
-      dockerImage: def.defaultDockerImage,
-      config: {},
-      scaling: def.defaultScaling ?? 'Shared',
-    };
-    topo.addImage(targetId, image);
-    interaction.select(image.id);
+  const startImageDrag = (kind: string, e: PointerEvent) => {
+    e.preventDefault();
+    (e.target as Element)?.setPointerCapture?.(e.pointerId);
+    interaction.startDrag({
+      source: { type: 'palette', itemType: 'image', kind },
+      origin: { x: 0, y: 0 },
+      current: { x: 0, y: 0 },
+      dropTargetId: null,
+    });
   };
 
   return (
@@ -102,8 +65,8 @@ const Palette: Component<{ tab: PaletteTab; onTabChange: (t: PaletteTab) => void
             <For each={containerDefinitions}>
               {(def) => (
                 <button
-                  class="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-topo-bg-tertiary transition-colors group cursor-pointer"
-                  onClick={() => addContainer(def.kind)}
+                  class="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-topo-bg-tertiary transition-colors group cursor-grab"
+                  onPointerDown={(e: PointerEvent) => startContainerDrag(def.kind, e)}
                 >
                   <div class="flex items-center gap-2">
                     <div class="w-3 h-3 rounded-sm" style={{ background: def.color }} />
@@ -117,8 +80,8 @@ const Palette: Component<{ tab: PaletteTab; onTabChange: (t: PaletteTab) => void
             <For each={imageDefinitions}>
               {(def) => (
                 <button
-                  class="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-topo-bg-tertiary transition-colors group cursor-pointer"
-                  onClick={() => addImage(def.kind)}
+                  class="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-topo-bg-tertiary transition-colors group cursor-grab"
+                  onPointerDown={(e: PointerEvent) => startImageDrag(def.kind, e)}
                 >
                   <div class="flex items-center gap-2">
                     <div class="w-3 h-3 rounded-full" style={{ background: def.color }} />

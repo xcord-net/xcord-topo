@@ -1,5 +1,14 @@
 import type { ImageDefinition } from '../types/catalog';
 
+const subdomainRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+function validateSubdomain(value: string): string | null {
+  if (!value) return null; // empty is ok (optional)
+  if (value.length > 63) return 'Max 63 characters';
+  if (!subdomainRegex.test(value)) return 'Lowercase letters, numbers, and hyphens only';
+  return null;
+}
+
 export const imageDefinitions: ImageDefinition[] = [
   {
     kind: 'HubServer',
@@ -19,7 +28,6 @@ export const imageDefinitions: ImageDefinition[] = [
         { value: 'PerTenant', label: 'Per Tenant' },
       ], parentKinds: ['ComputePool'] },
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
-      { key: 'upstreamPath', label: 'Upstream Path', placeholder: '/hub/*', parentKinds: ['Caddy'] },
     ],
     description: 'xcord hub control plane',
   },
@@ -42,7 +50,6 @@ export const imageDefinitions: ImageDefinition[] = [
         { value: 'PerTenant', label: 'Per Tenant' },
       ], parentKinds: ['ComputePool'] },
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
-      { key: 'upstreamPath', label: 'Upstream Path', placeholder: '/*', parentKinds: ['Caddy'] },
     ],
     defaultScaling: 'PerTenant',
     description: 'xcord federation instance',
@@ -144,12 +151,12 @@ export const imageDefinitions: ImageDefinition[] = [
       { id: '', name: 'port', type: 'Generic', direction: 'InOut', side: 'Left', offset: 0.5 },
     ],
     configFields: [
+      { key: 'subdomain', label: 'Subdomain', placeholder: 'myapp', validate: validateSubdomain },
       { key: 'scaling', label: 'Scaling', type: 'select', options: [
         { value: 'Shared', label: 'Shared (1 per host)' },
         { value: 'PerTenant', label: 'Per Tenant' },
       ], parentKinds: ['ComputePool'] },
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
-      { key: 'upstreamPath', label: 'Upstream Path', placeholder: '/service/*', parentKinds: ['Caddy'] },
     ],
     description: 'Custom Docker image',
   },

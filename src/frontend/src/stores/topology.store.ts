@@ -47,6 +47,18 @@ function findParentIn(containers: Container[], childId: string): Container | nul
   return null;
 }
 
+/** Compute absolute canvas position of a container (for use inside produce). */
+function absoluteContainerPos(containers: Container[], targetId: string, offX = 0, offY = 0): { x: number; y: number } {
+  for (const c of containers) {
+    const ax = offX + c.x;
+    const ay = offY + c.y;
+    if (c.id === targetId) return { x: ax, y: ay };
+    const found = absoluteContainerPos(c.children, targetId, ax, ay + HEADER_HEIGHT);
+    if (found.x !== -Infinity) return found;
+  }
+  return { x: -Infinity, y: -Infinity };
+}
+
 const STORAGE_KEY = 'xcord-topo:topology';
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -310,6 +322,93 @@ export function useTopology() {
     removeWire(wireId: string): void {
       store.setTopology(produce(t => {
         t.wires = t.wires.filter(w => w.id !== wireId);
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    /** Batch-move nodes by delta. Handles both containers and images. */
+    moveNodes(nodeIds: string[], dx: number, dy: number): void {
+      store.setTopology(produce(t => {
+        for (const id of nodeIds) {
+          // Try as container first
+          const found = findContainerDeep(t.containers, id);
+          if (found) {
+            found.container.x += dx;
+            found.container.y += dy;
+            continue;
+          }
+          // Try as image — search recursively through all containers
+          const searchImages = (containers: Container[]): boolean => {
+            for (const c of containers) {
+              const img = c.images.find(i => i.id === id);
+              if (img) {
+                img.x += dx;
+                img.y += dy;
+                return true;
+              }
+              if (searchImages(c.children)) return true;
+            }
+            return false;
+          };
+          searchImages(t.containers);
+        }
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    /** Move an image from one container to another, converting coordinates. */
+    reparentImage(imageId: string, fromContainerId: string, toContainerId: string, absoluteX: number, absoluteY: number): void {
+      store.setTopology(produce(t => {
+        // Find and remove from source
+        const src = findContainerDeep(t.containers, fromContainerId);
+        if (!src) return;
+        const imgIdx = src.container.images.findIndex(i => i.id === imageId);
+        if (imgIdx === -1) return;
+        const [img] = src.container.images.splice(imgIdx, 1);
+
+        // Find target and compute relative coords
+        const tgt = findContainerDeep(t.containers, toContainerId);
+        if (!tgt) {
+          // Put it back if target not found
+          src.container.images.push(img);
+          return;
+        }
+
+        // Compute target's absolute content origin
+        const targetAbs = absoluteContainerPos(t.containers, toContainerId);
+        img.x = absoluteX - targetAbs.x;
+        img.y = absoluteY - (targetAbs.y + HEADER_HEIGHT);
+
+        tgt.container.images.push(img);
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    /** Move a child container from one parent to another (or to top-level). */
+    reparentContainer(containerId: string, newParentId: string | null, absoluteX: number, absoluteY: number): void {
+      store.setTopology(produce(t => {
+        const found = findContainerDeep(t.containers, containerId);
+        if (!found) return;
+        // Remove from current location
+        const [container] = found.siblings.splice(found.index, 1);
+
+        if (newParentId) {
+          const parent = findContainerDeep(t.containers, newParentId);
+          if (!parent) {
+            // Restore if target not found
+            found.siblings.splice(found.index, 0, container);
+            return;
+          }
+          const parentAbs = absoluteContainerPos(t.containers, newParentId);
+          container.x = absoluteX - parentAbs.x;
+          container.y = absoluteY - (parentAbs.y + HEADER_HEIGHT);
+          parent.container.children.push(container);
+        } else {
+          // Move to top level
+          container.x = absoluteX;
+          container.y = absoluteY;
+          t.containers.push(container);
+        }
         t.updatedAt = new Date().toISOString();
       }));
     },

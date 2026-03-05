@@ -1,22 +1,15 @@
-import { Component, For, Show, onMount, onCleanup, createMemo } from 'solid-js';
+import { Component, For, Show, onMount, onCleanup } from 'solid-js';
 import { useTopology } from '../stores/topology.store';
 import { useCanvas } from '../stores/canvas.store';
 import { useInteraction } from '../stores/interaction.store';
 import { useHistory } from '../stores/history.store';
 import { screenToCanvas } from '../lib/geometry';
-import { containerDefinitions } from '../catalog/containers';
-import { imageDefinitions } from '../catalog/images';
-import type { Container, Image, Port, Wire as WireType } from '../types/topology';
+import type { Container, Image, Wire as WireType } from '../types/topology';
 import ContainerNode from './ContainerNode';
-import ImageNode from './ImageNode';
 import Wire from './Wire';
 import WirePreview from './WirePreview';
 import SelectionBox from './SelectionBox';
 import DotGrid from './DotGrid';
-
-function createPort(template: Port): Port {
-  return { ...template, id: crypto.randomUUID() };
-}
 
 /** Deep-clone a container tree, generating fresh IDs. Returns the clone and an old→new ID map. */
 function cloneContainer(c: Container): { clone: Container; idMap: Map<string, string> } {
@@ -81,48 +74,6 @@ const Canvas: Component = () => {
     return screenToCanvas({ x: clientX - rect.left, y: clientY - rect.top }, canvas.transform);
   };
 
-  /** Reorder top-level containers so the one containing the dragged element renders last (on top in SVG).
-   *  Always returns a new array to avoid SolidJS <For> reconciliation issues
-   *  when switching between store proxy and plain array. */
-  const sortedContainers = createMemo(() => {
-    const containers = [...topo.topology.containers];
-    if (interaction.mode !== 'dragging') return containers;
-    const dragId = interaction.selectedNodeId;
-    if (!dragId) return containers;
-    const containsDragged = (c: Container): boolean => {
-      if (c.id === dragId) return true;
-      if (c.images.some(i => i.id === dragId)) return true;
-      return c.children.some(containsDragged);
-    };
-    return containers.sort((a, b) =>
-      (containsDragged(a) ? 1 : 0) - (containsDragged(b) ? 1 : 0)
-    );
-  });
-
-  /** During image drag, find the image data + parent absolute position for the overlay */
-  const draggedImageOverlay = createMemo(() => {
-    if (interaction.mode !== 'dragging') return null;
-    const imageId = interaction.selectedNodeId;
-    const parentId = interaction.dragParentId;
-    if (!imageId || !parentId) return null;
-
-    const parentAbs = topo.getAbsolutePosition(parentId);
-    if (!parentAbs) return null;
-
-    const findImage = (containers: readonly Container[]): Image | undefined => {
-      for (const c of containers) {
-        if (c.id === parentId) return c.images.find(i => i.id === imageId);
-        const found = findImage(c.children);
-        if (found) return found;
-      }
-      return undefined;
-    };
-    const image = findImage(topo.topology.containers);
-    if (!image) return null;
-
-    return { image, containerX: parentAbs.x, containerY: parentAbs.y + 32 };
-  });
-
   const handleWheel = (e: WheelEvent) => {
     e.preventDefault();
     const rect = svgRef!.getBoundingClientRect();
@@ -164,46 +115,6 @@ const Canvas: Component = () => {
       interaction.updateSelectionBox(canvasPos);
       return;
     }
-
-    if (mode === 'dragging') {
-      const canvasPos = clientToCanvas(e.clientX, e.clientY);
-      const offset = interaction.dragOffset;
-      const nodeId = interaction.selectedNodeId;
-      const parentId = interaction.dragParentId;
-      if (nodeId && parentId) {
-        // Dragging an image — convert to parent-relative coordinates
-        const parentAbs = topo.getAbsolutePosition(parentId);
-        if (parentAbs) {
-          topo.moveImage(
-            parentId,
-            nodeId,
-            canvasPos.x - offset.x - parentAbs.x,
-            canvasPos.y - offset.y - (parentAbs.y + 32),
-          );
-        }
-        // Drop target highlight for image transfer
-        const target = topo.containerAtPoint(canvasPos.x, canvasPos.y);
-        interaction.setDropTarget(target && target.id !== parentId ? target.id : null);
-      } else if (nodeId) {
-        topo.moveContainer(nodeId, canvasPos.x - offset.x, canvasPos.y - offset.y);
-        // Drop target highlight for container reparenting
-        const target = topo.containerAtPoint(canvasPos.x, canvasPos.y, nodeId);
-        interaction.setDropTarget(target ? target.id : null);
-      }
-      return;
-    }
-
-    if (mode === 'resizing') {
-      const canvasPos = clientToCanvas(e.clientX, e.clientY);
-      const nodeId = interaction.selectedNodeId;
-      if (nodeId) {
-        const absPos = topo.getAbsolutePosition(nodeId);
-        if (absPos) {
-          topo.resizeContainer(nodeId, canvasPos.x - absPos.x, canvasPos.y - absPos.y);
-        }
-      }
-      return;
-    }
   };
 
   const handlePointerUp = (e: PointerEvent) => {
@@ -211,43 +122,6 @@ const Canvas: Component = () => {
 
     if (mode === 'panning') {
       interaction.setMode('idle');
-      return;
-    }
-
-    if (mode === 'dragging') {
-      const nodeId = interaction.selectedNodeId;
-      const parentId = interaction.dragParentId;
-      const dropTarget = interaction.dropTargetId;
-
-      if (nodeId && parentId) {
-        // Image drag — transfer to the highlighted container
-        if (dropTarget) {
-          topo.transferImage(nodeId, parentId, dropTarget);
-          topo.growToFit(dropTarget);
-        }
-        topo.growToFit(parentId);
-      } else if (nodeId) {
-        // Container drag — reparent to the highlighted container
-        if (dropTarget) {
-          topo.reparentContainer(nodeId, dropTarget);
-          topo.growToFit(dropTarget);
-        } else if (topo.isNested(nodeId)) {
-          topo.unparentContainer(nodeId);
-        }
-      }
-
-      interaction.setDropTarget(null);
-      interaction.setDragParentId(null);
-      interaction.setMode('idle');
-      history.push(topo.getSnapshot());
-      return;
-    }
-
-    if (mode === 'resizing') {
-      const nodeId = interaction.selectedNodeId;
-      if (nodeId) topo.growToFit(nodeId);
-      interaction.setMode('idle');
-      history.push(topo.getSnapshot());
       return;
     }
 
@@ -287,86 +161,6 @@ const Canvas: Component = () => {
     if (mode === 'selecting') {
       interaction.endSelectionBox();
       return;
-    }
-  };
-
-  const handleDragOver = (e: DragEvent) => {
-    if (e.dataTransfer?.types.includes('application/xcord-topo')) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-      const canvasPos = clientToCanvas(e.clientX, e.clientY);
-      const target = topo.containerAtPoint(canvasPos.x, canvasPos.y);
-      interaction.setDropTarget(target?.id ?? null);
-    }
-  };
-
-  const handleDragLeave = (e: DragEvent) => {
-    // Only clear when leaving the SVG entirely (not when entering a child element)
-    if (e.currentTarget === e.target) {
-      interaction.setDropTarget(null);
-    }
-  };
-
-  const handleDrop = (e: DragEvent) => {
-    e.preventDefault();
-    interaction.setDropTarget(null);
-    const raw = e.dataTransfer?.getData('application/xcord-topo');
-    if (!raw) return;
-
-    const { type, kind } = JSON.parse(raw) as { type: 'container' | 'image'; kind: string };
-    const canvasPos = clientToCanvas(e.clientX, e.clientY);
-
-    if (type === 'container') {
-      const def = containerDefinitions.find(d => d.kind === kind);
-      if (!def) return;
-      history.push(topo.getSnapshot());
-      const container: Container = {
-        id: crypto.randomUUID(),
-        name: def.label,
-        kind: def.kind,
-        x: canvasPos.x - def.defaultWidth / 2,
-        y: canvasPos.y - def.defaultHeight / 2,
-        width: def.defaultWidth,
-        height: def.defaultHeight,
-        ports: def.defaultPorts.map(createPort),
-        images: [],
-        children: [],
-        config: {},
-      };
-      topo.addContainer(container);
-      interaction.select(container.id);
-
-      // If dropped on an existing container, nest it immediately
-      const target = topo.containerAtPoint(canvasPos.x, canvasPos.y, container.id);
-      if (target) {
-        topo.reparentContainer(container.id, target.id);
-        topo.growToFit(target.id);
-      }
-    } else if (type === 'image') {
-      const def = imageDefinitions.find(d => d.kind === kind);
-      if (!def) return;
-      // Find the innermost container under the drop point (recursive)
-      const target = topo.containerAtPoint(canvasPos.x, canvasPos.y);
-      if (!target) return;
-      const targetAbs = topo.getAbsolutePosition(target.id);
-      if (!targetAbs) return;
-      history.push(topo.getSnapshot());
-      const image: Image = {
-        id: crypto.randomUUID(),
-        name: def.label,
-        kind: def.kind,
-        x: canvasPos.x - targetAbs.x - def.defaultWidth / 2,
-        y: canvasPos.y - (targetAbs.y + 32) - def.defaultHeight / 2,
-        width: def.defaultWidth,
-        height: def.defaultHeight,
-        ports: def.defaultPorts.map(createPort),
-        dockerImage: def.defaultDockerImage,
-        config: {},
-        scaling: def.defaultScaling ?? 'Shared',
-      };
-      topo.addImage(target.id, image);
-      interaction.select(image.id);
-      topo.growToFit(target.id);
     }
   };
 
@@ -522,14 +316,11 @@ const Canvas: Component = () => {
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
       style={{ cursor: interaction.mode === 'panning' ? 'grabbing' : 'default', 'touch-action': 'none' }}
     >
       <DotGrid />
       <g transform={transformStr()}>
-        <For each={sortedContainers()}>
+        <For each={topo.topology.containers}>
           {(container) => <ContainerNode container={container} />}
         </For>
         <For each={topo.topology.wires}>
@@ -537,19 +328,6 @@ const Canvas: Component = () => {
         </For>
         <Show when={interaction.wiringState}>
           <WirePreview />
-        </Show>
-        {/* Drag overlay — dragged image rendered above all containers */}
-        <Show when={draggedImageOverlay()}>
-          {(info) => (
-            <g style={{ 'pointer-events': 'none' }}>
-              <ImageNode
-                image={info().image}
-                containerX={info().containerX}
-                containerY={info().containerY}
-                containerId=""
-              />
-            </g>
-          )}
         </Show>
       </g>
       <Show when={interaction.selectionBox}>

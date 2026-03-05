@@ -4,11 +4,8 @@ import type { Point } from '../types/geometry';
 export type InteractionMode =
   | 'idle'
   | 'panning'
-  | 'dragging'
   | 'wiring'
-  | 'resizing'
-  | 'selecting'
-  | 'palette-drag';
+  | 'selecting';
 
 export interface WiringState {
   fromNodeId: string;
@@ -25,12 +22,6 @@ const store = createRoot(() => {
   const [hoveredPortId, setHoveredPortId] = createSignal<string | null>(null);
   const [wiringState, setWiringState] = createSignal<WiringState | null>(null);
   const [selectionBox, setSelectionBox] = createSignal<{ start: Point; end: Point } | null>(null);
-  const [paletteDragKind, setPaletteDragKind] = createSignal<string | null>(null);
-  const [paletteDragType, setPaletteDragType] = createSignal<'container' | 'image' | null>(null);
-  const [dragOffset, setDragOffset] = createSignal<Point>({ x: 0, y: 0 });
-  const [dropTargetId, setDropTargetId] = createSignal<string | null>(null);
-  const [dragParentId, setDragParentId] = createSignal<string | null>(null);
-
   return {
     mode, setMode,
     selectedNodeId, setSelectedNodeId,
@@ -38,11 +29,6 @@ const store = createRoot(() => {
     hoveredPortId, setHoveredPortId,
     wiringState, setWiringState,
     selectionBox, setSelectionBox,
-    paletteDragKind, setPaletteDragKind,
-    paletteDragType, setPaletteDragType,
-    dragOffset, setDragOffset,
-    dropTargetId, setDropTargetId,
-    dragParentId, setDragParentId,
   };
 });
 
@@ -54,18 +40,7 @@ export function useInteraction() {
     get hoveredPortId() { return store.hoveredPortId(); },
     get wiringState() { return store.wiringState(); },
     get selectionBox() { return store.selectionBox(); },
-    get paletteDragKind() { return store.paletteDragKind(); },
-    get paletteDragType() { return store.paletteDragType(); },
-    get dragOffset() { return store.dragOffset(); },
-    get dropTargetId() { return store.dropTargetId(); },
-    get dragParentId() { return store.dragParentId(); },
-
     setMode: store.setMode,
-    setDragOffset: store.setDragOffset,
-    setDropTarget(id: string | null): void {
-      store.setDropTargetId(id);
-    },
-    setDragParentId: store.setDragParentId,
 
     select(nodeId: string, additive = false): void {
       store.setSelectedNodeId(nodeId);
@@ -124,18 +99,6 @@ export function useInteraction() {
       store.setSelectionBox(null);
     },
 
-    startPaletteDrag(kind: string, type: 'container' | 'image'): void {
-      store.setMode('palette-drag');
-      store.setPaletteDragKind(kind);
-      store.setPaletteDragType(type);
-    },
-
-    endPaletteDrag(): void {
-      store.setMode('idle');
-      store.setPaletteDragKind(null);
-      store.setPaletteDragType(null);
-    },
-
     reset(): void {
       store.setMode('idle');
       store.setSelectedNodeId(null);
@@ -143,10 +106,6 @@ export function useInteraction() {
       store.setHoveredPortId(null);
       store.setWiringState(null);
       store.setSelectionBox(null);
-      store.setPaletteDragKind(null);
-      store.setPaletteDragType(null);
-      store.setDropTargetId(null);
-      store.setDragParentId(null);
     },
   };
 }

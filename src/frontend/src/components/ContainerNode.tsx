@@ -1,9 +1,7 @@
-import { Component, For, Show, createSignal, onMount } from 'solid-js';
+import { Component, For, createSignal, onMount } from 'solid-js';
 import { useInteraction } from '../stores/interaction.store';
-import { useCanvas } from '../stores/canvas.store';
 import { useTopology } from '../stores/topology.store';
 import { useHistory } from '../stores/history.store';
-import { screenToCanvas } from '../lib/geometry';
 import type { Container as ContainerType } from '../types/topology';
 import { containerDefinitions } from '../catalog/containers';
 import ImageNode from './ImageNode';
@@ -17,7 +15,6 @@ const ContainerNode: Component<{
   offsetY?: number;
 }> = (props) => {
   const interaction = useInteraction();
-  const canvas = useCanvas();
   const topo = useTopology();
   const history = useHistory();
 
@@ -28,7 +25,6 @@ const ContainerNode: Component<{
 
   const def = () => containerDefinitions.find(d => d.kind === props.container.kind);
   const isSelected = () => interaction.selectedNodeIds.has(props.container.id);
-  const isDropTarget = () => interaction.dropTargetId === props.container.id;
 
   let kindTextRef!: SVGTextElement;
   const [kindWidth, setKindWidth] = createSignal(40);
@@ -36,46 +32,6 @@ const ContainerNode: Component<{
     if (kindTextRef) setKindWidth(kindTextRef.getComputedTextLength());
   });
   const fitBtnX = () => absX() + props.container.width - 12 - kindWidth() - 8 - 20;
-
-  /** Sort images so the dragged one renders last (on top in SVG).
-   *  Always returns a new array to avoid SolidJS <For> reconciliation issues
-   *  when switching between store proxy and plain array. */
-  const sortedImages = () => {
-    const images = [...props.container.images];
-    const dragId = interaction.selectedNodeId;
-    if (interaction.mode !== 'dragging' || !dragId) return images;
-    return images.sort((a, b) => (a.id === dragId ? 1 : 0) - (b.id === dragId ? 1 : 0));
-  };
-
-  /** Sort children so the one containing the dragged element renders last */
-  const sortedChildren = () => {
-    const children = [...props.container.children];
-    const dragId = interaction.selectedNodeId;
-    if (interaction.mode !== 'dragging' || !dragId) return children;
-    const containsDragged = (c: ContainerType): boolean => {
-      if (c.id === dragId) return true;
-      if (c.images.some(i => i.id === dragId)) return true;
-      return c.children.some(containsDragged);
-    };
-    return children.sort((a, b) =>
-      (containsDragged(a) ? 1 : 0) - (containsDragged(b) ? 1 : 0)
-    );
-  };
-
-  const handleHeaderPointerDown = (e: PointerEvent) => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-
-    const svg = (e.target as SVGElement).ownerSVGElement!;
-    const rect = svg.getBoundingClientRect();
-    const canvasPos = screenToCanvas({ x: e.clientX - rect.left, y: e.clientY - rect.top }, canvas.transform);
-    interaction.select(props.container.id, e.shiftKey);
-    interaction.setMode('dragging');
-    interaction.setDragOffset({
-      x: canvasPos.x - props.container.x,
-      y: canvasPos.y - props.container.y,
-    });
-  };
 
   return (
     <g>
@@ -93,23 +49,6 @@ const ContainerNode: Component<{
         style={{ 'pointer-events': 'none' }}
       />
 
-      {/* Drop target highlight overlay */}
-      <Show when={isDropTarget()}>
-        <rect
-          x={absX()}
-          y={absY()}
-          width={props.container.width}
-          height={props.container.height}
-          rx={8}
-          fill="#7aa2f7"
-          opacity={0.1}
-          stroke="#7aa2f7"
-          stroke-width={2}
-          stroke-dasharray="6 3"
-          style={{ 'pointer-events': 'none' }}
-        />
-      </Show>
-
       {/* Header bar */}
       <rect
         x={absX()}
@@ -119,8 +58,12 @@ const ContainerNode: Component<{
         rx={8}
         fill={def()?.color ?? '#3b4261'}
         opacity={0.8}
-        style={{ cursor: 'grab' }}
-        onPointerDown={handleHeaderPointerDown}
+        style={{ cursor: 'default' }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          interaction.select(props.container.id, e.shiftKey);
+        }}
       />
       {/* Bottom half of header - square corners to match body */}
       <rect
@@ -130,8 +73,12 @@ const ContainerNode: Component<{
         height={HEADER_HEIGHT / 2}
         fill={def()?.color ?? '#3b4261'}
         opacity={0.8}
-        style={{ cursor: 'grab' }}
-        onPointerDown={handleHeaderPointerDown}
+        style={{ cursor: 'default' }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          interaction.select(props.container.id, e.shiftKey);
+        }}
       />
 
       {/* Container name */}
@@ -206,7 +153,7 @@ const ContainerNode: Component<{
       />
 
       {/* Nested images */}
-      <For each={sortedImages()}>
+      <For each={props.container.images}>
         {(image) => (
           <ImageNode
             image={image}
@@ -218,7 +165,7 @@ const ContainerNode: Component<{
       </For>
 
       {/* Nested child containers */}
-      <For each={sortedChildren()}>
+      <For each={props.container.children}>
         {(child) => (
           <ContainerNode
             container={child}
@@ -242,21 +189,6 @@ const ContainerNode: Component<{
         )}
       </For>
 
-      {/* Resize handle (bottom-right corner) */}
-      <rect
-        x={absX() + props.container.width - 12}
-        y={absY() + props.container.height - 12}
-        width={12}
-        height={12}
-        fill="transparent"
-        style={{ cursor: 'se-resize' }}
-        onPointerDown={(e) => {
-          if (e.button !== 0) return;
-          e.stopPropagation();
-          interaction.setMode('resizing');
-          interaction.select(props.container.id);
-        }}
-      />
     </g>
   );
 };

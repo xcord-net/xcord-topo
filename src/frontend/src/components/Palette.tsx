@@ -102,12 +102,7 @@ const Palette: Component<{ tab: PaletteTab; onTabChange: (t: PaletteTab) => void
             <For each={containerDefinitions}>
               {(def) => (
                 <button
-                  class="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-topo-bg-tertiary transition-colors group cursor-grab active:cursor-grabbing"
-                  draggable={true}
-                  onDragStart={(e) => {
-                    e.dataTransfer!.setData('application/xcord-topo', JSON.stringify({ type: 'container', kind: def.kind }));
-                    e.dataTransfer!.effectAllowed = 'copy';
-                  }}
+                  class="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-topo-bg-tertiary transition-colors group cursor-pointer"
                   onClick={() => addContainer(def.kind)}
                 >
                   <div class="flex items-center gap-2">
@@ -122,12 +117,7 @@ const Palette: Component<{ tab: PaletteTab; onTabChange: (t: PaletteTab) => void
             <For each={imageDefinitions}>
               {(def) => (
                 <button
-                  class="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-topo-bg-tertiary transition-colors group cursor-grab active:cursor-grabbing"
-                  draggable={true}
-                  onDragStart={(e) => {
-                    e.dataTransfer!.setData('application/xcord-topo', JSON.stringify({ type: 'image', kind: def.kind }));
-                    e.dataTransfer!.effectAllowed = 'copy';
-                  }}
+                  class="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-topo-bg-tertiary transition-colors group cursor-pointer"
                   onClick={() => addImage(def.kind)}
                 >
                   <div class="flex items-center gap-2">

@@ -37,16 +37,6 @@ function findContainerDeep(containers: Container[], id: string): { container: Co
   return null;
 }
 
-/** Get absolute position of a container accounting for parent nesting */
-function getAbsolutePos(containers: Container[], id: string, offX = 0, offY = 0): { x: number; y: number } | null {
-  for (const c of containers) {
-    if (c.id === id) return { x: offX + c.x, y: offY + c.y };
-    const found = getAbsolutePos(c.children, id, offX + c.x, offY + c.y + HEADER_HEIGHT);
-    if (found) return found;
-  }
-  return null;
-}
-
 /** Find the parent container of a child by id (works on mutable draft inside produce) */
 function findParentIn(containers: Container[], childId: string): Container | null {
   for (const c of containers) {
@@ -55,16 +45,6 @@ function findParentIn(containers: Container[], childId: string): Container | nul
     if (found) return found;
   }
   return null;
-}
-
-/** Walk all containers recursively */
-function forEachContainer(containers: Container[], fn: (c: Container, absX: number, absY: number) => void, offX = 0, offY = 0): void {
-  for (const c of containers) {
-    const ax = offX + c.x;
-    const ay = offY + c.y;
-    fn(c, ax, ay);
-    forEachContainer(c.children, fn, ax, ay + HEADER_HEIGHT);
-  }
 }
 
 const STORAGE_KEY = 'xcord-topo:topology';
@@ -191,120 +171,6 @@ export function useTopology() {
       }));
     },
 
-    moveContainer(id: string, x: number, y: number): void {
-      store.setTopology(produce(t => {
-        const found = findContainerDeep(t.containers, id);
-        if (found) {
-          found.container.x = x;
-          found.container.y = y;
-        }
-      }));
-    },
-
-    resizeContainer(id: string, width: number, height: number): void {
-      store.setTopology(produce(t => {
-        const found = findContainerDeep(t.containers, id);
-        if (found) {
-          found.container.width = Math.max(200, width);
-          found.container.height = Math.max(120, height);
-        }
-        t.updatedAt = new Date().toISOString();
-      }));
-    },
-
-    /** Reparent a container as a child of another. Converts coordinates to relative. */
-    reparentContainer(childId: string, parentId: string): void {
-      store.setTopology(produce(t => {
-        const childResult = findContainerDeep(t.containers, childId);
-        const parentResult = findContainerDeep(t.containers, parentId);
-        if (!childResult || !parentResult) return;
-        // Don't allow nesting into self or into a descendant
-        const isDescendant = (root: Container, targetId: string): boolean => {
-          if (root.id === targetId) return true;
-          return root.children.some(c => isDescendant(c, targetId));
-        };
-        if (isDescendant(childResult.container, parentId)) return;
-
-        // Get absolute positions before reparenting
-        const childAbs = getAbsolutePos(t.containers, childId)!;
-        const parentAbs = getAbsolutePos(t.containers, parentId)!;
-
-        // Remove from current location
-        childResult.siblings.splice(childResult.index, 1);
-
-        // Convert to relative coordinates (relative to parent content area)
-        const child = childResult.container;
-        child.x = childAbs.x - parentAbs.x;
-        child.y = childAbs.y - (parentAbs.y + HEADER_HEIGHT);
-
-        // Re-find parent (indices may have shifted)
-        const newParent = findContainerDeep(t.containers, parentId);
-        if (newParent) {
-          newParent.container.children.push(child);
-        }
-        t.updatedAt = new Date().toISOString();
-      }));
-    },
-
-    /** Unparent a child container back to top-level. Converts coordinates to absolute. */
-    unparentContainer(childId: string): void {
-      store.setTopology(produce(t => {
-        const childAbs = getAbsolutePos(t.containers, childId);
-        const found = findContainerDeep(t.containers, childId);
-        if (!found || !childAbs) return;
-        // Only unparent if it's actually nested (not already top-level)
-        if (found.siblings === t.containers) return;
-
-        found.siblings.splice(found.index, 1);
-        const child = found.container;
-        child.x = childAbs.x;
-        child.y = childAbs.y;
-        t.containers.push(child);
-        t.updatedAt = new Date().toISOString();
-      }));
-    },
-
-    /** Find the innermost container at an absolute canvas point (excluding a given id) */
-    containerAtPoint(absX: number, absY: number, excludeId?: string): Container | null {
-      let best: Container | null = null;
-      let bestArea = Infinity;
-      forEachContainer(store.topology.containers, (c, cx, cy) => {
-        if (c.id === excludeId) return;
-        if (absX >= cx && absX <= cx + c.width && absY >= cy && absY <= cy + c.height) {
-          const area = c.width * c.height;
-          if (area < bestArea) {
-            best = c;
-            bestArea = area;
-          }
-        }
-      });
-      return best;
-    },
-
-    /** Check if a container is currently nested (not top-level) */
-    isNested(id: string): boolean {
-      const found = findContainerDeep(store.topology.containers, id);
-      return !!found && found.siblings !== store.topology.containers;
-    },
-
-    /** Find the parent container ID of a nested container */
-    findParentContainerId(childId: string): string | null {
-      const search = (containers: Container[]): string | null => {
-        for (const c of containers) {
-          if (c.children.some(ch => ch.id === childId)) return c.id;
-          const found = search(c.children);
-          if (found) return found;
-        }
-        return null;
-      };
-      return search(store.topology.containers);
-    },
-
-    /** Get the absolute position of a container (accounting for parent nesting) */
-    getAbsolutePosition(id: string): { x: number; y: number } | null {
-      return getAbsolutePos(store.topology.containers, id);
-    },
-
     /** Find the container that owns an image by image ID */
     findImageOwner(imageId: string): string | null {
       const search = (containers: Container[]): string | null => {
@@ -423,47 +289,6 @@ export function useTopology() {
           found.container.images = found.container.images.filter(i => i.id !== imageId);
         }
         t.wires = t.wires.filter(w => w.fromNodeId !== imageId && w.toNodeId !== imageId);
-        t.updatedAt = new Date().toISOString();
-      }));
-    },
-
-    moveImage(containerId: string, imageId: string, x: number, y: number): void {
-      store.setTopology(produce(t => {
-        const found = findContainerDeep(t.containers, containerId);
-        if (found) {
-          const img = found.container.images.find(i => i.id === imageId);
-          if (img) {
-            img.x = x;
-            img.y = y;
-          }
-        }
-      }));
-    },
-
-    /** Transfer an image from one container to another, preserving absolute position */
-    transferImage(imageId: string, fromContainerId: string, toContainerId: string): void {
-      if (fromContainerId === toContainerId) return;
-      store.setTopology(produce(t => {
-        const fromResult = findContainerDeep(t.containers, fromContainerId);
-        if (!fromResult) return;
-        const imgIndex = fromResult.container.images.findIndex(i => i.id === imageId);
-        if (imgIndex === -1) return;
-
-        const fromAbs = getAbsolutePos(t.containers, fromContainerId)!;
-        const toAbs = getAbsolutePos(t.containers, toContainerId)!;
-        if (!fromAbs || !toAbs) return;
-
-        const [image] = fromResult.container.images.splice(imgIndex, 1);
-
-        // Convert from source-relative to target-relative coordinates
-        const absX = fromAbs.x + image.x;
-        const absY = fromAbs.y + HEADER_HEIGHT + image.y;
-        image.x = absX - toAbs.x;
-        image.y = absY - (toAbs.y + HEADER_HEIGHT);
-
-        // Re-find target (indices may have shifted after splice)
-        const toResult = findContainerDeep(t.containers, toContainerId);
-        if (toResult) toResult.container.images.push(image);
         t.updatedAt = new Date().toISOString();
       }));
     },

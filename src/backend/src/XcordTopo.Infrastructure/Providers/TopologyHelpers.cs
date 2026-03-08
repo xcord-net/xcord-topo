@@ -291,7 +291,7 @@ public static class TopologyHelpers
                     AddServiceKeyEnvVar(envVars, topology, "stripe_publishable_key", "Stripe__PublishableKey");
                     AddServiceKeyEnvVar(envVars, topology, "stripe_secret_key", "Stripe__SecretKey");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_host", "Email__SmtpHost");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_port", "Email__SmtpPort");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_port", "Email__SmtpPort", "587");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_username", "Email__SmtpUsername");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_password", "Email__SmtpPassword");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_from_address", "Email__FromAddress");
@@ -341,7 +341,7 @@ public static class TopologyHelpers
                 if (topology != null)
                 {
                     AddServiceKeyEnvVar(envVars, topology, "smtp_host", "Email__SmtpHost");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_port", "Email__SmtpPort");
+                    AddServiceKeyEnvVar(envVars, topology, "smtp_port", "Email__SmtpPort", "587");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_username", "Email__SmtpUsername");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_password", "Email__SmtpPassword");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_from_address", "Email__FromAddress");
@@ -366,10 +366,13 @@ public static class TopologyHelpers
         List<(string Key, string Value)> envVars,
         Topology topology,
         string serviceKey,
-        string envVarName)
+        string envVarName,
+        string? defaultValue = null)
     {
         if (topology.ServiceKeys.TryGetValue(serviceKey, out var value) && !string.IsNullOrEmpty(value))
             envVars.Add((envVarName, $"${{var.{serviceKey}}}"));
+        else if (defaultValue != null)
+            envVars.Add((envVarName, defaultValue));
     }
 
     public static string? ResolveCommandOverride(Image image, HostEntry entry, WireResolver resolver)

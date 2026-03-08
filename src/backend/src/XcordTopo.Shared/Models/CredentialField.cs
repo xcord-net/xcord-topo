@@ -25,4 +25,5 @@ public sealed class CredentialFieldHelp
     public List<string> Steps { get; set; } = [];
     public string? Url { get; set; }
     public string? Permissions { get; set; }
+    public string? Note { get; set; }
 }

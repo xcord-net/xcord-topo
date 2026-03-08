@@ -20,6 +20,7 @@ public sealed class LinodeProvider : ICloudProvider
         new() { Id = "us-east", Label = "Newark, NJ", Country = "US" },
         new() { Id = "us-central", Label = "Dallas, TX", Country = "US" },
         new() { Id = "us-west", Label = "Fremont, CA", Country = "US" },
+        new() { Id = "us-lax", Label = "Los Angeles, CA", Country = "US" },
         new() { Id = "us-southeast", Label = "Atlanta, GA", Country = "US" },
         new() { Id = "eu-west", Label = "London, UK", Country = "GB" },
         new() { Id = "eu-central", Label = "Frankfurt, DE", Country = "DE" },
@@ -77,9 +78,9 @@ public sealed class LinodeProvider : ICloudProvider
                 Summary = "Linode data center region for your instances",
                 Steps =
                 [
-                    "Choose the region closest to your users",
-                    "All instances will be deployed in this region",
-                    "Consider data residency requirements for your domain"
+                    "Pick the region closest to your users for lowest latency",
+                    "All instances in this topology will share the same region",
+                    "Consider data residency or compliance requirements"
                 ],
                 Url = "https://www.linode.com/global-infrastructure/"
             }

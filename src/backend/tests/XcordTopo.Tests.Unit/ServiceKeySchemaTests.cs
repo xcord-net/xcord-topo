@@ -22,19 +22,19 @@ public sealed class ServiceKeySchemaTests
     }
 
     [Fact]
-    public void StripeFields_AreRequired()
+    public void StripeFields_AreOptional()
     {
         var fields = ServiceKeySchema.GetSchema();
-        Assert.True(fields.First(f => f.Key == "stripe_publishable_key").Required);
-        Assert.True(fields.First(f => f.Key == "stripe_secret_key").Required);
+        Assert.False(fields.First(f => f.Key == "stripe_publishable_key").Required);
+        Assert.False(fields.First(f => f.Key == "stripe_secret_key").Required);
     }
 
     [Fact]
-    public void SmtpFields_RequiredExceptFromName()
+    public void SmtpFields_RequiredExceptPortAndFromName()
     {
         var fields = ServiceKeySchema.GetSchema();
         Assert.True(fields.First(f => f.Key == "smtp_host").Required);
-        Assert.True(fields.First(f => f.Key == "smtp_port").Required);
+        Assert.False(fields.First(f => f.Key == "smtp_port").Required);
         Assert.True(fields.First(f => f.Key == "smtp_username").Required);
         Assert.True(fields.First(f => f.Key == "smtp_password").Required);
         Assert.True(fields.First(f => f.Key == "smtp_from_address").Required);

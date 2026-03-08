@@ -41,6 +41,7 @@ export interface CredentialFieldHelp {
   steps: string[];
   url?: string;
   permissions?: string;
+  note?: string;
 }
 
 export interface ValidationRule {

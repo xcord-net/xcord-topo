@@ -13,7 +13,7 @@ public static class ServiceKeySchema
             Label = "Stripe Publishable Key",
             Type = "text",
             Sensitive = true,
-            Required = true,
+            Required = false,
             Placeholder = "pk_live_...",
             Help = new()
             {
@@ -34,7 +34,7 @@ public static class ServiceKeySchema
             Label = "Stripe Secret Key",
             Type = "password",
             Sensitive = true,
-            Required = true,
+            Required = false,
             Placeholder = "sk_live_...",
             Help = new()
             {
@@ -78,7 +78,7 @@ public static class ServiceKeySchema
             Label = "SMTP Port",
             Type = "text",
             Sensitive = false,
-            Required = true,
+            Required = false,
             Placeholder = "587",
             Help = new()
             {

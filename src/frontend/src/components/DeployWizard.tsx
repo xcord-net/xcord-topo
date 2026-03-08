@@ -97,6 +97,9 @@ const FieldHelp: Component<{ help: NonNullable<CredentialField['help']> }> = (pr
               <span class="text-topo-text-secondary">{props.help.permissions}</span>
             </div>
           </Show>
+          <Show when={props.help.note}>
+            <p class="text-topo-text-muted italic mb-2">{props.help.note}</p>
+          </Show>
           <Show when={props.help.url}>
             <a
               href={props.help.url!}
@@ -155,6 +158,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   // Multi-provider state
   const [activeProviderKeys, setActiveProviderKeys] = createSignal<string[]>([]);
   const [activeProviderTab, setActiveProviderTab] = createSignal('');
+  const [providerRegions, setProviderRegions] = createSignal<Record<string, Region[]>>({});
   const [providerSchemas, setProviderSchemas] = createSignal<Record<string, CredentialField[]>>({});
   const [providerStatuses, setProviderStatuses] = createSignal<Record<string, CredentialStatus>>({});
   const [providerValues, setProviderValues] = createSignal<Record<string, Record<string, string>>>({});
@@ -246,12 +250,15 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         const valResults: Record<string, Record<string, string>> = {};
         const touchResults: Record<string, Set<string>> = {};
         const errResults: Record<string, Record<string, string>> = {};
+        const regionResults: Record<string, Region[]> = {};
 
         await Promise.all(allKeys.map(async (pk) => {
-          const [credRes, schema] = await Promise.all([
+          const [credRes, schema, regRes] = await Promise.all([
             deployApi.getCredentialStatus(pk),
             deployApi.getCredentialSchema(pk),
+            fetch(`/api/v1/providers/${pk}/regions`).then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); }),
           ]);
+          regionResults[pk] = regRes.regions;
           schemaResults[pk] = schema;
           statusResults[pk] = credRes;
           touchResults[pk] = new Set();
@@ -271,6 +278,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         setProviderValues(valResults);
         setProviderTouchedFields(touchResults);
         setProviderFieldErrors(errResults);
+        setProviderRegions(regionResults);
 
         // Also load primary provider data for single-provider compat
         const regRes = await fetch(`/api/v1/providers/${key}/regions`).then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); });
@@ -819,6 +827,9 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       <div>
         <label class="flex items-center text-xs text-topo-text-muted mb-1">
           {field.label}
+          <Show when={field.required}>
+            <span class="ml-0.5 text-topo-error">*</span>
+          </Show>
           <Show when={!field.required}>
             <span class="ml-1 text-topo-text-muted/50">(optional)</span>
           </Show>
@@ -903,6 +914,9 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       <div>
         <label class="flex items-center text-xs text-topo-text-muted mb-1">
           {field.label}
+          <Show when={field.required}>
+            <span class="ml-0.5 text-topo-error">*</span>
+          </Show>
           <Show when={!field.required}>
             <span class="ml-1 text-topo-text-muted/50">(optional)</span>
           </Show>
@@ -989,6 +1003,9 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       <div>
         <label class="flex items-center text-xs text-topo-text-muted mb-1">
           {field.label}
+          <Show when={field.required}>
+            <span class="ml-0.5 text-topo-error">*</span>
+          </Show>
           <Show when={!field.required}>
             <span class="ml-1 text-topo-text-muted/50">(optional)</span>
           </Show>
@@ -999,7 +1016,19 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
             <FieldHelp help={field.help!} />
           </Show>
         </label>
-        {field.type === 'textarea' ? (
+        {field.type === 'select' && field.key === 'region' ? (
+          <select
+            class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand`}
+            value={vals()[field.key] ?? ''}
+            onChange={(e) => setValue(field.key, e.currentTarget.value)}
+            onBlur={handleBlur}
+          >
+            <option value="">{field.placeholder || 'Select...'}</option>
+            <For each={providerRegions()[providerKey] ?? []}>
+              {(r) => <option value={r.id}>{r.label} ({r.id})</option>}
+            </For>
+          </select>
+        ) : field.type === 'textarea' ? (
           <textarea
             class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand font-mono h-16 resize-none`}
             placeholder={field.placeholder}

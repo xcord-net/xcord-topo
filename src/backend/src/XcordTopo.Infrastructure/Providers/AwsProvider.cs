@@ -19,6 +19,7 @@ public sealed class AwsProvider : ICloudProvider
     [
         new() { Id = "us-east-1", Label = "US East (Virginia)", Country = "US" },
         new() { Id = "us-east-2", Label = "US East (Ohio)", Country = "US" },
+        new() { Id = "us-west-1", Label = "US West (N. California)", Country = "US" },
         new() { Id = "us-west-2", Label = "US West (Oregon)", Country = "US" },
         new() { Id = "eu-west-1", Label = "Europe (Ireland)", Country = "IE" },
         new() { Id = "eu-central-1", Label = "Europe (Frankfurt)", Country = "DE" },
@@ -61,6 +62,7 @@ public sealed class AwsProvider : ICloudProvider
                     "Copy both the Access Key ID and Secret Access Key"
                 ],
                 Permissions = "EC2 full access, VPC full access, Route53 full access (or AmazonEC2FullAccess + AmazonRoute53FullAccess managed policies)",
+                Note = "AWS will recommend using IAM roles instead — this is expected. IAM roles are for workloads running on AWS infrastructure; static access keys are the correct choice for external management tools.",
                 Url = "https://console.aws.amazon.com/iam/home#/users"
             },
             Validation = [new() { Type = "pattern", Value = @"^AKIA[A-Z0-9]{16}$", Message = "Must be a valid AWS access key ID (starts with AKIA, 20 characters)" }]
@@ -100,9 +102,9 @@ public sealed class AwsProvider : ICloudProvider
                 Summary = "AWS region for your EC2 instances and VPC",
                 Steps =
                 [
-                    "Choose the region closest to your users",
-                    "All instances will be deployed in this region",
-                    "Consider data residency and compliance requirements"
+                    "Pick the region closest to your users for lowest latency",
+                    "All instances in this topology will share the same region",
+                    "Consider data residency or compliance requirements"
                 ],
                 Url = "https://aws.amazon.com/about-aws/global-infrastructure/regions_az/"
             }

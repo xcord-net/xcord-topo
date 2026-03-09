@@ -3,11 +3,15 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Providers;
 
-public sealed class LinodeProvider : ICloudProvider
+public sealed class LinodeProvider : ProviderHclBase
 {
-    public string Key => "linode";
+    protected override string InstanceResourceType => "linode_instance";
+    protected override string PublicIpField => "ip_address";
+    protected override string PrivateIpField => "private_ip_address";
 
-    public ProviderInfo GetInfo() => new()
+    public override string Key => "linode";
+
+    public override ProviderInfo GetInfo() => new()
     {
         Key = "linode",
         Name = "Linode (Akamai)",
@@ -15,7 +19,7 @@ public sealed class LinodeProvider : ICloudProvider
         SupportedContainerKinds = ["Host", "Caddy", "ComputePool", "Dns"]
     };
 
-    public List<Region> GetRegions() =>
+    public override List<Region> GetRegions() =>
     [
         new() { Id = "us-east", Label = "Newark, NJ", Country = "US" },
         new() { Id = "us-central", Label = "Dallas, TX", Country = "US" },
@@ -29,7 +33,7 @@ public sealed class LinodeProvider : ICloudProvider
         new() { Id = "ap-southeast", Label = "Sydney, AU", Country = "AU" },
     ];
 
-    public List<ComputePlan> GetPlans() =>
+    public override List<ComputePlan> GetPlans() =>
     [
         new() { Id = "g6-nanode-1", Label = "Nanode 1GB", VCpus = 1, MemoryMb = 1024, DiskGb = 25, PriceMonthly = 5m },
         new() { Id = "g6-standard-1", Label = "Linode 2GB", VCpus = 1, MemoryMb = 2048, DiskGb = 50, PriceMonthly = 12m },
@@ -39,7 +43,7 @@ public sealed class LinodeProvider : ICloudProvider
         new() { Id = "g6-standard-8", Label = "Linode 32GB", VCpus = 8, MemoryMb = 32768, DiskGb = 640, PriceMonthly = 192m },
     ];
 
-    public List<CredentialField> GetCredentialSchema() =>
+    public override List<CredentialField> GetCredentialSchema() =>
     [
         new()
         {
@@ -131,7 +135,7 @@ public sealed class LinodeProvider : ICloudProvider
         }
     ];
 
-    public Dictionary<string, string> GenerateHcl(
+    public override Dictionary<string, string> GenerateHcl(
         Topology topology, List<TopologyHelpers.PoolSelection>? poolSelections = null)
     {
         var files = new Dictionary<string, string>();
@@ -142,7 +146,7 @@ public sealed class LinodeProvider : ICloudProvider
         var resolver = new WireResolver(topology);
 
         files["main.tf"] = GenerateMain();
-        files["secrets.tf"] = GenerateSecrets(hosts, resolver, topology);
+        files["secrets.tf"] = GenerateSecrets(hosts, resolver);
         files["variables.tf"] = GenerateVariables(topology, pools);
         files["instances.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies);
         files["firewall.tf"] = GenerateFirewall(topology, hosts, standaloneCaddies);
@@ -156,7 +160,7 @@ public sealed class LinodeProvider : ICloudProvider
         return files;
     }
 
-    public Dictionary<string, string> GenerateHclForContainers(
+    public override Dictionary<string, string> GenerateHclForContainers(
         Topology topology,
         IReadOnlyList<Container> ownedContainers,
         List<TopologyHelpers.PoolSelection>? poolSelections = null)
@@ -170,7 +174,7 @@ public sealed class LinodeProvider : ICloudProvider
 
         files["main_linode.tf"] = GenerateMain();
         files["variables_linode.tf"] = GenerateVariables(topology, pools);
-        files["secrets.tf"] = GenerateSecrets(hosts, resolver, topology);
+        files["secrets.tf"] = GenerateSecrets(hosts, resolver);
         files["instances_linode.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies);
         files["firewall_linode.tf"] = GenerateFirewall(topology, hosts, standaloneCaddies);
         files["provisioning_linode.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
@@ -182,34 +186,6 @@ public sealed class LinodeProvider : ICloudProvider
             files["dns_linode.tf"] = GenerateDnsRecords(dnsContainers, allHosts, resolver, topology);
 
         return files;
-    }
-
-    internal string SelectPlan(int requiredRamMb)
-    {
-        var plans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-        foreach (var plan in plans)
-        {
-            if (plan.MemoryMb >= requiredRamMb)
-                return plan.Id;
-        }
-        return plans.Last().Id;
-    }
-
-    /// <summary>
-    /// Resolves the compute plan for a pool: uses SelectedPlanId if set, otherwise auto-selects cheapest viable.
-    /// </summary>
-    private static ComputePlan ResolvePoolPlan(TopologyHelpers.ComputePoolEntry pool, List<ComputePlan> plans)
-    {
-        if (pool.SelectedPlanId is not null)
-        {
-            var selected = plans.FirstOrDefault(p => p.Id == pool.SelectedPlanId);
-            if (selected is not null) return selected;
-        }
-
-        var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
-        var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
-        var minHostRam = sharedOverhead + fedMemory;
-        return plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
     }
 
     // --- DNS record generation ---
@@ -257,17 +233,6 @@ public sealed class LinodeProvider : ICloudProvider
         return dns.ToString();
     }
 
-    /// <summary>
-    /// Get the Terraform IP reference for a host based on which provider owns it.
-    /// </summary>
-    internal static string GetIpReference(string hostName, string providerKey, bool isReplicated)
-    {
-        if (string.Equals(providerKey, "aws", StringComparison.OrdinalIgnoreCase))
-            return isReplicated ? $"aws_instance.{hostName}[0].public_ip" : $"aws_instance.{hostName}.public_ip";
-
-        return isReplicated ? $"linode_instance.{hostName}[0].ip_address" : $"linode_instance.{hostName}.ip_address";
-    }
-
     // --- File generators ---
 
     private static string GenerateMain()
@@ -295,25 +260,6 @@ public sealed class LinodeProvider : ICloudProvider
             b.RawAttribute("token", "var.linode_token");
         });
         return main.ToString();
-    }
-
-    private static string GenerateSecrets(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology)
-    {
-        var secrets = new HclBuilder();
-        foreach (var entry in hosts)
-        {
-            var allSecrets = TopologyHelpers.CollectSecrets(entry, resolver);
-            foreach (var secret in allSecrets)
-            {
-                secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
-                {
-                    b.Attribute("length", 32);
-                    b.RawAttribute("special", "false");
-                });
-                secrets.Line();
-            }
-        }
-        return secrets.ToString();
     }
 
     private string GenerateVariables(Topology topology, List<TopologyHelpers.ComputePoolEntry> pools)
@@ -346,102 +292,14 @@ public sealed class LinodeProvider : ICloudProvider
             b.Attribute("description", "SSH public key for instance access");
         });
 
-        // Host replica $VAR variables
+        // Host replica variables
         var hosts = TopologyHelpers.CollectHosts(topology.Containers);
         CollectHostReplicaVariables(hosts, vars);
 
-        // ComputePool variables
-        var plans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-        foreach (var pool in pools)
-        {
-            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
-            var selectedPlan = ResolvePoolPlan(pool, plans);
-            var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile);
-            var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
-
-            vars.Line();
-            vars.Block($"variable \"{poolName}_host_count\"", b =>
-            {
-                b.Attribute("type", "number");
-                b.Attribute("default", hostsRequired);
-                b.Attribute("description", $"Number of compute hosts for pool '{pool.Pool.Name}' ({pool.TierProfile.Name}, {pool.TargetTenants} tenants)");
-            });
-            vars.Line();
-            vars.Block($"variable \"{poolName}_tenants_per_host\"", b =>
-            {
-                b.Attribute("type", "number");
-                b.Attribute("default", tenantsPerHost > 0 ? tenantsPerHost : 1);
-                b.Attribute("description", $"Number of tenants per host in pool '{pool.Pool.Name}'");
-            });
-        }
-
-        // Service key variables
-        foreach (var field in ServiceKeySchema.GetSchema())
-        {
-            if (!topology.ServiceKeys.ContainsKey(field.Key)) continue;
-
-            vars.Line();
-            vars.Block($"variable \"{field.Key}\"", b =>
-            {
-                b.Attribute("type", "string");
-                if (field.Sensitive)
-                    b.RawAttribute("sensitive", "true");
-                b.Attribute("description", field.Label);
-                b.Attribute("default", "");
-            });
-        }
+        // ComputePool + service key variables (shared)
+        GeneratePoolAndServiceKeyVariables(vars, topology, pools);
 
         return vars.ToString();
-    }
-
-    private static void CollectHostReplicaVariables(List<TopologyHelpers.HostEntry> hosts, HclBuilder vars)
-    {
-        foreach (var entry in hosts)
-        {
-            var (literal, varRef) = TopologyHelpers.ParseHostReplicas(entry.Host);
-            var hasMinMax = entry.Host.Config.ContainsKey("minReplicas") || entry.Host.Config.ContainsKey("maxReplicas");
-
-            var needsVariable = varRef != null || (literal.HasValue && literal.Value > 1 && hasMinMax);
-            if (!needsVariable) continue;
-
-            var varName = varRef != null ? TopologyHelpers.SanitizeName(varRef) : $"{TopologyHelpers.SanitizeName(entry.Host.Name)}_replicas";
-            var defaultValue = literal ?? 1;
-
-            var minStr = entry.Host.Config.GetValueOrDefault("minReplicas", "");
-            var maxStr = entry.Host.Config.GetValueOrDefault("maxReplicas", "");
-            var hasMin = int.TryParse(minStr, out var minVal);
-            var hasMax = int.TryParse(maxStr, out var maxVal);
-
-            vars.Line();
-            vars.Block($"variable \"{varName}\"", b =>
-            {
-                b.Attribute("type", "number");
-                b.Attribute("default", defaultValue);
-                b.Attribute("description", $"Number of replicas for host '{entry.Host.Name}'");
-
-                if (hasMin || hasMax)
-                {
-                    b.Block("validation", vb =>
-                    {
-                        if (hasMin && hasMax)
-                        {
-                            vb.RawAttribute("condition", $"var.{varName} >= {minVal} && var.{varName} <= {maxVal}");
-                            vb.Attribute("error_message", $"Replicas must be between {minVal} and {maxVal}.");
-                        }
-                        else if (hasMin)
-                        {
-                            vb.RawAttribute("condition", $"var.{varName} >= {minVal}");
-                            vb.Attribute("error_message", $"Replicas must be at least {minVal}.");
-                        }
-                        else
-                        {
-                            vb.RawAttribute("condition", $"var.{varName} <= {maxVal}");
-                            vb.Attribute("error_message", $"Replicas must be at most {maxVal}.");
-                        }
-                    });
-                }
-            });
-        }
     }
 
     private string GenerateInstances(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
@@ -829,61 +687,5 @@ public sealed class LinodeProvider : ICloudProvider
             }
         }
         return volumes.ToString();
-    }
-
-    private static string GenerateOutputs(List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
-    {
-        var outputs = new HclBuilder();
-        foreach (var entry in hosts)
-        {
-            var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
-            if (TopologyHelpers.IsReplicatedHost(entry))
-            {
-                outputs.Block($"output \"{resourceName}_ips\"", b =>
-                {
-                    b.RawAttribute("value", $"linode_instance.{resourceName}[*].ip_address");
-                    b.Attribute("description", $"Public IPs of {entry.Host.Name} instances");
-                });
-                outputs.Line();
-                outputs.Block($"output \"{resourceName}_private_ips\"", b =>
-                {
-                    b.RawAttribute("value", $"linode_instance.{resourceName}[*].private_ip_address");
-                    b.Attribute("description", $"Private IPs of {entry.Host.Name} instances");
-                });
-            }
-            else
-            {
-                outputs.Block($"output \"{resourceName}_ip\"", b =>
-                {
-                    b.RawAttribute("value", $"linode_instance.{resourceName}.ip_address");
-                    b.Attribute("description", $"Public IP of {entry.Host.Name}");
-                });
-            }
-            outputs.Line();
-        }
-
-        foreach (var pool in pools)
-        {
-            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
-            outputs.Block($"output \"{poolName}_ips\"", b =>
-            {
-                b.RawAttribute("value", $"linode_instance.{poolName}[*].ip_address");
-                b.Attribute("description", $"Public IPs of compute pool '{pool.Pool.Name}'");
-            });
-            outputs.Line();
-        }
-
-        foreach (var caddy in standaloneCaddies)
-        {
-            var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
-            outputs.Block($"output \"{resourceName}_ip\"", b =>
-            {
-                b.RawAttribute("value", $"linode_instance.{resourceName}.ip_address");
-                b.Attribute("description", $"Public IP of {caddy.Name}");
-            });
-            outputs.Line();
-        }
-
-        return outputs.ToString();
     }
 }

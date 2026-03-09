@@ -38,6 +38,11 @@ export const containerDefinitions: ContainerDefinition[] = [
       { id: '', name: 'upstream', type: 'Network', direction: 'Out', side: 'Bottom', offset: 0.5 },
     ],
     configFields: [
+      { key: 'provider', label: 'Provider Override', type: 'select', options: [
+        { value: '', label: 'Default' },
+        { value: 'linode', label: 'Linode' },
+        { value: 'aws', label: 'AWS' },
+      ] },
       { key: 'domain', label: 'Domain', placeholder: 'example.com' },
     ],
     description: 'Caddy reverse proxy with auto-TLS',

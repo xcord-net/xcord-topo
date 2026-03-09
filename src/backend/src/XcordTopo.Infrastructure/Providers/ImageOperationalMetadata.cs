@@ -221,7 +221,8 @@ public static class ImageOperationalMetadata
                 perTenantMb += 256;
         }
 
-        if (perTenantMb <= 0) return 0;
+        if (perTenantMb <= 0)
+            return poolImages.Count > 0 ? 1 : 0; // Dedicated host model: 1 tenant per host
         return available / perTenantMb;
     }
 

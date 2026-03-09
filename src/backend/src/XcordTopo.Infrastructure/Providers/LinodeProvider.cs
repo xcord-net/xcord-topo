@@ -138,16 +138,17 @@ public sealed class LinodeProvider : ICloudProvider
         var hosts = TopologyHelpers.CollectHosts(topology.Containers);
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology, poolSelections);
         var dnsContainers = TopologyHelpers.CollectDnsContainers(topology.Containers);
+        var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddiesRecursive(topology.Containers);
         var resolver = new WireResolver(topology);
 
         files["main.tf"] = GenerateMain();
         files["secrets.tf"] = GenerateSecrets(hosts, resolver, topology);
         files["variables.tf"] = GenerateVariables(topology, pools);
-        files["instances.tf"] = GenerateInstances(topology, hosts, pools);
-        files["firewall.tf"] = GenerateFirewall(topology, hosts);
-        files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology, pools);
+        files["instances.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies);
+        files["firewall.tf"] = GenerateFirewall(topology, hosts, standaloneCaddies);
+        files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
         files["volumes.tf"] = GenerateVolumes(hosts);
-        files["outputs.tf"] = GenerateOutputs(hosts, pools);
+        files["outputs.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
 
         if (dnsContainers.Count > 0)
             files["dns.tf"] = GenerateDnsRecords(dnsContainers, hosts, resolver, topology);
@@ -164,16 +165,17 @@ public sealed class LinodeProvider : ICloudProvider
         var hosts = TopologyHelpers.CollectHosts(ownedContainers.ToList());
         var pools = TopologyHelpers.CollectComputePools(ownedContainers.ToList(), topology, poolSelections);
         var dnsContainers = ownedContainers.Where(c => c.Kind == ContainerKind.Dns).ToList();
+        var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddies(ownedContainers.ToList());
         var resolver = new WireResolver(topology);
 
         files["main_linode.tf"] = GenerateMain();
         files["variables_linode.tf"] = GenerateVariables(topology, pools);
         files["secrets.tf"] = GenerateSecrets(hosts, resolver, topology);
-        files["instances_linode.tf"] = GenerateInstances(topology, hosts, pools);
-        files["firewall_linode.tf"] = GenerateFirewall(topology, hosts);
-        files["provisioning_linode.tf"] = GenerateProvisioning(hosts, resolver, topology, pools);
+        files["instances_linode.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies);
+        files["firewall_linode.tf"] = GenerateFirewall(topology, hosts, standaloneCaddies);
+        files["provisioning_linode.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
         files["volumes_linode.tf"] = GenerateVolumes(hosts);
-        files["outputs_linode.tf"] = GenerateOutputs(hosts, pools);
+        files["outputs_linode.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
 
         var allHosts = TopologyHelpers.CollectHosts(topology.Containers);
         if (dnsContainers.Count > 0)
@@ -442,7 +444,7 @@ public sealed class LinodeProvider : ICloudProvider
         }
     }
 
-    private string GenerateInstances(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools)
+    private string GenerateInstances(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
     {
         var instances = new HclBuilder();
         foreach (var entry in hosts)
@@ -491,10 +493,29 @@ public sealed class LinodeProvider : ICloudProvider
             instances.Line();
         }
 
+        // Standalone Caddy instances
+        foreach (var caddy in standaloneCaddies)
+        {
+            var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
+            var plan = SelectPlan(ImageOperationalMetadata.Caddy.MinRamMb);
+
+            instances.Block($"resource \"linode_instance\" \"{resourceName}\"", b =>
+            {
+                b.Attribute("label", $"{topology.Name}-{caddy.Name}");
+                b.RawAttribute("region", "var.region");
+                b.Attribute("type", plan);
+                b.Attribute("image", "linode/ubuntu24.04");
+                b.RawAttribute("authorized_keys", "[var.ssh_public_key]");
+                b.Line();
+                b.ListAttribute("tags", ["xcord-topo", topology.Name, "caddy"]);
+            });
+            instances.Line();
+        }
+
         return instances.ToString();
     }
 
-    private static string GenerateFirewall(Topology topology, List<TopologyHelpers.HostEntry> hosts)
+    private static string GenerateFirewall(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<Container> standaloneCaddies)
     {
         var firewall = new HclBuilder();
 
@@ -564,6 +585,12 @@ public sealed class LinodeProvider : ICloudProvider
                     refs.Add($"[linode_instance.{resourceName}.id]");
             }
 
+            foreach (var caddy in standaloneCaddies)
+            {
+                var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
+                refs.Add($"[linode_instance.{resourceName}.id]");
+            }
+
             if (refs.Any(r => r.Contains("[*]")))
             {
                 var concatArgs = string.Join(", ", refs);
@@ -571,14 +598,15 @@ public sealed class LinodeProvider : ICloudProvider
             }
             else
             {
-                var idRefs = hosts.Select(e => $"linode_instance.{TopologyHelpers.SanitizeName(e.Host.Name)}.id");
+                var idRefs = hosts.Select(e => $"linode_instance.{TopologyHelpers.SanitizeName(e.Host.Name)}.id")
+                    .Concat(standaloneCaddies.Select(c => $"linode_instance.{TopologyHelpers.SanitizeName(c.Name)}.id"));
                 b.RawAttribute("linodes", $"[{string.Join(", ", idRefs)}]");
             }
         });
         return firewall.ToString();
     }
 
-    private string GenerateProvisioning(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology, List<TopologyHelpers.ComputePoolEntry> pools)
+    private string GenerateProvisioning(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
     {
         var provisioning = new HclBuilder();
         foreach (var entry in hosts)
@@ -725,6 +753,41 @@ public sealed class LinodeProvider : ICloudProvider
             provisioning.Line();
         }
 
+        // Standalone Caddy provisioning
+        foreach (var caddy in standaloneCaddies)
+        {
+            var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
+            var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver);
+
+            provisioning.Block($"resource \"null_resource\" \"provision_{resourceName}\"", b =>
+            {
+                b.RawAttribute("depends_on", $"[linode_instance.{resourceName}]");
+                b.Line();
+                b.Block("connection", cb =>
+                {
+                    cb.Attribute("type", "ssh");
+                    cb.RawAttribute("host", $"linode_instance.{resourceName}.ip_address");
+                    cb.Attribute("user", "root");
+                });
+                b.Line();
+                b.Block("provisioner \"remote-exec\"", pb =>
+                {
+                    pb.RawAttribute("inline", "[");
+                    b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
+                    b.Line("  \"systemctl enable docker\",");
+                    b.Line("  \"systemctl start docker\",");
+                    b.Line("  \"docker network create xcord-bridge\",");
+                    b.Line($"  \"mkdir -p /opt/caddy\",");
+                    var escapedCaddyfile = caddyfile.Replace("\"", "\\\"").Replace("$", "\\$");
+                    var caddyfileLines = escapedCaddyfile.Split('\n');
+                    b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                    b.Line($"  \"docker run -d --name {resourceName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                    pb.Line("]");
+                });
+            });
+            provisioning.Line();
+        }
+
         return provisioning.ToString();
     }
 
@@ -768,7 +831,7 @@ public sealed class LinodeProvider : ICloudProvider
         return volumes.ToString();
     }
 
-    private static string GenerateOutputs(List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools)
+    private static string GenerateOutputs(List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
     {
         var outputs = new HclBuilder();
         foreach (var entry in hosts)
@@ -806,6 +869,17 @@ public sealed class LinodeProvider : ICloudProvider
             {
                 b.RawAttribute("value", $"linode_instance.{poolName}[*].ip_address");
                 b.Attribute("description", $"Public IPs of compute pool '{pool.Pool.Name}'");
+            });
+            outputs.Line();
+        }
+
+        foreach (var caddy in standaloneCaddies)
+        {
+            var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
+            outputs.Block($"output \"{resourceName}_ip\"", b =>
+            {
+                b.RawAttribute("value", $"linode_instance.{resourceName}.ip_address");
+                b.Attribute("description", $"Public IP of {caddy.Name}");
             });
             outputs.Line();
         }

@@ -15,10 +15,8 @@ public sealed class UpdateTopologyHandler(ITopologyStore store)
     public async Task<Result<Topology>> Handle(UpdateTopologyRequest request, CancellationToken ct)
     {
         var existing = await store.GetAsync(request.Topology.Id, ct);
-        if (existing is null)
-            return Error.NotFound("TOPOLOGY_NOT_FOUND", $"Topology {request.Topology.Id} not found");
-
-        request.Topology.CreatedAt = existing.CreatedAt;
+        // Upsert — preserve CreatedAt if topology already exists, otherwise set it now
+        request.Topology.CreatedAt = existing?.CreatedAt ?? DateTimeOffset.UtcNow;
         await store.SaveAsync(request.Topology, ct);
         return request.Topology;
     }

@@ -23,11 +23,8 @@ public static class TopologyHelpers
         foreach (var container in containers)
         {
             if (container.Kind == ContainerKind.Host)
-            {
                 result.Add(new HostEntry(container));
-                result.AddRange(CollectHosts(container.Children));
-            }
-            // ComputePool and Dns containers are handled separately
+            result.AddRange(CollectHosts(container.Children));
         }
         return result;
     }
@@ -56,6 +53,7 @@ public static class TopologyHelpers
 
                 result.Add(new ComputePoolEntry(container, tierProfile, targetTenants, selectedPlanId));
             }
+            result.AddRange(CollectComputePools(container.Children, topology, selections));
         }
         return result;
     }
@@ -84,6 +82,37 @@ public static class TopologyHelpers
     }
 
     /// <summary>
+    /// Collect standalone Caddy containers from a flat list of already-partitioned containers.
+    /// Used in multi-provider GenerateHclForContainers where PartitionContainers has already flattened.
+    /// Caddies inside a Host are NOT standalone — they're provisioned as part of the Host.
+    /// </summary>
+    public static List<Container> CollectStandaloneCaddies(List<Container> containers)
+    {
+        return containers.Where(c => c.Kind == ContainerKind.Caddy).ToList();
+    }
+
+    /// <summary>
+    /// Recursively collect Caddy containers that are not inside a Host.
+    /// Used in single-provider GenerateHcl where containers are still in tree form.
+    /// </summary>
+    public static List<Container> CollectStandaloneCaddiesRecursive(List<Container> containers)
+    {
+        var result = new List<Container>();
+        CollectCaddiesWalk(containers, false, result);
+        return result;
+    }
+
+    private static void CollectCaddiesWalk(List<Container> containers, bool insideHost, List<Container> result)
+    {
+        foreach (var c in containers)
+        {
+            if (c.Kind == ContainerKind.Caddy && !insideHost)
+                result.Add(c);
+            CollectCaddiesWalk(c.Children, insideHost || c.Kind == ContainerKind.Host, result);
+        }
+    }
+
+    /// <summary>
     /// Collect all DNS containers from the topology.
     /// </summary>
     public static List<Container> CollectDnsContainers(List<Container> containers)
@@ -93,6 +122,7 @@ public static class TopologyHelpers
         {
             if (container.Kind == ContainerKind.Dns)
                 result.Add(container);
+            result.AddRange(CollectDnsContainers(container.Children));
         }
         return result;
     }
@@ -129,6 +159,22 @@ public static class TopologyHelpers
         if (IsVariableRef(replicas))
             return (null, replicas[1..]);
         return (int.TryParse(replicas, out var n) ? n : 1, null);
+    }
+
+    public static (int Min, int Max) ParseReplicaRange(Dictionary<string, string> config)
+    {
+        var replicas = config.GetValueOrDefault("replicas", "1");
+        if (replicas.Contains('-'))
+        {
+            var parts = replicas.Split('-', 2);
+            var min = int.TryParse(parts[0], out var lo) ? lo : 1;
+            var max = int.TryParse(parts[1], out var hi) ? hi : min;
+            return (min, max);
+        }
+        var n = int.TryParse(replicas, out var v) ? v : 1;
+        var minR = config.TryGetValue("minReplicas", out var minStr) && int.TryParse(minStr, out var minVal) ? minVal : n;
+        var maxR = config.TryGetValue("maxReplicas", out var maxStr) && int.TryParse(maxStr, out var maxVal) ? maxVal : n;
+        return (Math.Min(minR, maxR), Math.Max(minR, maxR));
     }
 
     public static bool IsReplicatedHost(HostEntry entry)

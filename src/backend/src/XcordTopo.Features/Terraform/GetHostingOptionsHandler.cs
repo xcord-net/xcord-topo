@@ -17,7 +17,15 @@ public sealed record PoolHostingEntry(
     string PoolName, string TierProfileId, string TierProfileName,
     List<PoolHostingOption> Options);
 
-public sealed record GetHostingOptionsResponse(List<PoolHostingEntry> Pools);
+public sealed record InfraImageCost(
+    string ImageName, string ImageKind, string ContainerName,
+    int RamMb, string PlanId, string PlanLabel,
+    decimal PriceMonthly, int MinReplicas, int MaxReplicas,
+    decimal MinCostMonthly, decimal MaxCostMonthly);
+
+public sealed record GetHostingOptionsResponse(
+    List<PoolHostingEntry> Pools,
+    List<InfraImageCost> InfraImages);
 
 public sealed class GetHostingOptionsHandler(
     ITopologyStore topologyStore,
@@ -61,7 +69,66 @@ public sealed class GetHostingOptionsHandler(
                 pool.Pool.Name, pool.TierProfile.Id, pool.TierProfile.Name, options));
         }
 
-        return new GetHostingOptionsResponse(result);
+        // Collect infrastructure image costs (images NOT inside ComputePools)
+        var infraImages = new List<InfraImageCost>();
+        CollectInfraImages(topology.Containers, topology, registry, infraImages);
+
+        return new GetHostingOptionsResponse(result, infraImages);
+    }
+
+    private static void CollectInfraImages(
+        List<Container> containers, Topology topology,
+        ProviderRegistry registry, List<InfraImageCost> results)
+    {
+        foreach (var container in containers)
+        {
+            if (container.Kind == ContainerKind.ComputePool)
+                continue; // Pool images are handled by the pool section
+
+            // Group all images on this container into one host entry
+            if (container.Images.Count > 0 || container.Kind == ContainerKind.Caddy)
+            {
+                var totalRam = 0;
+
+                // Caddy containers include their own overhead
+                if (container.Kind == ContainerKind.Caddy)
+                    totalRam += ImageOperationalMetadata.Caddy.MinRamMb;
+
+                foreach (var image in container.Images)
+                {
+                    var imageRam = ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta)
+                        ? meta.MinRamMb : 256;
+                    totalRam += imageRam;
+                }
+
+                if (totalRam > 0)
+                {
+                    var providerKey = TopologyHelpers.ResolveProviderKey(container, topology);
+                    var provider = registry.Get(providerKey);
+                    if (provider is not null)
+                    {
+                        var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
+                        var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= totalRam) ?? plans.Last();
+
+                        var imageNames = container.Images.Select(i => i.Name).ToList();
+                        if (container.Kind == ContainerKind.Caddy)
+                            imageNames.Insert(0, "Caddy");
+                        var label = string.Join(", ", imageNames);
+
+                        var (minReplicas, maxReplicas) = TopologyHelpers.ParseReplicaRange(container.Config);
+
+                        results.Add(new InfraImageCost(
+                            container.Name, label, container.Name,
+                            totalRam, selectedPlan.Id, selectedPlan.Label,
+                            selectedPlan.PriceMonthly, minReplicas, maxReplicas,
+                            selectedPlan.PriceMonthly * minReplicas,
+                            selectedPlan.PriceMonthly * maxReplicas));
+                    }
+                }
+            }
+
+            CollectInfraImages(container.Children, topology, registry, results);
+        }
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)

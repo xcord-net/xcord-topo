@@ -2,6 +2,7 @@ import { Component, For, Show, createSignal, onMount } from 'solid-js';
 import { useInteraction } from '../stores/interaction.store';
 import { useTopology } from '../stores/topology.store';
 import { useHistory } from '../stores/history.store';
+import { useValidation } from '../stores/validation.store';
 import type { Container as ContainerType } from '../types/topology';
 import { containerDefinitions } from '../catalog/containers';
 import ImageNode from './ImageNode';
@@ -17,6 +18,7 @@ const ContainerNode: Component<{
   const interaction = useInteraction();
   const topo = useTopology();
   const history = useHistory();
+  const validation = useValidation();
 
   const offX = () => props.offsetX ?? 0;
   const offY = () => props.offsetY ?? 0;
@@ -25,6 +27,9 @@ const ContainerNode: Component<{
 
   const def = () => containerDefinitions.find(d => d.kind === props.container.kind);
   const isSelected = () => interaction.selectedNodeIds.has(props.container.id);
+  const hasError = () => validation.hasErrors(props.container.id);
+  const hasWarning = () => validation.hasWarnings(props.container.id);
+  const errorCount = () => validation.nodeErrorCount(props.container.id);
 
   const drag = () => interaction.dragState;
   const isDropTarget = () => drag()?.dropTargetId === props.container.id;
@@ -48,8 +53,8 @@ const ContainerNode: Component<{
         height={props.container.height}
         rx={8}
         fill="#1f2335"
-        stroke={isSelected() ? '#7aa2f7' : (def()?.color ?? '#3b4261')}
-        stroke-width={isSelected() ? 2 : 1}
+        stroke={hasError() ? '#f7768e' : hasWarning() ? '#e0af68' : isSelected() ? '#7aa2f7' : (def()?.color ?? '#3b4261')}
+        stroke-width={hasError() || hasWarning() ? 2 : isSelected() ? 2 : 1}
         opacity={0.95}
         style={{ 'pointer-events': 'none' }}
       />
@@ -195,6 +200,31 @@ const ContainerNode: Component<{
           />
         )}
       </For>
+
+      {/* Error/warning badge */}
+      <Show when={errorCount() > 0}>
+        <rect
+          x={absX() + props.container.width - 24}
+          y={absY() - 10}
+          width={20}
+          height={20}
+          rx={10}
+          fill={hasError() ? '#f7768e' : '#e0af68'}
+          style={{ 'pointer-events': 'none' }}
+        />
+        <text
+          x={absX() + props.container.width - 14}
+          y={absY()}
+          fill="#1a1b26"
+          font-size="11"
+          font-weight="700"
+          text-anchor="middle"
+          dominant-baseline="middle"
+          style={{ 'pointer-events': 'none', 'user-select': 'none' }}
+        >
+          {errorCount()}
+        </text>
+      </Show>
 
       {/* Container ports */}
       <For each={props.container.ports}>

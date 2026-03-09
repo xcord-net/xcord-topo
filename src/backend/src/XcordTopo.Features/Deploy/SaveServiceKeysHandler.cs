@@ -10,7 +10,7 @@ namespace XcordTopo.Features.Deploy;
 
 public sealed record SaveServiceKeysRequest(Dictionary<string, string> Variables);
 
-public sealed record SaveServiceKeysResponse(string Status);
+public sealed record SaveServiceKeysResponse(string Status, CredentialStatus UpdatedStatus);
 
 public sealed class SaveServiceKeysHandler(ICredentialStore credentialStore)
     : IRequestHandler<SaveServiceKeysRequest, Result<SaveServiceKeysResponse>>, IValidatable<SaveServiceKeysRequest>
@@ -35,7 +35,8 @@ public sealed class SaveServiceKeysHandler(ICredentialStore credentialStore)
         }
 
         await credentialStore.SaveAsync("service-keys", request.Variables, ct);
-        return new SaveServiceKeysResponse("saved");
+        var updatedStatus = await credentialStore.GetStatusAsync("service-keys", ct);
+        return new SaveServiceKeysResponse("saved", updatedStatus);
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)

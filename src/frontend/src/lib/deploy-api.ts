@@ -10,13 +10,15 @@ export async function getCredentialStatus(providerKey: string): Promise<Credenti
   return res.json();
 }
 
-export async function saveCredentials(providerKey: string, variables: Record<string, string>): Promise<void> {
+export async function saveCredentials(providerKey: string, variables: Record<string, string>): Promise<CredentialStatus> {
   const res = await fetch(`${API_BASE}/providers/${providerKey}/credentials`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ variables }),
   });
   if (!res.ok) throw new Error(`Failed to save credentials: ${res.statusText}`);
+  const data = await res.json();
+  return data.updatedStatus;
 }
 
 // --- Credential schema ---
@@ -43,13 +45,15 @@ export async function getServiceKeyStatus(): Promise<CredentialStatus> {
   return res.json();
 }
 
-export async function saveServiceKeys(variables: Record<string, string>): Promise<void> {
+export async function saveServiceKeys(variables: Record<string, string>): Promise<CredentialStatus> {
   const res = await fetch(`${API_BASE}/service-keys`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ variables }),
   });
   if (!res.ok) throw new Error(`Failed to save service keys: ${res.statusText}`);
+  const data = await res.json();
+  return data.updatedStatus;
 }
 
 // --- SSH keypair ---

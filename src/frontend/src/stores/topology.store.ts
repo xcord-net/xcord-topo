@@ -62,38 +62,46 @@ function absoluteContainerPos(containers: Container[], targetId: string, offX = 
 const STORAGE_KEY = 'xcord-topo:topology';
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** Apply schema migrations to a topology loaded from any source (localStorage, API, etc.) */
+function migrateTopology(topology: Topology): Topology {
+  // Backfill children arrays for topologies saved before nesting support
+  const backfillChildren = (containers: Container[]) => {
+    for (const c of containers) {
+      if (!c.children) c.children = [];
+      backfillChildren(c.children);
+    }
+  };
+  backfillChildren(topology.containers);
+  // Backfill serviceKeys for topologies saved before service key support
+  if (!topology.serviceKeys) topology.serviceKeys = {};
+  // Migrate image ports and backfill scaling from catalog defaults
+  const migrateImages = (containers: Container[]) => {
+    for (const c of containers) {
+      for (const img of c.images) {
+        const def = imageDefinitions.find(d => d.kind === img.kind);
+        if (!def) continue;
+        // Replace ports with catalog defaults, preserving IDs by position
+        img.ports = def.defaultPorts.map((dp, i) => ({
+          ...dp,
+          id: img.ports[i]?.id || crypto.randomUUID(),
+        }));
+        // Backfill scaling for images saved before scaling support
+        if (!img.scaling) {
+          img.scaling = def.defaultScaling ?? 'Shared';
+        }
+      }
+      migrateImages(c.children);
+    }
+  };
+  migrateImages(topology.containers);
+  return topology;
+}
+
 function loadFromStorage(): Topology {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Topology;
-      // Backfill children arrays for topologies saved before nesting support
-      const backfill = (containers: Container[]) => {
-        for (const c of containers) {
-          if (!c.children) c.children = [];
-          backfill(c.children);
-        }
-      };
-      backfill(parsed.containers);
-      // Backfill serviceKeys for topologies saved before service key support
-      if (!parsed.serviceKeys) parsed.serviceKeys = {};
-      // Migrate image ports to current catalog definitions (names, sides, offsets)
-      const migrateImagePorts = (containers: Container[]) => {
-        for (const c of containers) {
-          for (const img of c.images) {
-            const def = imageDefinitions.find(d => d.kind === img.kind);
-            if (!def) continue;
-            // Replace ports with catalog defaults, preserving IDs by position
-            img.ports = def.defaultPorts.map((dp, i) => ({
-              ...dp,
-              id: img.ports[i]?.id || crypto.randomUUID(),
-            }));
-          }
-          migrateImagePorts(c.children);
-        }
-      };
-      migrateImagePorts(parsed.containers);
-      return parsed;
+      return migrateTopology(JSON.parse(raw) as Topology);
     }
   } catch { /* ignore corrupt data */ }
   return createEmptyTopology();
@@ -125,7 +133,7 @@ export function useTopology() {
     get topology() { return store.topology; },
 
     load(topology: Topology): void {
-      store.setTopology(reconcile(topology));
+      store.setTopology(reconcile(migrateTopology(topology)));
     },
 
     reset(): void {

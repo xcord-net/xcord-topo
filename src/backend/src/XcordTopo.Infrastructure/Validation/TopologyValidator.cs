@@ -89,7 +89,7 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
                 {
                     if (!IsValidReplicaValue(replicas))
                         items.Add(new(ValidationSeverity.Error,
-                            $"Image '{image.Name}' has invalid replicas value '{replicas}'. Must be a positive integer or a $VARIABLE reference.",
+                            $"Image '{image.Name}' has invalid replicas value '{replicas}'. Must be a positive integer, a range (e.g. 1-3), or a $VARIABLE reference.",
                             NodeId: image.Id.ToString(), Field: "replicas"));
                 }
             }
@@ -126,7 +126,8 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
 
     private static void CheckNameUniqueness(Topology topology, List<TopologyValidationError> items)
     {
-        var seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Container names must be globally unique (they become Terraform resource names)
+        var seenContainers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         void Walk(List<Container> containers)
         {
@@ -135,25 +136,28 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
                 var sanitized = TopologyHelpers.SanitizeName(c.Name);
                 if (!string.IsNullOrEmpty(sanitized))
                 {
-                    if (seen.TryGetValue(sanitized, out var existing))
+                    if (seenContainers.TryGetValue(sanitized, out var existing))
                         items.Add(new(ValidationSeverity.Error,
                             $"Name collision: '{c.Name}' and '{existing}' both sanitize to '{sanitized}', causing Terraform resource conflicts.",
                             NodeId: c.Id.ToString(), Field: "name"));
                     else
-                        seen[sanitized] = c.Name;
+                        seenContainers[sanitized] = c.Name;
                 }
 
+                // Image names only need to be unique within their parent container
+                // (they become Docker container names scoped to the host)
+                var seenImages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var img in c.Images)
                 {
                     var imgSanitized = TopologyHelpers.SanitizeName(img.Name);
                     if (!string.IsNullOrEmpty(imgSanitized))
                     {
-                        if (seen.TryGetValue(imgSanitized, out var existing))
+                        if (seenImages.TryGetValue(imgSanitized, out var existing))
                             items.Add(new(ValidationSeverity.Error,
-                                $"Name collision: '{img.Name}' and '{existing}' both sanitize to '{imgSanitized}', causing Terraform resource conflicts.",
+                                $"Name collision: '{img.Name}' and '{existing}' both sanitize to '{imgSanitized}' within '{c.Name}'.",
                                 NodeId: img.Id.ToString(), Field: "name"));
                         else
-                            seen[imgSanitized] = img.Name;
+                            seenImages[imgSanitized] = img.Name;
                     }
                 }
 
@@ -479,7 +483,16 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
     {
         if (value.StartsWith('$') && value.Length > 1 && !value.Contains(' '))
             return true;
-        return int.TryParse(value, out var n) && n > 0;
+        if (int.TryParse(value, out var n) && n > 0)
+            return true;
+        // Accept range format "min-max" where both are positive integers and min <= max
+        var parts = value.Split('-');
+        if (parts.Length == 2
+            && int.TryParse(parts[0], out var min) && min > 0
+            && int.TryParse(parts[1], out var max) && max > 0
+            && min <= max)
+            return true;
+        return false;
     }
 
     [GeneratedRegex(@"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")]

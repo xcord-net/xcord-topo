@@ -139,13 +139,16 @@ public sealed class WireResolver
     }
 
     /// <summary>
-    /// Resolve the target image for a wire originating from a given port on a source image.
-    /// Returns the target image and its port.
+    /// Resolve the target image wired to a given port on a source image.
+    /// Checks both directions — wires can be drawn from either end.
     /// </summary>
     public Image? ResolveWiredImage(Guid sourceImageId, string portName)
     {
-        var result = ResolveOutgoing(sourceImageId, portName);
-        return result?.Node as Image;
+        var outgoing = ResolveOutgoing(sourceImageId, portName);
+        if (outgoing?.Node is Image outImg) return outImg;
+
+        var incoming = ResolveIncoming(sourceImageId, portName);
+        return incoming.Select(r => r.Node).OfType<Image>().FirstOrDefault();
     }
 
     /// <summary>

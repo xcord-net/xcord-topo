@@ -162,6 +162,7 @@ public sealed class AwsProvider : ICloudProvider
         var hosts = TopologyHelpers.CollectHosts(topology.Containers);
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology, poolSelections);
         var dnsContainers = TopologyHelpers.CollectDnsContainers(topology.Containers);
+        var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddiesRecursive(topology.Containers);
         var resolver = new WireResolver(topology);
 
         files["main.tf"] = GenerateMain();
@@ -169,9 +170,9 @@ public sealed class AwsProvider : ICloudProvider
         files["secrets.tf"] = GenerateSecrets(hosts, resolver);
         files["network.tf"] = GenerateNetwork(topology);
         files["security_groups.tf"] = GenerateSecurityGroups(topology, hosts);
-        files["instances.tf"] = GenerateInstances(topology, hosts, pools);
-        files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology, pools);
-        files["outputs.tf"] = GenerateOutputs(hosts, pools);
+        files["instances.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies);
+        files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
+        files["outputs.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
 
         if (dnsContainers.Count > 0)
             files["dns.tf"] = GenerateDnsRecords(dnsContainers, hosts, resolver, topology);
@@ -188,6 +189,7 @@ public sealed class AwsProvider : ICloudProvider
         var hosts = TopologyHelpers.CollectHosts(ownedContainers.ToList());
         var pools = TopologyHelpers.CollectComputePools(ownedContainers.ToList(), topology, poolSelections);
         var dnsContainers = ownedContainers.Where(c => c.Kind == ContainerKind.Dns).ToList();
+        var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddies(ownedContainers.ToList());
         var resolver = new WireResolver(topology);
 
         files["main_aws.tf"] = GenerateMain();
@@ -195,9 +197,9 @@ public sealed class AwsProvider : ICloudProvider
         files["secrets.tf"] = GenerateSecrets(hosts, resolver);
         files["network_aws.tf"] = GenerateNetwork(topology);
         files["security_groups_aws.tf"] = GenerateSecurityGroups(topology, hosts);
-        files["instances_aws.tf"] = GenerateInstances(topology, hosts, pools);
-        files["provisioning_aws.tf"] = GenerateProvisioning(hosts, resolver, topology, pools);
-        files["outputs_aws.tf"] = GenerateOutputs(hosts, pools);
+        files["instances_aws.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies);
+        files["provisioning_aws.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
+        files["outputs_aws.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
 
         var allHosts = TopologyHelpers.CollectHosts(topology.Containers);
         if (dnsContainers.Count > 0)
@@ -628,7 +630,7 @@ public sealed class AwsProvider : ICloudProvider
         return sg.ToString();
     }
 
-    private string GenerateInstances(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools)
+    private string GenerateInstances(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
     {
         var topoName = TopologyHelpers.SanitizeName(topology.Name);
         var instances = new HclBuilder();
@@ -732,10 +734,40 @@ public sealed class AwsProvider : ICloudProvider
             instances.Line();
         }
 
+        // Standalone Caddy instances
+        foreach (var caddy in standaloneCaddies)
+        {
+            var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
+            var instanceType = SelectPlan(ImageOperationalMetadata.Caddy.MinRamMb);
+
+            instances.Block($"resource \"aws_instance\" \"{resourceName}\"", b =>
+            {
+                b.RawAttribute("ami", "data.aws_ami.ubuntu.id");
+                b.Attribute("instance_type", instanceType);
+                b.RawAttribute("subnet_id", $"aws_subnet.{topoName}.id");
+                b.RawAttribute("vpc_security_group_ids", $"[aws_security_group.{topoName}.id]");
+                b.RawAttribute("key_name", $"var.ssh_public_key != \"\" ? aws_key_pair.{topoName}[0].key_name : null");
+                b.Line();
+                b.Block("root_block_device", rb =>
+                {
+                    rb.Attribute("volume_size", 20);
+                    rb.Attribute("volume_type", "gp3");
+                });
+                b.Line();
+                b.Block("tags", tb =>
+                {
+                    tb.Attribute("Name", $"{topology.Name}-{caddy.Name}");
+                    tb.Attribute("Project", "xcord-topo");
+                    tb.Attribute("Topology", topology.Name);
+                });
+            });
+            instances.Line();
+        }
+
         return instances.ToString();
     }
 
-    private static string GenerateProvisioning(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology, List<TopologyHelpers.ComputePoolEntry> pools)
+    private static string GenerateProvisioning(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
     {
         var provisioning = new HclBuilder();
         foreach (var entry in hosts)
@@ -880,10 +912,46 @@ public sealed class AwsProvider : ICloudProvider
             provisioning.Line();
         }
 
+        // Standalone Caddy provisioning
+        foreach (var caddy in standaloneCaddies)
+        {
+            var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
+            var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver);
+
+            provisioning.Block($"resource \"null_resource\" \"provision_{resourceName}\"", b =>
+            {
+                b.RawAttribute("depends_on", $"[aws_instance.{resourceName}]");
+                b.Line();
+                b.Block("connection", cb =>
+                {
+                    cb.Attribute("type", "ssh");
+                    cb.RawAttribute("host", $"aws_instance.{resourceName}.public_ip");
+                    cb.Attribute("user", "ubuntu");
+                });
+                b.Line();
+                b.Block("provisioner \"remote-exec\"", pb =>
+                {
+                    pb.RawAttribute("inline", "[");
+                    b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
+                    b.Line("  \"sudo usermod -aG docker ubuntu\",");
+                    b.Line("  \"sudo systemctl enable docker\",");
+                    b.Line("  \"sudo systemctl start docker\",");
+                    b.Line("  \"sudo docker network create xcord-bridge\",");
+                    b.Line($"  \"sudo mkdir -p /opt/caddy\",");
+                    var escapedCaddyfile = caddyfile.Replace("\"", "\\\"").Replace("$", "\\$");
+                    var caddyfileLines = escapedCaddyfile.Split('\n');
+                    b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                    b.Line($"  \"sudo docker run -d --name {resourceName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                    pb.Line("]");
+                });
+            });
+            provisioning.Line();
+        }
+
         return provisioning.ToString();
     }
 
-    private static string GenerateOutputs(List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools)
+    private static string GenerateOutputs(List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
     {
         var outputs = new HclBuilder();
         foreach (var entry in hosts)
@@ -921,6 +989,17 @@ public sealed class AwsProvider : ICloudProvider
             {
                 b.RawAttribute("value", $"aws_instance.{poolName}[*].public_ip");
                 b.Attribute("description", $"Public IPs of compute pool '{pool.Pool.Name}'");
+            });
+            outputs.Line();
+        }
+
+        foreach (var caddy in standaloneCaddies)
+        {
+            var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
+            outputs.Block($"output \"{resourceName}_ip\"", b =>
+            {
+                b.RawAttribute("value", $"aws_instance.{resourceName}.public_ip");
+                b.Attribute("description", $"Public IP of {caddy.Name}");
             });
             outputs.Line();
         }

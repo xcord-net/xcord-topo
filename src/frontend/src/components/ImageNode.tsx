@@ -1,5 +1,6 @@
 import { Component, For, Show } from 'solid-js';
 import { useInteraction } from '../stores/interaction.store';
+import { useValidation } from '../stores/validation.store';
 import type { Image } from '../types/topology';
 import { imageDefinitions } from '../catalog/images';
 import PortCircle from './PortCircle';
@@ -11,11 +12,15 @@ const ImageNode: Component<{
   containerId: string;
 }> = (props) => {
   const interaction = useInteraction();
+  const validation = useValidation();
   const def = () => imageDefinitions.find(d => d.kind === props.image.kind);
 
   const absX = () => props.containerX + props.image.x;
   const absY = () => props.containerY + props.image.y;
   const isSelected = () => interaction.selectedNodeIds.has(props.image.id);
+  const hasError = () => validation.hasErrors(props.image.id);
+  const hasWarning = () => validation.hasWarnings(props.image.id);
+  const errorCount = () => validation.nodeErrorCount(props.image.id);
   const isDragging = () => interaction.mode === 'dragging';
   const handleCursor = () => isDragging() ? 'grabbing' : 'grab';
 
@@ -63,8 +68,8 @@ const ImageNode: Component<{
         height={props.image.height}
         rx={4}
         fill="#24283b"
-        stroke={isSelected() ? '#7aa2f7' : (def()?.color ?? '#565f89')}
-        stroke-width={isSelected() ? 2 : 1}
+        stroke={hasError() ? '#f7768e' : hasWarning() ? '#e0af68' : isSelected() ? '#7aa2f7' : (def()?.color ?? '#565f89')}
+        stroke-width={hasError() || hasWarning() || isSelected() ? 2 : 1}
         style={{ cursor: handleCursor() }}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
@@ -114,6 +119,31 @@ const ImageNode: Component<{
           />
         )}
       </For>
+
+      {/* Error/warning badge */}
+      <Show when={errorCount() > 0}>
+        <rect
+          x={absX() - 4}
+          y={absY() - 8}
+          width={20}
+          height={16}
+          rx={8}
+          fill={hasError() ? '#f7768e' : '#e0af68'}
+          style={{ 'pointer-events': 'none' }}
+        />
+        <text
+          x={absX() + 6}
+          y={absY()}
+          fill="#1a1b26"
+          font-size="10"
+          font-weight="700"
+          text-anchor="middle"
+          dominant-baseline="middle"
+          style={{ 'pointer-events': 'none', 'user-select': 'none' }}
+        >
+          {errorCount()}
+        </text>
+      </Show>
 
       {/* Replica badge */}
       <Show when={replicaLabel()}>

@@ -3,6 +3,7 @@ import type { ConfigField } from '../types/catalog';
 import { useTopology } from '../stores/topology.store';
 import { useInteraction } from '../stores/interaction.store';
 import { useHistory } from '../stores/history.store';
+import { useValidation } from '../stores/validation.store';
 import { containerDefinitions } from '../catalog/containers';
 import { imageDefinitions } from '../catalog/images';
 import type { Container, ContainerKind, Image } from '../types/topology';
@@ -71,6 +72,7 @@ const PropertiesPanel: Component = () => {
   const topo = useTopology();
   const interaction = useInteraction();
   const history = useHistory();
+  const validation = useValidation();
 
   const selectedContainer = createMemo(() => {
     const id = interaction.selectedNodeId;
@@ -83,6 +85,23 @@ const PropertiesPanel: Component = () => {
     if (!id) return null;
     return findImageDeep(topo.topology.containers, id);
   });
+
+  const nodeErrors = createMemo(() => {
+    const id = interaction.selectedNodeId;
+    if (!id) return [];
+    return validation.nodeErrors.get(id) ?? [];
+  });
+
+  const fieldHasError = (field: string) => {
+    return nodeErrors().some(e => e.field === field && e.severity === 'Error');
+  };
+
+  const fieldHasWarning = (field: string) => {
+    return nodeErrors().some(e => e.field === field && e.severity === 'Warning');
+  };
+
+  /** Errors that don't have a specific field (structural issues like missing wires). */
+  const generalErrors = createMemo(() => nodeErrors().filter(e => !e.field));
 
   const configFields = createMemo(() => {
     const c = selectedContainer();
@@ -136,10 +155,27 @@ const PropertiesPanel: Component = () => {
       <Show when={selectedContainer()}>
         {(container) => (
           <div class="space-y-3">
+            {/* Validation errors */}
+            <Show when={nodeErrors().length > 0}>
+              <div class="space-y-1">
+                <For each={nodeErrors()}>
+                  {(err) => (
+                    <div class={`px-2 py-1.5 rounded text-[11px] leading-tight ${
+                      err.severity === 'Error'
+                        ? 'bg-red-500/10 border border-red-500/20 text-red-400'
+                        : 'bg-amber-500/10 border border-amber-500/20 text-amber-400'
+                    }`}>
+                      {err.message}
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+
             <div>
               <label class="text-xs text-topo-text-muted">Name</label>
               <input
-                class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                class={`w-full bg-topo-bg-tertiary border rounded px-2 py-1 text-sm text-topo-text-primary mt-1 ${fieldHasError('name') ? 'border-red-500' : 'border-topo-border'}`}
                 value={container().name}
                 onInput={(e) => updateContainerProp('name', e.currentTarget.value)}
               />
@@ -160,7 +196,7 @@ const PropertiesPanel: Component = () => {
                         <FieldLabel field={field} />
                         {field.type === 'select' ? (
                           <select
-                            class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                            class={`w-full bg-topo-bg-tertiary border rounded px-2 py-1 text-sm text-topo-text-primary mt-1 ${fieldHasError(field.key) ? 'border-red-500' : 'border-topo-border'}`}
                             value={container().config[field.key] ?? ''}
                             onChange={(e) => updateContainerConfig(field.key, e.currentTarget.value)}
                           >
@@ -170,7 +206,7 @@ const PropertiesPanel: Component = () => {
                           </select>
                         ) : (
                           <input
-                            class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                            class={`w-full bg-topo-bg-tertiary border rounded px-2 py-1 text-sm text-topo-text-primary mt-1 ${fieldHasError(field.key) ? 'border-red-500' : 'border-topo-border'}`}
                             value={container().config[field.key] ?? ''}
                             placeholder={field.placeholder}
                             onInput={(e) => updateContainerConfig(field.key, e.currentTarget.value)}
@@ -204,10 +240,27 @@ const PropertiesPanel: Component = () => {
       <Show when={selectedImage()}>
         {(imgData) => (
           <div class="space-y-3">
+            {/* Validation errors */}
+            <Show when={nodeErrors().length > 0}>
+              <div class="space-y-1">
+                <For each={nodeErrors()}>
+                  {(err) => (
+                    <div class={`px-2 py-1.5 rounded text-[11px] leading-tight ${
+                      err.severity === 'Error'
+                        ? 'bg-red-500/10 border border-red-500/20 text-red-400'
+                        : 'bg-amber-500/10 border border-amber-500/20 text-amber-400'
+                    }`}>
+                      {err.message}
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+
             <div>
               <label class="text-xs text-topo-text-muted">Name</label>
               <input
-                class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                class={`w-full bg-topo-bg-tertiary border rounded px-2 py-1 text-sm text-topo-text-primary mt-1 ${fieldHasError('name') ? 'border-red-500' : 'border-topo-border'}`}
                 value={imgData().image.name}
                 onInput={(e) => updateImageProp('name', e.currentTarget.value)}
               />
@@ -232,12 +285,13 @@ const PropertiesPanel: Component = () => {
                         ? updateImageProp(field.key as keyof Image, v)
                         : updateImageConfig(field.key, v);
                       const error = () => field.validate?.(getValue()) ?? null;
+                      const hasFieldErr = () => error() || fieldHasError(field.key);
                       return (
                         <div>
                           <FieldLabel field={field} />
                           {field.type === 'select' ? (
                             <select
-                              class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                              class={`w-full bg-topo-bg-tertiary border rounded px-2 py-1 text-sm text-topo-text-primary mt-1 ${hasFieldErr() ? 'border-red-500' : 'border-topo-border'}`}
                               value={getValue()}
                               onChange={(e) => setValue(e.currentTarget.value)}
                             >
@@ -247,7 +301,7 @@ const PropertiesPanel: Component = () => {
                             </select>
                           ) : (
                             <input
-                              class={`w-full bg-topo-bg-tertiary border rounded px-2 py-1 text-sm text-topo-text-primary mt-1 ${error() ? 'border-red-500' : 'border-topo-border'}`}
+                              class={`w-full bg-topo-bg-tertiary border rounded px-2 py-1 text-sm text-topo-text-primary mt-1 ${hasFieldErr() ? 'border-red-500' : 'border-topo-border'}`}
                               value={getValue()}
                               placeholder={field.placeholder}
                               onInput={(e) => setValue(e.currentTarget.value)}

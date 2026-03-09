@@ -80,8 +80,23 @@ export interface PoolHostingEntry {
   options: PoolHostingOption[];
 }
 
+export interface InfraImageCost {
+  imageName: string;
+  imageKind: string;
+  containerName: string;
+  ramMb: number;
+  planId: string;
+  planLabel: string;
+  priceMonthly: number;
+  minReplicas: number;
+  maxReplicas: number;
+  minCostMonthly: number;
+  maxCostMonthly: number;
+}
+
 export interface HostingOptions {
   pools: PoolHostingEntry[];
+  infraImages: InfraImageCost[];
 }
 
 export interface PoolSelection {

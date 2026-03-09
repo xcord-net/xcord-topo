@@ -53,9 +53,9 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         {
             foreach (var container in containers)
             {
-                // Only top-level provisionable containers get partitioned
                 if (container.Kind is ContainerKind.Host
-                    or ContainerKind.ComputePool or ContainerKind.Dns)
+                    or ContainerKind.ComputePool or ContainerKind.Dns
+                    or ContainerKind.Caddy)
                 {
                     var key = TopologyHelpers.ResolveProviderKey(container, topology);
                     if (!result.TryGetValue(key, out var list))
@@ -65,6 +65,10 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
                     }
                     list.Add(container);
                 }
+
+                // Always recurse — provisionable containers may be nested
+                // under non-provisionable ones
+                Walk(container.Children);
             }
         }
 

@@ -10,7 +10,7 @@ namespace XcordTopo.Features.Deploy;
 
 public sealed record SaveCredentialsRequest(string ProviderKey, Dictionary<string, string> Variables);
 
-public sealed record SaveCredentialsResponse(string Status);
+public sealed record SaveCredentialsResponse(string Status, CredentialStatus UpdatedStatus);
 
 public sealed class SaveCredentialsHandler(
     ICredentialStore credentialStore,
@@ -43,7 +43,8 @@ public sealed class SaveCredentialsHandler(
         }
 
         await credentialStore.SaveAsync(request.ProviderKey, request.Variables, ct);
-        return new SaveCredentialsResponse("saved");
+        var updatedStatus = await credentialStore.GetStatusAsync(request.ProviderKey, ct);
+        return new SaveCredentialsResponse("saved", updatedStatus);
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)

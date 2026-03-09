@@ -2,12 +2,14 @@ import { Component, createSignal, createResource, Show, For } from 'solid-js';
 import { useTopology } from '../stores/topology.store';
 import { useCanvas } from '../stores/canvas.store';
 import { useHistory } from '../stores/history.store';
+import { useValidation } from '../stores/validation.store';
 import * as api from '../lib/serialization';
 
 const Toolbar: Component<{ onToggleDeploy: () => void }> = (props) => {
   const topo = useTopology();
   const canvas = useCanvas();
   const history = useHistory();
+  const validation = useValidation();
   const [saving, setSaving] = createSignal(false);
   const [showTopologyList, setShowTopologyList] = createSignal(false);
 
@@ -188,6 +190,18 @@ const Toolbar: Component<{ onToggleDeploy: () => void }> = (props) => {
       </button>
 
       <div class="flex-1" />
+
+      {/* Validation status */}
+      <Show when={validation.errorCount > 0}>
+        <span class="text-xs text-red-400 font-medium">
+          {validation.errorCount} error{validation.errorCount !== 1 ? 's' : ''}
+        </span>
+      </Show>
+      <Show when={validation.errorCount === 0 && validation.warningCount > 0}>
+        <span class="text-xs text-amber-400 font-medium">
+          {validation.warningCount} warning{validation.warningCount !== 1 ? 's' : ''}
+        </span>
+      </Show>
 
       {/* Deploy */}
       <button

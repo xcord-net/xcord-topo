@@ -61,6 +61,9 @@ public sealed class EstimateCostHandler(
             total += lineTotal;
         }
 
+        // Infrastructure image costs (images NOT on Host or ComputePool containers)
+        CollectInfraImageCosts(topology.Containers, topology, registry, entries, ref total);
+
         // ComputePool cost estimation with tier-aware density
         foreach (var pool in pools)
         {
@@ -110,6 +113,54 @@ public sealed class EstimateCostHandler(
         }
 
         return new CostEstimateResponse(entries, total);
+    }
+
+    private static void CollectInfraImageCosts(
+        List<Container> containers, Topology topology,
+        ProviderRegistry registry, List<HostCostEntry> entries, ref decimal total)
+    {
+        foreach (var container in containers)
+        {
+            if (container.Kind is ContainerKind.Host or ContainerKind.ComputePool)
+                continue;
+
+            // Group all images on this container into one host entry
+            if (container.Images.Count > 0 || container.Kind == ContainerKind.Caddy)
+            {
+                var totalRam = 0;
+
+                if (container.Kind == ContainerKind.Caddy)
+                    totalRam += ImageOperationalMetadata.Caddy.MinRamMb;
+
+                foreach (var image in container.Images)
+                {
+                    var imageRam = ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta)
+                        ? meta.MinRamMb : 256;
+                    totalRam += imageRam;
+                }
+
+                if (totalRam > 0)
+                {
+                    var providerKey = TopologyHelpers.ResolveProviderKey(container, topology);
+                    var provider = registry.Get(providerKey);
+                    if (provider is not null)
+                    {
+                        var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
+                        var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= totalRam) ?? plans.Last();
+
+                        var (minReplicas, _) = TopologyHelpers.ParseReplicaRange(container.Config);
+                        var lineTotal = selectedPlan.PriceMonthly * minReplicas;
+
+                        entries.Add(new HostCostEntry(
+                            container.Name, selectedPlan.Id, selectedPlan.Label,
+                            totalRam, minReplicas, lineTotal));
+                        total += lineTotal;
+                    }
+                }
+            }
+
+            CollectInfraImageCosts(container.Children, topology, registry, entries, ref total);
+        }
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)

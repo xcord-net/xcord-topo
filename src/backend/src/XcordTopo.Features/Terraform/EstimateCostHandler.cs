@@ -12,9 +12,12 @@ public sealed record CostEstimateRequest(
 
 public sealed record CostEstimateBody(List<TopologyHelpers.PoolSelection>? PoolSelections);
 
+public sealed record ServiceBreakdownItem(string Name, string Kind, int RamMb);
+
 public sealed record HostCostEntry(
     string HostName, string PlanId, string PlanLabel, int RamMb, int Count, decimal PricePerMonth,
-    string? TierProfileId = null, int? TenantsPerHost = null, int? TargetTenants = null);
+    string? TierProfileId = null, int? TenantsPerHost = null, int? TargetTenants = null,
+    List<ServiceBreakdownItem>? Services = null);
 
 public sealed record CostEstimateResponse(List<HostCostEntry> Hosts, decimal TotalMonthly);
 
@@ -29,138 +32,72 @@ public sealed class EstimateCostHandler(
         if (topology is null)
             return Error.NotFound("TOPOLOGY_NOT_FOUND", "Topology not found");
 
-        var provider = registry.Get(topology.Provider);
-        if (provider is null)
-            return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{topology.Provider}' not found");
-
-        var hosts = TopologyHelpers.CollectHosts(topology.Containers);
-        var pools = TopologyHelpers.CollectComputePools(
-            topology.Containers, topology, request.PoolSelections);
-        var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
+        var units = DeploymentUnitBuilder.Build(topology, request.PoolSelections);
         var entries = new List<HostCostEntry>();
         var total = 0m;
 
-        foreach (var entry in hosts)
+        foreach (var unit in units)
         {
-            var requiredRam = TopologyHelpers.CalculateHostRam(entry.Host);
-            var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= requiredRam) ?? plans.Last();
-
-            // Determine count
-            var count = 1;
-            var (literal, _) = TopologyHelpers.ParseHostReplicas(entry.Host);
-            if (literal.HasValue) count = literal.Value;
-
-            var lineTotal = selectedPlan.PriceMonthly * count;
-            entries.Add(new HostCostEntry(
-                entry.Host.Name,
-                selectedPlan.Id,
-                selectedPlan.Label,
-                requiredRam,
-                count,
-                lineTotal));
-            total += lineTotal;
-        }
-
-        // Infrastructure image costs (images NOT on Host or ComputePool containers)
-        CollectInfraImageCosts(topology.Containers, topology, registry, entries, ref total);
-
-        // ComputePool cost estimation with tier-aware density
-        foreach (var pool in pools)
-        {
-            var poolImages = TopologyHelpers.CollectImages(pool.Pool);
-            var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb(poolImages);
-
-            // Calculate per-tenant memory for min host RAM sizing
-            var perTenantMb = 0;
-            foreach (var image in poolImages)
+            switch (unit)
             {
-                if (image.Scaling != ImageScaling.PerTenant) continue;
-                var spec = pool.TierProfile.ImageSpecs.GetValueOrDefault(image.Kind.ToString());
-                perTenantMb += spec?.MemoryMb ?? 256;
-            }
+                case InstanceUnit inst:
+                {
+                    var provider = registry.Get(inst.ProviderKey);
+                    if (provider is null) continue;
+                    var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
+                    var plan = plans.FirstOrDefault(p => p.MemoryMb >= inst.TotalRamMb) ?? plans.Last();
+                    var lineTotal = plan.PriceMonthly * inst.MinReplicas;
+                    entries.Add(new HostCostEntry(
+                        inst.Container?.Name ?? "instance",
+                        plan.Id, plan.Label,
+                        inst.TotalRamMb, inst.MinReplicas, lineTotal,
+                        Services: inst.Services.Select(s => new ServiceBreakdownItem(s.Name, s.Kind, s.RamMb)).ToList()));
+                    total += lineTotal;
+                    break;
+                }
+                case PoolUnit pool:
+                {
+                    var provider = registry.Get(pool.ProviderKey);
+                    if (provider is null) continue;
+                    var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
 
-            // Use selected plan if specified, otherwise auto-select cheapest viable
-            ComputePlan selectedPlan;
-            if (pool.SelectedPlanId is not null)
-            {
-                selectedPlan = plans.FirstOrDefault(p => p.Id == pool.SelectedPlanId)
-                    ?? plans.FirstOrDefault(p => p.MemoryMb >= sharedOverhead + perTenantMb)
-                    ?? plans.Last();
-            }
-            else
-            {
-                var minHostRam = sharedOverhead + perTenantMb;
-                selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
-            }
+                    var sharedOverhead = pool.Services.Where(s => s.Scaling == ImageScaling.Shared).Sum(s => s.RamMb);
 
-            var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(
-                selectedPlan.MemoryMb, pool.TierProfile, poolImages);
-            var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
+                    var perTenantMb = 0;
+                    foreach (var svc in pool.Services.Where(s => s.Scaling == ImageScaling.PerTenant))
+                    {
+                        var spec = pool.TierProfile.ImageSpecs.GetValueOrDefault(svc.Kind);
+                        perTenantMb += spec?.MemoryMb ?? 256;
+                    }
 
-            var ramPerHost = sharedOverhead + (tenantsPerHost * perTenantMb);
-            var lineTotal = selectedPlan.PriceMonthly * hostsRequired;
-            entries.Add(new HostCostEntry(
-                pool.Pool.Name,
-                selectedPlan.Id,
-                selectedPlan.Label,
-                ramPerHost,
-                hostsRequired,
-                lineTotal,
-                pool.TierProfile.Id,
-                tenantsPerHost,
-                pool.TargetTenants));
-            total += lineTotal;
+                    ComputePlan selectedPlan;
+                    if (pool.SelectedPlanId is not null)
+                        selectedPlan = plans.FirstOrDefault(p => p.Id == pool.SelectedPlanId)
+                            ?? plans.FirstOrDefault(p => p.MemoryMb >= sharedOverhead + perTenantMb) ?? plans.Last();
+                    else
+                        selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= sharedOverhead + perTenantMb) ?? plans.Last();
+
+                    var poolImages = TopologyHelpers.CollectImages(pool.Container!);
+                    var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(
+                        selectedPlan.MemoryMb, pool.TierProfile, poolImages);
+                    var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
+                    var ramPerHost = sharedOverhead + (tenantsPerHost * perTenantMb);
+                    var lineTotal = selectedPlan.PriceMonthly * hostsRequired;
+
+                    entries.Add(new HostCostEntry(
+                        pool.Container?.Name ?? "pool",
+                        selectedPlan.Id, selectedPlan.Label,
+                        ramPerHost, hostsRequired, lineTotal,
+                        pool.TierProfile.Id, tenantsPerHost, pool.TargetTenants,
+                        Services: pool.Services.Select(s => new ServiceBreakdownItem(s.Name, s.Kind, s.RamMb)).ToList()));
+                    total += lineTotal;
+                    break;
+                }
+                // DnsUnit — no compute cost, skip
+            }
         }
 
         return new CostEstimateResponse(entries, total);
-    }
-
-    private static void CollectInfraImageCosts(
-        List<Container> containers, Topology topology,
-        ProviderRegistry registry, List<HostCostEntry> entries, ref decimal total)
-    {
-        foreach (var container in containers)
-        {
-            if (container.Kind is ContainerKind.Host or ContainerKind.ComputePool)
-                continue;
-
-            // Group all images on this container into one host entry
-            if (container.Images.Count > 0 || container.Kind == ContainerKind.Caddy)
-            {
-                var totalRam = 0;
-
-                if (container.Kind == ContainerKind.Caddy)
-                    totalRam += ImageOperationalMetadata.Caddy.MinRamMb;
-
-                foreach (var image in container.Images)
-                {
-                    var imageRam = ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta)
-                        ? meta.MinRamMb : 256;
-                    totalRam += imageRam;
-                }
-
-                if (totalRam > 0)
-                {
-                    var providerKey = TopologyHelpers.ResolveProviderKey(container, topology);
-                    var provider = registry.Get(providerKey);
-                    if (provider is not null)
-                    {
-                        var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-                        var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= totalRam) ?? plans.Last();
-
-                        var (minReplicas, _) = TopologyHelpers.ParseReplicaRange(container.Config);
-                        var lineTotal = selectedPlan.PriceMonthly * minReplicas;
-
-                        entries.Add(new HostCostEntry(
-                            container.Name, selectedPlan.Id, selectedPlan.Label,
-                            totalRam, minReplicas, lineTotal));
-                        total += lineTotal;
-                    }
-                }
-            }
-
-            CollectInfraImageCosts(container.Children, topology, registry, entries, ref total);
-        }
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)

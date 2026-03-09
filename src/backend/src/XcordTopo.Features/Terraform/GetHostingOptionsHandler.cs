@@ -21,7 +21,8 @@ public sealed record InfraImageCost(
     string ImageName, string ImageKind, string ContainerName,
     int RamMb, string PlanId, string PlanLabel,
     decimal PriceMonthly, int MinReplicas, int MaxReplicas,
-    decimal MinCostMonthly, decimal MaxCostMonthly);
+    decimal MinCostMonthly, decimal MaxCostMonthly,
+    List<ServiceBreakdownItem>? Services = null);
 
 public sealed record GetHostingOptionsResponse(
     List<PoolHostingEntry> Pools,
@@ -39,17 +40,43 @@ public sealed class GetHostingOptionsHandler(
         if (topology is null)
             return Error.NotFound("TOPOLOGY_NOT_FOUND", "Topology not found");
 
-        var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology);
-        var result = new List<PoolHostingEntry>();
+        var units = DeploymentUnitBuilder.Build(topology);
 
-        foreach (var pool in pools)
+        // Build infra image costs from InstanceUnits
+        var infraImages = new List<InfraImageCost>();
+        foreach (var unit in units)
         {
-            var providerKey = TopologyHelpers.ResolveProviderKey(pool.Pool, topology);
-            var provider = registry.Get(providerKey);
+            if (unit is not InstanceUnit inst) continue;
+
+            var provider = registry.Get(inst.ProviderKey);
             if (provider is null) continue;
 
             var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-            var poolImages = TopologyHelpers.CollectImages(pool.Pool);
+            var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= inst.TotalRamMb) ?? plans.Last();
+
+            var imageNames = inst.Services.Select(s => s.Name).ToList();
+            var label = string.Join(", ", imageNames);
+
+            infraImages.Add(new InfraImageCost(
+                inst.Container?.Name ?? "instance", label, inst.Container?.Name ?? "instance",
+                inst.TotalRamMb, selectedPlan.Id, selectedPlan.Label,
+                selectedPlan.PriceMonthly, inst.MinReplicas, inst.MaxReplicas,
+                selectedPlan.PriceMonthly * inst.MinReplicas,
+                selectedPlan.PriceMonthly * inst.MaxReplicas,
+                Services: inst.Services.Select(s => new ServiceBreakdownItem(s.Name, s.Kind, s.RamMb)).ToList()));
+        }
+
+        // Build pool hosting options — keep per-plan tenantsPerHost calculation
+        var result = new List<PoolHostingEntry>();
+        foreach (var unit in units)
+        {
+            if (unit is not PoolUnit pool) continue;
+
+            var provider = registry.Get(pool.ProviderKey);
+            if (provider is null) continue;
+
+            var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
+            var poolImages = TopologyHelpers.CollectImages(pool.Container!);
             var options = new List<PoolHostingOption>();
 
             foreach (var plan in plans)
@@ -66,69 +93,10 @@ public sealed class GetHostingOptionsHandler(
             }
 
             result.Add(new PoolHostingEntry(
-                pool.Pool.Name, pool.TierProfile.Id, pool.TierProfile.Name, options));
+                pool.Container?.Name ?? "pool", pool.TierProfile.Id, pool.TierProfile.Name, options));
         }
-
-        // Collect infrastructure image costs (images NOT inside ComputePools)
-        var infraImages = new List<InfraImageCost>();
-        CollectInfraImages(topology.Containers, topology, registry, infraImages);
 
         return new GetHostingOptionsResponse(result, infraImages);
-    }
-
-    private static void CollectInfraImages(
-        List<Container> containers, Topology topology,
-        ProviderRegistry registry, List<InfraImageCost> results)
-    {
-        foreach (var container in containers)
-        {
-            if (container.Kind == ContainerKind.ComputePool)
-                continue; // Pool images are handled by the pool section
-
-            // Group all images on this container into one host entry
-            if (container.Images.Count > 0 || container.Kind == ContainerKind.Caddy)
-            {
-                var totalRam = 0;
-
-                // Caddy containers include their own overhead
-                if (container.Kind == ContainerKind.Caddy)
-                    totalRam += ImageOperationalMetadata.Caddy.MinRamMb;
-
-                foreach (var image in container.Images)
-                {
-                    var imageRam = ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta)
-                        ? meta.MinRamMb : 256;
-                    totalRam += imageRam;
-                }
-
-                if (totalRam > 0)
-                {
-                    var providerKey = TopologyHelpers.ResolveProviderKey(container, topology);
-                    var provider = registry.Get(providerKey);
-                    if (provider is not null)
-                    {
-                        var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-                        var selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= totalRam) ?? plans.Last();
-
-                        var imageNames = container.Images.Select(i => i.Name).ToList();
-                        if (container.Kind == ContainerKind.Caddy)
-                            imageNames.Insert(0, "Caddy");
-                        var label = string.Join(", ", imageNames);
-
-                        var (minReplicas, maxReplicas) = TopologyHelpers.ParseReplicaRange(container.Config);
-
-                        results.Add(new InfraImageCost(
-                            container.Name, label, container.Name,
-                            totalRam, selectedPlan.Id, selectedPlan.Label,
-                            selectedPlan.PriceMonthly, minReplicas, maxReplicas,
-                            selectedPlan.PriceMonthly * minReplicas,
-                            selectedPlan.PriceMonthly * maxReplicas));
-                    }
-                }
-            }
-
-            CollectInfraImages(container.Children, topology, registry, results);
-        }
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)

@@ -1579,7 +1579,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                       </thead>
                       <tbody>
                         <For each={hostingOptions()?.infraImages ?? []}>
-                          {(img) => (
+                          {(img) => (<>
                             <tr class="border-b border-topo-border/50">
                               <td class="py-1.5 px-3">
                                 <span class="text-topo-text-primary font-medium">{img.imageName}</span>
@@ -1601,7 +1601,28 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                                   : <>${img.minCostMonthly}{'\u2013'}${img.maxCostMonthly}/mo</>}
                               </td>
                             </tr>
-                          )}
+                            <Show when={img.services?.length}>
+                              <tr class="border-b border-topo-border/30">
+                                <td colSpan={6} class="px-2 py-1">
+                                  <details class="group">
+                                    <summary class="text-[10px] text-topo-text-secondary cursor-pointer hover:text-topo-brand">
+                                      Services ({img.services!.length})
+                                    </summary>
+                                    <div class="pl-4 py-1 space-y-0.5">
+                                      <For each={img.services!}>
+                                        {(svc) => (
+                                          <div class="flex justify-between text-[10px] text-topo-text-secondary">
+                                            <span>{svc.name} <span class="opacity-50">({svc.kind})</span></span>
+                                            <span>{svc.ramMb >= 1024 ? `${(svc.ramMb / 1024).toFixed(1)} GB` : `${svc.ramMb} MB`}</span>
+                                          </div>
+                                        )}
+                                      </For>
+                                    </div>
+                                  </details>
+                                </td>
+                              </tr>
+                            </Show>
+                          </>)}
                         </For>
                       </tbody>
                       <tfoot>
@@ -1867,7 +1888,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                         </thead>
                         <tbody>
                           <For each={cost().hosts.filter(h => !h.tierProfileId)}>
-                            {(h) => (
+                            {(h) => (<>
                               <tr class="border-b border-topo-border/50">
                                 <td class="py-1 px-2 text-topo-text-secondary">{h.hostName}</td>
                                 <td class="py-1 px-2 text-topo-text-muted">{h.planLabel}</td>
@@ -1875,7 +1896,28 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                                 <td class="py-1 px-2 text-topo-text-muted">{h.count}</td>
                                 <td class="py-1 px-2 text-topo-text-secondary text-right">${h.pricePerMonth}</td>
                               </tr>
-                            )}
+                              <Show when={h.services?.length}>
+                                <tr class="border-b border-topo-border/30">
+                                  <td colSpan={5} class="px-2 py-1">
+                                    <details class="group">
+                                      <summary class="text-[10px] text-topo-text-secondary cursor-pointer hover:text-topo-brand">
+                                        Services ({h.services!.length})
+                                      </summary>
+                                      <div class="pl-4 py-1 space-y-0.5">
+                                        <For each={h.services!}>
+                                          {(svc) => (
+                                            <div class="flex justify-between text-[10px] text-topo-text-secondary">
+                                              <span>{svc.name} <span class="opacity-50">({svc.kind})</span></span>
+                                              <span>{svc.ramMb >= 1024 ? `${(svc.ramMb / 1024).toFixed(1)} GB` : `${svc.ramMb} MB`}</span>
+                                            </div>
+                                          )}
+                                        </For>
+                                      </div>
+                                    </details>
+                                  </td>
+                                </tr>
+                              </Show>
+                            </>)}
                           </For>
                           <tr>
                             <td colspan="4" class="py-1.5 px-2 text-topo-text-primary font-semibold">Infrastructure Total</td>

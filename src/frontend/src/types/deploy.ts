@@ -24,6 +24,7 @@ export interface HostCostEntry {
   tierProfileId?: string;
   tenantsPerHost?: number;
   targetTenants?: number;
+  services?: ServiceBreakdown[];
 }
 
 export interface CostEstimate {
@@ -61,6 +62,12 @@ export interface CredentialField {
   validation: ValidationRule[];
 }
 
+export interface ServiceBreakdown {
+  name: string;
+  kind: string;
+  ramMb: number;
+}
+
 // --- Hosting options ---
 
 export interface PoolHostingOption {
@@ -92,6 +99,7 @@ export interface InfraImageCost {
   maxReplicas: number;
   minCostMonthly: number;
   maxCostMonthly: number;
+  services?: ServiceBreakdown[];
 }
 
 export interface HostingOptions {

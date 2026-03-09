@@ -23,14 +23,24 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             return provider.GenerateHcl(topology, poolSelections);
         }
 
-        // Multi-provider — partition containers by provider, call each
-        var containersByProvider = PartitionContainers(topology);
+        // Multi-provider — build deployment units and group by provider key
+        var units = DeploymentUnitBuilder.Build(topology, poolSelections);
+        var unitsByProvider = units
+            .GroupBy(u => u.ProviderKey, StringComparer.OrdinalIgnoreCase);
+
         var mergedFiles = new Dictionary<string, string>();
 
-        foreach (var (providerKey, containers) in containersByProvider)
+        foreach (var group in unitsByProvider)
         {
-            var provider = registry.Get(providerKey);
+            var provider = registry.Get(group.Key);
             if (provider == null) continue;
+
+            // Transitional: extract containers from units until providers accept units directly
+            var containers = group
+                .Select(u => u.Container)
+                .Where(c => c != null)
+                .Cast<Container>()
+                .ToList();
 
             var files = provider.GenerateHclForContainers(topology, containers, poolSelections);
             foreach (var (fileName, content) in files)
@@ -43,36 +53,5 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         }
 
         return mergedFiles;
-    }
-
-    private static Dictionary<string, List<Container>> PartitionContainers(Topology topology)
-    {
-        var result = new Dictionary<string, List<Container>>(StringComparer.OrdinalIgnoreCase);
-
-        void Walk(List<Container> containers)
-        {
-            foreach (var container in containers)
-            {
-                if (container.Kind is ContainerKind.Host
-                    or ContainerKind.ComputePool or ContainerKind.Dns
-                    or ContainerKind.Caddy)
-                {
-                    var key = TopologyHelpers.ResolveProviderKey(container, topology);
-                    if (!result.TryGetValue(key, out var list))
-                    {
-                        list = [];
-                        result[key] = list;
-                    }
-                    list.Add(container);
-                }
-
-                // Always recurse — provisionable containers may be nested
-                // under non-provisionable ones
-                Walk(container.Children);
-            }
-        }
-
-        Walk(topology.Containers);
-        return result;
     }
 }

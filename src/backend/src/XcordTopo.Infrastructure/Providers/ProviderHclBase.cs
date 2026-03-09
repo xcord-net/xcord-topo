@@ -209,7 +209,8 @@ public abstract class ProviderHclBase : ICloudProvider
         {
             var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             var selectedPlan = ResolvePoolPlan(pool, plans);
-            var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile);
+            var poolImages = TopologyHelpers.CollectImages(pool.Pool);
+            var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile, poolImages);
             var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
 
             vars.Line();

@@ -84,12 +84,12 @@ public static class DeploymentUnitBuilder
                         : ImageOperationalMetadata.DefaultTierProfiles;
 
                     var tierProfileId = container.Config.GetValueOrDefault("tierProfile", "");
-                    TierProfile? tierProfile = null;
-                    if (!string.IsNullOrEmpty(tierProfileId))
-                    {
-                        tierProfile = tierProfiles.FirstOrDefault(t => t.Id == tierProfileId)
-                            ?? tierProfiles.First();
-                    }
+                    TierProfile? tierProfile = string.IsNullOrEmpty(tierProfileId)
+                        ? tierProfiles.OrderByDescending(t =>
+                            t.ImageSpecs.Values.Sum(s => s.MemoryMb)).First()
+                        : tierProfiles.FirstOrDefault(t => t.Id == tierProfileId)
+                            ?? tierProfiles.OrderByDescending(t =>
+                                t.ImageSpecs.Values.Sum(s => s.MemoryMb)).First();
 
                     var selection = selections?.FirstOrDefault(s =>
                         s.PoolName.Equals(container.Name, StringComparison.OrdinalIgnoreCase));

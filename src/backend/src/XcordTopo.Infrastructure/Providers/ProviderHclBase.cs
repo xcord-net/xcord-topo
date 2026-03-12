@@ -148,10 +148,14 @@ public abstract class ProviderHclBase : ICloudProvider
         }
 
         // Pool shared service secrets — data-driven from actual pool images
+        // Deduplicate by container since multiple tier entries share the same infra
         if (pools != null)
         {
+            var seenPools = new HashSet<Guid>();
             foreach (var pool in pools)
             {
+                if (!seenPools.Add(pool.Pool.Id)) continue;
+
                 var poolSecrets = TopologyHelpers.CollectPoolSecrets(pool);
                 foreach (var secret in poolSecrets)
                 {
@@ -207,11 +211,11 @@ public abstract class ProviderHclBase : ICloudProvider
 
         foreach (var pool in pools)
         {
-            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
+            var poolName = pool.ResourceName;
             outputs.Block($"output \"{poolName}_ips\"", b =>
             {
                 b.RawAttribute("value", $"{InstanceResourceType}.{poolName}[*].{PublicIpField}");
-                b.Attribute("description", $"Public IPs of compute pool '{pool.Pool.Name}'");
+                b.Attribute("description", $"Public IPs of {pool.TierProfile.Name}");
             });
             outputs.Line();
         }
@@ -336,7 +340,7 @@ public abstract class ProviderHclBase : ICloudProvider
     {
         foreach (var pool in pools)
         {
-            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
+            var poolName = pool.ResourceName;
             var selectedPlan = ResolvePoolPlan(pool, plans);
             var poolImages = TopologyHelpers.CollectImages(pool.Pool);
             var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile, poolImages);
@@ -346,14 +350,14 @@ public abstract class ProviderHclBase : ICloudProvider
             {
                 b.RawAttribute("type", "number");
                 b.Attribute("default", 0);
-                b.Attribute("description", $"Number of compute hosts for pool '{pool.Pool.Name}' ({pool.TierProfile.Name})");
+                b.Attribute("description", $"Number of compute hosts for {pool.TierProfile.Name}");
             });
             vars.Line();
             vars.Block($"variable \"{poolName}_tenants_per_host\"", b =>
             {
                 b.RawAttribute("type", "number");
                 b.Attribute("default", tenantsPerHost > 0 ? tenantsPerHost : 1);
-                b.Attribute("description", $"Number of tenants per host in pool '{pool.Pool.Name}'");
+                b.Attribute("description", $"Number of tenants per host for {pool.TierProfile.Name}");
             });
         }
     }

@@ -681,11 +681,11 @@ public sealed class AwsProvider : ProviderHclBase
             instances.Line();
         }
 
-        // ComputePool instances
+        // ComputePool instances — one resource block per tier
         var allPlans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         foreach (var pool in pools)
         {
-            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
+            var poolName = pool.ResourceName;
             var selectedPlan = ResolvePoolPlan(pool, allPlans);
 
             instances.Block($"resource \"aws_instance\" \"{poolName}\"", b =>
@@ -711,7 +711,7 @@ public sealed class AwsProvider : ProviderHclBase
                 b.Line();
                 b.MapBlock("tags", tb =>
                 {
-                    tb.RawAttribute("Name", $"\"{topology.Name}-{pool.Pool.Name}-${{count.index}}\"");
+                    tb.RawAttribute("Name", $"\"{topology.Name}-{pool.TierProfile.Name}-${{count.index}}\"");
                     tb.Attribute("Project", "xcord-topo");
                     tb.Attribute("Topology", topology.Name);
                 });
@@ -1007,12 +1007,12 @@ public sealed class AwsProvider : ProviderHclBase
             provisioning.Line();
         }
 
-        // ComputePool provisioning — Swarm manager (host 0)
+        // ComputePool provisioning — one Swarm cluster per tier
         foreach (var pool in pools)
         {
-            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
+            var poolName = pool.ResourceName;
 
-            // Build depends_on from actual pool secrets
+            // Build depends_on from actual pool secrets (shared across tiers)
             var poolSecrets = TopologyHelpers.CollectPoolSecrets(pool);
             var secretDeps = string.Join(", ", poolSecrets.Select(s => $"random_password.{s.ResourceName}"));
             var dependsOn = string.IsNullOrEmpty(secretDeps)
@@ -1073,8 +1073,6 @@ public sealed class AwsProvider : ProviderHclBase
                     }
                     if (poolCaddies.Count == 0)
                     {
-                        // No Caddy container in pool — deploy a bare Caddy with empty Caddyfile.
-                        // The Caddyfile is mounted from the host so the hub can update routing at runtime.
                         b.Line($"  \"sudo mkdir -p /opt/caddy\",");
                         b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n\\nCADDYEOF\",");
                         b.Line($"  \"sudo docker service create --name caddy --mode global --network xcord-pool -p 80:80 -p 443:443 -p 2019:2019 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");

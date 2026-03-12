@@ -123,6 +123,7 @@ export interface PoolSelection {
   poolName: string;
   planId: string;
   targetTenants: number;
+  tierProfileId?: string;
 }
 
 export interface InfraSelection {

@@ -70,13 +70,14 @@ public class AwsProviderTests
         var provisioning = files["provisioning.tf"];
 
         // The enterprise tier manager provisioner should have a count guard
-        // so it doesn't crash when enterprise_tier_host_count = 0
-        var managerBlock = ExtractResourceBlock(provisioning, "provision_enterprise_tier_manager");
+        // so it doesn't crash when host_count = 0.
+        // Resource names are tier-qualified: <pool_name>_<tier_id>_manager
+        var managerBlock = ExtractResourceBlock(provisioning, "provision_enterprise_tier_enterprise_manager");
         Assert.NotNull(managerBlock);
 
         // Must have count conditional to prevent crash on host_count=0
         Assert.Contains("count", managerBlock);
-        Assert.Contains("enterprise_tier_host_count", managerBlock);
+        Assert.Contains("enterprise_tier_enterprise_host_count", managerBlock);
     }
 
     // --- Bug 5: Pool host_count defaults (no targetTenants leakage) ---
@@ -89,15 +90,16 @@ public class AwsProviderTests
         var vars = files["variables.tf"];
 
         // targetTenants is UI-only — host_count defaults should be simple values (1),
-        // not computed from targetTenants
-        Assert.Contains("variable \"free_tier_host_count\"", vars);
-        Assert.Contains("variable \"pro_tier_host_count\"", vars);
-        Assert.Contains("variable \"basic_tier_host_count\"", vars);
-        Assert.Contains("variable \"enterprise_tier_host_count\"", vars);
+        // not computed from targetTenants.
+        // Resource names are now tier-qualified: <pool_name>_<tier_id>
+        Assert.Contains("variable \"free_tier_free_host_count\"", vars);
+        Assert.Contains("variable \"pro_tier_pro_host_count\"", vars);
+        Assert.Contains("variable \"basic_tier_basic_host_count\"", vars);
+        Assert.Contains("variable \"enterprise_tier_enterprise_host_count\"", vars);
 
         // Pool host counts default to 0 — pool infrastructure is deferred.
         // Hub sets these > 0 via terraform apply when it needs to provision tenants.
-        foreach (var poolName in new[] { "free_tier", "basic_tier", "pro_tier", "enterprise_tier" })
+        foreach (var poolName in new[] { "free_tier_free", "basic_tier_basic", "pro_tier_pro", "enterprise_tier_enterprise" })
         {
             var varBlock = ExtractVariableBlock(vars, $"{poolName}_host_count");
             Assert.NotNull(varBlock);
@@ -114,14 +116,15 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var instances = files["instances.tf"];
 
-        // 7 distinct instance resource types
+        // Instance resource types — pool instances are now tier-qualified: <pool_name>_<tier_id>
         Assert.Contains("aws_instance\" \"hub_server\"", instances);
         Assert.Contains("aws_instance\" \"live_kit\"", instances);
         Assert.Contains("aws_instance\" \"caddy\"", instances);
-        Assert.Contains("aws_instance\" \"free_tier\"", instances);
-        Assert.Contains("aws_instance\" \"basic_tier\"", instances);
-        Assert.Contains("aws_instance\" \"pro_tier\"", instances);
-        Assert.Contains("aws_instance\" \"enterprise_tier\"", instances);
+        // Each pool container generates one instance per tier profile
+        Assert.Contains("aws_instance\" \"free_tier_free\"", instances);
+        Assert.Contains("aws_instance\" \"basic_tier_basic\"", instances);
+        Assert.Contains("aws_instance\" \"pro_tier_pro\"", instances);
+        Assert.Contains("aws_instance\" \"enterprise_tier_enterprise\"", instances);
     }
 
     // --- DataPool generates infrastructure (host VM + data services) ---
@@ -172,8 +175,9 @@ public class AwsProviderTests
         var provisioning = files["provisioning.tf"];
 
         // Pool provisioning should deploy shared services (PG, Redis, MinIO)
-        // but NOT FederationServer images (hub provisions those at runtime)
-        var proManagerBlock = ExtractResourceBlock(provisioning, "provision_pro_tier_manager");
+        // but NOT FederationServer images (hub provisions those at runtime).
+        // Resource names are tier-qualified: <pool_name>_<tier_id>_manager
+        var proManagerBlock = ExtractResourceBlock(provisioning, "provision_pro_tier_pro_manager");
         Assert.NotNull(proManagerBlock);
 
         Assert.DoesNotContain("ghcr.io/xcord/fed", proManagerBlock);
@@ -334,7 +338,8 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var provisioning = files["provisioning.tf"];
 
-        var proManagerBlock = ExtractResourceBlock(provisioning, "provision_pro_tier_manager");
+        // Resource names are tier-qualified: <pool_name>_<tier_id>_manager
+        var proManagerBlock = ExtractResourceBlock(provisioning, "provision_pro_tier_pro_manager");
         Assert.NotNull(proManagerBlock);
 
         // Shared services should be prefixed with "shared-" to avoid name collision with tenant containers
@@ -388,14 +393,15 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var instances = files["instances.tf"];
 
-        // Each pool instance should use var.<pool_name>_host_count for count
-        var proBlock = ExtractResourceBlock(instances, "pro_tier");
+        // Each pool instance should use var.<pool_name>_host_count for count.
+        // Resource names are tier-qualified: <pool_name>_<tier_id>
+        var proBlock = ExtractResourceBlock(instances, "pro_tier_pro");
         Assert.NotNull(proBlock);
-        Assert.Contains("var.pro_tier_host_count", proBlock);
+        Assert.Contains("var.pro_tier_pro_host_count", proBlock);
 
-        var freeBlock = ExtractResourceBlock(instances, "free_tier");
+        var freeBlock = ExtractResourceBlock(instances, "free_tier_free");
         Assert.NotNull(freeBlock);
-        Assert.Contains("var.free_tier_host_count", freeBlock);
+        Assert.Contains("var.free_tier_free_host_count", freeBlock);
     }
 
     // --- VPC and networking resources present ---
@@ -440,11 +446,11 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var outputs = files["outputs.tf"];
 
-        // Pool outputs
-        Assert.Contains("output \"pro_tier_ips\"", outputs);
-        Assert.Contains("output \"free_tier_ips\"", outputs);
-        Assert.Contains("output \"basic_tier_ips\"", outputs);
-        Assert.Contains("output \"enterprise_tier_ips\"", outputs);
+        // Pool outputs — resource names are tier-qualified: <pool_name>_<tier_id>
+        Assert.Contains("output \"pro_tier_pro_ips\"", outputs);
+        Assert.Contains("output \"free_tier_free_ips\"", outputs);
+        Assert.Contains("output \"basic_tier_basic_ips\"", outputs);
+        Assert.Contains("output \"enterprise_tier_enterprise_ips\"", outputs);
 
         // Standalone Caddy output
         Assert.Contains("output \"caddy_ip\"", outputs);
@@ -718,8 +724,9 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var provisioning = files["provisioning.tf"];
 
-        // Pool manager needs docker login because FederationServer images come from private registry
-        var proManagerBlock = ExtractResourceBlock(provisioning, "provision_pro_tier_manager");
+        // Pool manager needs docker login because FederationServer images come from private registry.
+        // Resource names are tier-qualified: <pool_name>_<tier_id>_manager
+        var proManagerBlock = ExtractResourceBlock(provisioning, "provision_pro_tier_pro_manager");
         Assert.NotNull(proManagerBlock);
         Assert.Contains("docker login", proManagerBlock);
     }

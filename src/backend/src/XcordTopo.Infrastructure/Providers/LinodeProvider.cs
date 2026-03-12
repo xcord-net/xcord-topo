@@ -437,23 +437,23 @@ public sealed class LinodeProvider : ProviderHclBase
             instances.Line();
         }
 
-        // ComputePool instances
+        // ComputePool instances — one resource block per tier
         var allPlans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         foreach (var pool in pools)
         {
-            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
+            var poolName = pool.ResourceName;
             var selectedPlan = ResolvePoolPlan(pool, allPlans);
 
             instances.Block($"resource \"linode_instance\" \"{poolName}\"", b =>
             {
                 b.RawAttribute("count", $"var.{poolName}_host_count");
-                b.Attribute("label", $"{topology.Name}-{pool.Pool.Name}-${{count.index}}");
+                b.Attribute("label", $"{topology.Name}-{pool.TierProfile.Name}-${{count.index}}");
                 b.RawAttribute("region", "var.region");
                 b.Attribute("type", selectedPlan.Id);
                 b.Attribute("image", "linode/ubuntu24.04");
                 b.RawAttribute("authorized_keys", "[var.ssh_public_key]");
                 b.Line();
-                b.ListAttribute("tags", ["xcord-topo", topology.Name, "compute-pool"]);
+                b.ListAttribute("tags", ["xcord-topo", topology.Name, pool.TierProfile.Id]);
             });
             instances.Line();
         }
@@ -588,8 +588,7 @@ public sealed class LinodeProvider : ProviderHclBase
 
             foreach (var pool in pools)
             {
-                var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
-                refs.Add($"linode_instance.{poolName}[*].id");
+                refs.Add($"linode_instance.{pool.ResourceName}[*].id");
             }
 
             // Elastic images get their own instances — include them in the firewall
@@ -609,7 +608,7 @@ public sealed class LinodeProvider : ProviderHclBase
             {
                 var idRefs = hosts.Select(e => $"linode_instance.{TopologyHelpers.SanitizeName(e.Host.Name)}.id")
                     .Concat(standaloneCaddies.Select(c => $"linode_instance.{TopologyHelpers.SanitizeName(c.Name)}.id"))
-                    .Concat(pools.Select(p => $"linode_instance.{TopologyHelpers.SanitizeName(p.Pool.Name)}.id"))
+                    .Concat(pools.Select(p => $"linode_instance.{p.ResourceName}.id"))
                     .Concat(elasticImages.Select(i => $"linode_instance.{TopologyHelpers.SanitizeName(i.Name)}[*].id"));
                 b.RawAttribute("linodes", $"[{string.Join(", ", idRefs)}]");
             }
@@ -802,12 +801,12 @@ public sealed class LinodeProvider : ProviderHclBase
             provisioning.Line();
         }
 
-        // ComputePool provisioning — Swarm manager (host 0)
+        // ComputePool provisioning — one Swarm cluster per tier
         foreach (var pool in pools)
         {
-            var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
+            var poolName = pool.ResourceName;
 
-            // Build depends_on from actual pool secrets
+            // Build depends_on from actual pool secrets (shared across tiers)
             var poolSecrets = TopologyHelpers.CollectPoolSecrets(pool);
             var secretDeps = string.Join(", ", poolSecrets.Select(s => $"random_password.{s.ResourceName}"));
             var dependsOn = string.IsNullOrEmpty(secretDeps)
@@ -867,8 +866,6 @@ public sealed class LinodeProvider : ProviderHclBase
                     }
                     if (poolCaddies.Count == 0)
                     {
-                        // No Caddy container in pool — deploy a bare Caddy with empty Caddyfile.
-                        // The Caddyfile is mounted from the host so the hub can update routing at runtime.
                         b.Line($"  \"mkdir -p /opt/caddy\",");
                         b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n\\nCADDYEOF\",");
                         b.Line($"  \"docker service create --name caddy --mode global --network xcord-pool -p 80:80 -p 443:443 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");

@@ -11,8 +11,14 @@ public static class TopologyHelpers
     // --- Records ---
 
     public record HostEntry(Container Host);
-    public record ComputePoolEntry(Container Pool, TierProfile TierProfile, int TargetTenants, string? SelectedPlanId = null);
-    public record PoolSelection(string PoolName, string PlanId, int TargetTenants);
+    public record ComputePoolEntry(Container Pool, TierProfile TierProfile, int TargetTenants, string? SelectedPlanId = null)
+    {
+        /// <summary>
+        /// Tier-qualified resource name: "compute_pool_free", "compute_pool_pro", etc.
+        /// </summary>
+        public string ResourceName => SanitizeName(Pool.Name) + "_" + SanitizeName(TierProfile.Id);
+    }
+    public record PoolSelection(string PoolName, string PlanId, int TargetTenants, string? TierProfileId = null);
     public record SecretEntry(string ResourceName, string Description);
 
     // --- Tree-walking ---
@@ -57,16 +63,17 @@ public static class TopologyHelpers
         {
             if (container.Kind == ContainerKind.ComputePool && seen.Add(container))
             {
-                var tierProfileId = container.Config.GetValueOrDefault("tierProfile", "free");
-                var tierProfile = tierProfiles.FirstOrDefault(t => t.Id == tierProfileId)
-                    ?? tierProfiles.First();
+                // One entry per tier profile — each tier gets its own host group
+                foreach (var tier in tierProfiles)
+                {
+                    var selection = selections?.FirstOrDefault(s =>
+                        string.Equals(s.PoolName, container.Name, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(s.TierProfileId, tier.Id, StringComparison.OrdinalIgnoreCase));
+                    var targetTenants = selection?.TargetTenants ?? 0;
+                    var selectedPlanId = selection?.PlanId;
 
-                var selection = selections?.FirstOrDefault(s =>
-                    string.Equals(s.PoolName, container.Name, StringComparison.OrdinalIgnoreCase));
-                var targetTenants = selection?.TargetTenants ?? 0;
-                var selectedPlanId = selection?.PlanId;
-
-                result.Add(new ComputePoolEntry(container, tierProfile, targetTenants, selectedPlanId));
+                    result.Add(new ComputePoolEntry(container, tier, targetTenants, selectedPlanId));
+                }
             }
             CollectComputePoolsRecursive(container.Children, topology, selections, tierProfiles, result, seen);
         }

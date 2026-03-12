@@ -612,13 +612,14 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         const savedPools = poolSelections();
         for (const pool of hosting.pools) {
           if (pool.options.length > 0) {
-            // Preserve saved selection if it exists and is still valid
-            const savedSel = savedPools[pool.poolName];
+            const key = pool.tierProfileId ? `${pool.poolName}_${pool.tierProfileId}` : pool.poolName;
+            const savedSel = savedPools[key];
             const validPlan = savedSel && pool.options.some(o => o.planId === savedSel.planId);
-            defaults[pool.poolName] = validPlan ? savedSel : {
+            defaults[key] = validPlan ? savedSel : {
               poolName: pool.poolName,
               planId: pool.options[0].planId,
               targetTenants: 10,
+              tierProfileId: pool.tierProfileId || undefined,
             };
           }
         }
@@ -697,9 +698,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     // Validate all pools with viable options have a plan selected
     for (const pool of options.pools) {
       if (pool.options.length === 0) continue;
-      const sel = sels[pool.poolName];
+      const key = pool.tierProfileId ? `${pool.poolName}_${pool.tierProfileId}` : pool.poolName;
+      const sel = sels[key];
       if (!sel || !sel.planId) {
-        setError(`Please select a hosting plan for "${pool.poolName}"`);
+        setError(`Please select a hosting plan for "${pool.tierProfileName || pool.poolName}"`);
         return;
       }
     }
@@ -1649,7 +1651,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                                       <For each={img.availablePlans}>
                                         {(p) => (
                                           <option value={p.planId}>
-                                            {p.planLabel} ({p.vCpus} vCPU, {p.memoryMb >= 1024 ? `${(p.memoryMb / 1024).toFixed(0)} GB` : `${p.memoryMb} MB`})
+                                            {p.planLabel} ({p.vCpus} vCPU)
                                           </option>
                                         )}
                                       </For>
@@ -1724,23 +1726,25 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                 </div>
               </Show>
 
-              {/* Section 2: Compute Pools */}
+              {/* Section 2: Pools */}
               <Show when={(hostingOptions()?.pools?.length ?? 0) > 0}>
                 <div class="space-y-2">
-                  <h3 class="text-xs font-semibold text-topo-text-primary uppercase tracking-wide">Compute Pools</h3>
+                  <h3 class="text-xs font-semibold text-topo-text-primary uppercase tracking-wide">Pools</h3>
                   <p class="text-[11px] text-topo-text-muted bg-amber-500/5 border border-amber-500/20 rounded px-2.5 py-1.5">
-                    Compute pool costs are incurred per instance assigned — no cost until tenants are provisioned.
+                    Pool infrastructure is deferred — created when the hub provisions the first tenant or data service.
                   </p>
                 </div>
 
                 <For each={hostingOptions()?.pools ?? []}>
                   {(pool) => {
-                    const sel = () => poolSelections()[pool.poolName];
+                    const poolKey = () => pool.tierProfileId ? `${pool.poolName}_${pool.tierProfileId}` : pool.poolName;
+                    const sel = () => poolSelections()[poolKey()];
+                    const hasTenants = () => pool.options.some(o => o.tenantsPerHost > 0);
                     const selectedOption = () => pool.options.find(o => o.planId === sel()?.planId);
                     const hostsRequired = () => {
                       const s = sel();
                       const opt = selectedOption();
-                      if (!s || !opt || !s.targetTenants || s.targetTenants < 1) return 0;
+                      if (!s || !opt || !opt.tenantsPerHost || !s.targetTenants || s.targetTenants < 1) return 0;
                       return Math.ceil(s.targetTenants / opt.tenantsPerHost);
                     };
 
@@ -1748,17 +1752,16 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                       <div class="bg-topo-bg-secondary rounded-lg border border-topo-border p-4 space-y-3">
                         <div class="flex items-center gap-2">
                           <span class="text-sm font-semibold text-topo-text-primary">{pool.poolName}</span>
-                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-topo-brand/10 text-topo-brand">
-                            {pool.tierProfileName}
-                          </span>
+                          <Show when={pool.tierProfileName}>
+                            <span class="text-[10px] px-1.5 py-0.5 rounded bg-topo-brand/10 text-topo-brand">
+                              {pool.tierProfileName}
+                            </span>
+                          </Show>
                         </div>
 
                         <Show when={pool.options.length > 0} fallback={
-                          <p class="text-xs text-red-400 italic">
-                            No viable plans — check that at least one image in this pool has scaling set to PerTenant.
-                          </p>
+                          <p class="text-xs text-red-400 italic">No viable plans for this pool.</p>
                         }>
-                          {/* Plan table */}
                           <div class="overflow-x-auto">
                             <table class="w-full text-xs">
                               <thead>
@@ -1769,8 +1772,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                                   <th class="text-right py-1.5 pr-3 font-medium">Storage</th>
                                   <th class="text-right py-1.5 pr-3 font-medium">vCPUs</th>
                                   <th class="text-right py-1.5 pr-3 font-medium">$/mo</th>
-                                  <th class="text-right py-1.5 pr-3 font-medium">Tenants/Host</th>
-                                  <th class="text-right py-1.5 font-medium">$/Tenant</th>
+                                  <Show when={hasTenants()}>
+                                    <th class="text-right py-1.5 pr-3 font-medium">Tenants/Host</th>
+                                    <th class="text-right py-1.5 font-medium">$/Tenant</th>
+                                  </Show>
                                 </tr>
                               </thead>
                               <tbody>
@@ -1783,12 +1788,14 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                                           isSelected() ? 'bg-topo-brand/10' : 'hover:bg-topo-bg-tertiary'
                                         }`}
                                         onClick={() => {
+                                          const key = poolKey();
                                           setPoolSelections(prev => ({
                                             ...prev,
-                                            [pool.poolName]: {
-                                              ...prev[pool.poolName],
+                                            [key]: {
+                                              ...prev[key],
                                               poolName: pool.poolName,
                                               planId: option.planId,
+                                              tierProfileId: pool.tierProfileId || undefined,
                                             },
                                           }));
                                         }}
@@ -1811,8 +1818,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                                         </td>
                                         <td class="py-1.5 pr-3 text-right text-topo-text-secondary">{option.vCpus}</td>
                                         <td class="py-1.5 pr-3 text-right text-topo-text-secondary">${option.priceMonthly.toFixed(2)}</td>
-                                        <td class="py-1.5 pr-3 text-right text-topo-text-secondary">{option.tenantsPerHost}</td>
-                                        <td class="py-1.5 text-right text-topo-text-secondary">${option.costPerTenant}</td>
+                                        <Show when={hasTenants()}>
+                                          <td class="py-1.5 pr-3 text-right text-topo-text-secondary">{option.tenantsPerHost}</td>
+                                          <td class="py-1.5 text-right text-topo-text-secondary">${option.costPerTenant}</td>
+                                        </Show>
                                       </tr>
                                     );
                                   }}
@@ -1821,35 +1830,38 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                             </table>
                           </div>
 
-                          {/* Visual aid: estimate hosts needed for a given tenant count */}
-                          <div class="flex items-center gap-4 pt-1">
-                            <label class="flex items-center gap-2 text-xs text-topo-text-muted">
-                              Estimate tenants
-                              <input
-                                type="number"
-                                min="0"
-                                class="w-20 px-2 py-1 text-xs rounded border border-topo-border bg-topo-bg-primary text-topo-text-primary focus:border-topo-brand focus:outline-none"
-                                value={sel()?.targetTenants ?? ''}
-                                onInput={(e) => {
-                                  const val = parseInt(e.currentTarget.value, 10);
-                                  setPoolSelections(prev => ({
-                                    ...prev,
-                                    [pool.poolName]: {
-                                      ...prev[pool.poolName],
-                                      poolName: pool.poolName,
-                                      targetTenants: isNaN(val) ? 0 : val,
-                                    },
-                                  }));
-                                }}
-                              />
-                            </label>
-                            <Show when={hostsRequired() > 0}>
-                              <span class="text-xs text-topo-text-muted">
-                                = <span class="text-topo-brand font-semibold">{hostsRequired()}</span>
-                                {' '}{hostsRequired() === 1 ? 'host' : 'hosts'}
-                              </span>
-                            </Show>
-                          </div>
+                          <Show when={hasTenants()}>
+                            <div class="flex items-center gap-4 pt-1">
+                              <label class="flex items-center gap-2 text-xs text-topo-text-muted">
+                                Estimate tenants
+                                <input
+                                  type="number"
+                                  min="0"
+                                  class="w-20 px-2 py-1 text-xs rounded border border-topo-border bg-topo-bg-primary text-topo-text-primary focus:border-topo-brand focus:outline-none"
+                                  value={sel()?.targetTenants ?? ''}
+                                  onInput={(e) => {
+                                    const val = parseInt(e.currentTarget.value, 10);
+                                    const key = poolKey();
+                                    setPoolSelections(prev => ({
+                                      ...prev,
+                                      [key]: {
+                                        ...prev[key],
+                                        poolName: pool.poolName,
+                                        targetTenants: isNaN(val) ? 0 : val,
+                                        tierProfileId: pool.tierProfileId || undefined,
+                                      },
+                                    }));
+                                  }}
+                                />
+                              </label>
+                              <Show when={hostsRequired() > 0}>
+                                <span class="text-xs text-topo-text-muted">
+                                  = <span class="text-topo-brand font-semibold">{hostsRequired()}</span>
+                                  {' '}{hostsRequired() === 1 ? 'host' : 'hosts'}
+                                </span>
+                              </Show>
+                            </div>
+                          </Show>
                         </Show>
                       </div>
                     );

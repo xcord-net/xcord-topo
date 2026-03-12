@@ -11,6 +11,9 @@ export default defineConfig({
     proxy: {
       '/api': apiTarget,
     },
+    watch: {
+      ignored: ['**/bin/**', '**/obj/**', '**/node_modules/**'],
+    },
   },
   build: {
     target: 'esnext',

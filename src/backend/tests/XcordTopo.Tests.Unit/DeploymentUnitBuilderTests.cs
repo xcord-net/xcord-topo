@@ -1,4 +1,8 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using XcordTopo.Features.Terraform;
 using XcordTopo.Infrastructure.Providers;
+using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Models;
 
 namespace XcordTopo.Tests.Unit;
@@ -32,9 +36,9 @@ public sealed class StagedDeploymentTests
 
         var vars = files["variables.tf"];
 
-        Assert.Contains("compute_pool_host_count", vars);
-        // Default must be 0, not 1
-        Assert.Matches(@"variable\s+""compute_pool_host_count""[^}]*default\s*=\s*0\b", vars);
+        // Tier-qualified: compute_pool_free_host_count (one per tier profile)
+        Assert.Contains("compute_pool_free_host_count", vars);
+        Assert.Matches(@"variable\s+""compute_pool_free_host_count""[^}]*default\s*=\s*0\b", vars);
     }
 
     /// <summary>
@@ -79,6 +83,76 @@ public sealed class StagedDeploymentTests
 
         // Caddy must NOT reference compute_pool — it won't exist at initial deploy
         Assert.DoesNotContain("compute_pool", caddySection);
+    }
+
+    /// <summary>
+    /// GetHostingOptions must return BOTH ComputePool and DataPool in the pools section,
+    /// even when the topology has no explicit tierProfile config on the ComputePool.
+    /// Uses the real production-simple fixture to catch config gaps.
+    /// </summary>
+    [Fact]
+    public async Task GetHostingOptions_ProductionSimple_ReturnsComputePoolAndDataPoolInPools()
+    {
+        var topology = DeserializeFixture("production-simple.json");
+        var registry = new ProviderRegistry([new LinodeProvider(), new AwsProvider()]);
+        var store = new InMemoryTopologyStore(topology);
+        var handler = new GetHostingOptionsHandler(store, registry);
+
+        var result = await handler.Handle(
+            new GetHostingOptionsRequest(topology.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess, "Handler should succeed");
+        var response = result.Value;
+
+        // ComputePool emits one entry per tier profile
+        var computePools = response.Pools.Where(p => p.PoolName == "Compute Pool").ToList();
+        Assert.True(computePools.Count >= 2,
+            $"Expected multiple tier entries for ComputePool, got {computePools.Count}");
+
+        // Each tier must have viable plan options with tenant density
+        foreach (var cp in computePools)
+        {
+            Assert.True(cp.Options.Count > 0,
+                $"ComputePool tier '{cp.TierProfileName}' must have viable plan options");
+            Assert.True(cp.Options.All(o => o.TenantsPerHost > 0),
+                $"ComputePool tier '{cp.TierProfileName}' options must all have tenantsPerHost > 0");
+        }
+
+        // Higher tiers fit fewer tenants per host (more RAM per tenant)
+        var tierNames = computePools.Select(p => p.TierProfileName).ToList();
+        Assert.Contains("Free Tier", tierNames);
+        Assert.Contains("Enterprise Tier", tierNames);
+
+        // DataPool still appears
+        var dataPool = response.Pools.First(p => p.PoolName == "Data Pool");
+        Assert.True(dataPool.Options.Count > 0,
+            "DataPool must have viable plan options");
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    private static Topology DeserializeFixture(string name)
+    {
+        var assembly = typeof(StagedDeploymentTests).Assembly;
+        var resourceName = $"XcordTopo.Tests.Unit.Fixtures.{name}";
+        using var stream = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Fixture not found: {resourceName}");
+        using var reader = new StreamReader(stream);
+        var json = reader.ReadToEnd();
+        return JsonSerializer.Deserialize<Topology>(json, JsonOptions)
+            ?? throw new InvalidOperationException("Failed to deserialize fixture");
+    }
+
+    private sealed class InMemoryTopologyStore(Topology topology) : ITopologyStore
+    {
+        public Task<List<Topology>> ListAsync(CancellationToken ct = default) => Task.FromResult(new List<Topology> { topology });
+        public Task<Topology?> GetAsync(Guid id, CancellationToken ct = default) => Task.FromResult<Topology?>(id == topology.Id ? topology : null);
+        public Task SaveAsync(Topology t, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     // -------------------------------------------------------------------------

@@ -890,7 +890,8 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
 
-        var poolIdx = provisioning.IndexOf("provision_compute_pool_manager");
+        // Pool provisioner name is tier-qualified: provision_compute_pool_<tier_id>_manager
+        var poolIdx = provisioning.IndexOf("provision_compute_pool_free_manager");
         Assert.True(poolIdx >= 0);
         var poolSection = provisioning[poolIdx..];
 
@@ -906,8 +907,9 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
 
-        var poolIdx = provisioning.IndexOf("provision_compute_pool_manager");
-        Assert.True(poolIdx >= 0, "Expected provision_compute_pool_manager resource");
+        // Pool provisioner name is tier-qualified: provision_compute_pool_<tier_id>_manager
+        var poolIdx = provisioning.IndexOf("provision_compute_pool_free_manager");
+        Assert.True(poolIdx >= 0, "Expected provision_compute_pool_free_manager resource");
         var poolSection = provisioning[poolIdx..];
 
         Assert.DoesNotContain("shared-postgres", poolSection);
@@ -941,7 +943,8 @@ public class TopologySerializationTests : IDisposable
         var variables = files["variables.tf"];
         Assert.Contains("hub_server_replicas", variables);
         Assert.Contains("live_kit_replicas", variables);
-        Assert.Contains("compute_pool_host_count", variables);
+        // Pool host counts are tier-qualified: compute_pool_<tier_id>_host_count
+        Assert.Contains("compute_pool_free_host_count", variables);
     }
 
     [Fact]
@@ -1093,8 +1096,9 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
 
-        var poolIdx = provisioning.IndexOf("provision_compute_pool_manager");
-        Assert.True(poolIdx >= 0, "Expected provision_compute_pool_manager resource");
+        // Pool provisioner name is tier-qualified: provision_compute_pool_<tier_id>_manager
+        var poolIdx = provisioning.IndexOf("provision_compute_pool_free_manager");
+        Assert.True(poolIdx >= 0, "Expected provision_compute_pool_free_manager resource");
         var poolSection = provisioning[poolIdx..];
 
         // The Caddy container must expose the admin API port (2019) for runtime config updates

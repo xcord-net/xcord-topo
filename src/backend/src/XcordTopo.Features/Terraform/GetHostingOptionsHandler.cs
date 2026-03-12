@@ -47,7 +47,7 @@ public sealed class GetHostingOptionsHandler(
 
         var units = DeploymentUnitBuilder.Build(topology);
 
-        // Build infra image costs from InstanceUnits (skip DataPool — provisioned on demand)
+        // Build infra image costs from InstanceUnits (skip DataPool — shown in pools section)
         var infraImages = new List<InfraImageCost>();
         foreach (var unit in units)
         {
@@ -81,8 +81,10 @@ public sealed class GetHostingOptionsHandler(
                 Services: inst.Services.Select(s => new ServiceBreakdownItem(s.Name, s.Kind, s.RamMb)).ToList()));
         }
 
-        // Build pool hosting options — keep per-plan tenantsPerHost calculation
-        var result = new List<PoolHostingEntry>();
+        // Build pool hosting options
+        var pools = new List<PoolHostingEntry>();
+
+        // ComputePool — one entry per tier profile so each tier gets its own plan selector
         foreach (var unit in units)
         {
             if (unit is not PoolUnit pool) continue;
@@ -90,31 +92,54 @@ public sealed class GetHostingOptionsHandler(
             var provider = registry.Get(pool.ProviderKey);
             if (provider is null) continue;
 
-            // Tier-agnostic pools (no tierProfile) skip hosting options — hub decides placement
-            if (pool.TierProfile is null) continue;
-
             var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
             var poolImages = TopologyHelpers.CollectImages(pool.Container!);
-            var options = new List<PoolHostingOption>();
 
-            foreach (var plan in plans)
+            var tierProfiles = topology.TierProfiles.Count > 0
+                ? topology.TierProfiles
+                : ImageOperationalMetadata.DefaultTierProfiles;
+
+            foreach (var tier in tierProfiles)
             {
-                var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(
-                    plan.MemoryMb, pool.TierProfile, poolImages);
-                if (tenantsPerHost < 1) continue;
+                var options = new List<PoolHostingOption>();
+                foreach (var plan in plans)
+                {
+                    var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(
+                        plan.MemoryMb, tier, poolImages);
+                    if (tenantsPerHost < 1) continue;
 
-                var costPerTenant = plan.PriceMonthly / tenantsPerHost;
-                options.Add(new PoolHostingOption(
-                    plan.Id, plan.Label, plan.MemoryMb, plan.VCpus,
-                    plan.DiskGb, plan.PriceMonthly, tenantsPerHost,
-                    Math.Round(costPerTenant, 2)));
+                    var costPerTenant = plan.PriceMonthly / tenantsPerHost;
+                    options.Add(new PoolHostingOption(
+                        plan.Id, plan.Label, plan.MemoryMb, plan.VCpus,
+                        plan.DiskGb, plan.PriceMonthly, tenantsPerHost,
+                        Math.Round(costPerTenant, 2)));
+                }
+
+                pools.Add(new PoolHostingEntry(
+                    pool.Container?.Name ?? "pool", tier.Id, tier.Name, options));
             }
-
-            result.Add(new PoolHostingEntry(
-                pool.Container?.Name ?? "pool", pool.TierProfile.Id, pool.TierProfile.Name, options));
         }
 
-        return new GetHostingOptionsResponse(result, infraImages);
+        // DataPool — no tier profile, just plan selection for the data host
+        foreach (var unit in units)
+        {
+            if (unit is not InstanceUnit inst) continue;
+            if (inst.Container?.Kind != ContainerKind.DataPool) continue;
+
+            var provider = registry.Get(inst.ProviderKey);
+            if (provider is null) continue;
+
+            var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
+            var viablePlans = plans.Where(p => p.MemoryMb >= inst.TotalRamMb).ToList();
+            var options = viablePlans.Select(p => new PoolHostingOption(
+                p.Id, p.Label, p.MemoryMb, p.VCpus, p.DiskGb, p.PriceMonthly,
+                TenantsPerHost: 0, CostPerTenant: 0)).ToList();
+
+            pools.Add(new PoolHostingEntry(
+                inst.Container.Name, "", "Data Pool", options));
+        }
+
+        return new GetHostingOptionsResponse(pools, infraImages);
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)

@@ -191,7 +191,17 @@ const PropertiesPanel: Component = () => {
                 <h4 class="text-xs font-semibold text-topo-text-muted uppercase tracking-wider mb-2">Configuration</h4>
                 <div class="space-y-2">
                   <For each={configFields()}>
-                    {(field) => (
+                    {(field) => {
+                      const resolvedOptions = () => {
+                        if (field.optionsFrom === 'tierProfiles') {
+                          return [
+                            { value: '', label: 'None' },
+                            ...topo.topology.tierProfiles.map(tp => ({ value: tp.id, label: tp.name })),
+                          ];
+                        }
+                        return field.options ?? [];
+                      };
+                      return (
                       <div>
                         <FieldLabel field={field} />
                         {field.type === 'select' ? (
@@ -200,7 +210,7 @@ const PropertiesPanel: Component = () => {
                             value={container().config[field.key] ?? ''}
                             onChange={(e) => updateContainerConfig(field.key, e.currentTarget.value)}
                           >
-                            <For each={field.options ?? []}>
+                            <For each={resolvedOptions()}>
                               {(opt) => <option value={opt.value}>{opt.label}</option>}
                             </For>
                           </select>
@@ -213,7 +223,8 @@ const PropertiesPanel: Component = () => {
                           />
                         )}
                       </div>
-                    )}
+                      );
+                    }}
                   </For>
                 </div>
               </div>
@@ -286,6 +297,15 @@ const PropertiesPanel: Component = () => {
                         : updateImageConfig(field.key, v);
                       const error = () => field.validate?.(getValue()) ?? null;
                       const hasFieldErr = () => error() || fieldHasError(field.key);
+                      const resolvedOptions = () => {
+                        if (field.optionsFrom === 'tierProfiles') {
+                          return [
+                            { value: '', label: 'None' },
+                            ...topo.topology.tierProfiles.map(tp => ({ value: tp.id, label: tp.name })),
+                          ];
+                        }
+                        return field.options ?? [];
+                      };
                       return (
                         <div>
                           <FieldLabel field={field} />
@@ -295,7 +315,7 @@ const PropertiesPanel: Component = () => {
                               value={getValue()}
                               onChange={(e) => setValue(e.currentTarget.value)}
                             >
-                              <For each={field.options ?? []}>
+                              <For each={resolvedOptions()}>
                                 {(opt) => <option value={opt.value}>{opt.label}</option>}
                               </For>
                             </select>

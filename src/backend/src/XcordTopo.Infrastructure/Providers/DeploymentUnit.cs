@@ -17,13 +17,13 @@ public sealed record ServiceEntry(
     /// Create a ServiceEntry from a topology Image node.
     /// RAM is looked up from ImageOperationalMetadata; defaults to 256 if not found.
     /// </summary>
-    public static ServiceEntry FromImage(Image image)
+    public static ServiceEntry FromImage(Image image, string? registry = null)
     {
         var ramMb = ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta)
             ? meta.MinRamMb
             : 256;
 
-        var dockerImage = image.DockerImage ?? TopologyHelpers.GetDefaultDockerImage(image.Kind);
+        var dockerImage = image.DockerImage ?? TopologyHelpers.GetDefaultDockerImage(image.Kind, registry);
 
         return new ServiceEntry(
             Name: image.Name,
@@ -77,7 +77,7 @@ public sealed record PoolUnit(
     Container? Container,
     string ProviderKey,
     List<ServiceEntry> Services,
-    TierProfile TierProfile,
+    TierProfile? TierProfile,
     int TargetTenants,
     string? SelectedPlanId) : DeploymentUnit(Container, ProviderKey);
 

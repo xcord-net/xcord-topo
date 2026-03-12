@@ -6,7 +6,8 @@ export type ContainerKind =
   | 'Host'
   | 'Caddy'
   | 'ComputePool'
-  | 'Dns';
+  | 'Dns'
+  | 'DataPool';
 
 export type ImageKind =
   | 'HubServer'
@@ -15,6 +16,7 @@ export type ImageKind =
   | 'PostgreSQL'
   | 'MinIO'
   | 'LiveKit'
+  | 'Registry'
   | 'Custom';
 
 export type ImageScaling = 'Shared' | 'PerTenant';
@@ -88,6 +90,7 @@ export interface Topology {
   containers: Container[];
   wires: Wire[];
   tierProfiles: TierProfile[];
+  registry: string;
   schemaVersion: number;
   createdAt: string;
   updatedAt: string;

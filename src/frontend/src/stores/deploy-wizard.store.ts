@@ -1,6 +1,6 @@
 import { createRoot } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import type { DeployStep, DeployMode, PoolSelection } from '../types/deploy';
+import type { DeployStep, DeployMode, PoolSelection, InfraSelection } from '../types/deploy';
 
 export interface DeployWizardState {
   /** Current wizard step */
@@ -13,6 +13,8 @@ export interface DeployWizardState {
   providerValues: Record<string, Record<string, string>>;
   /** Pool hosting selections */
   poolSelections: Record<string, PoolSelection>;
+  /** Infrastructure image plan selections (keyed by imageName) */
+  infraSelections: Record<string, InfraSelection>;
   /** Non-sensitive service key values */
   serviceKeyValues: Record<string, string>;
   /** ID of the topology this wizard state belongs to */
@@ -29,6 +31,7 @@ function createEmptyState(): DeployWizardState {
     deployMode: 'fresh',
     providerValues: {},
     poolSelections: {},
+    infraSelections: {},
     serviceKeyValues: {},
     topologyId: '',
   };
@@ -42,6 +45,7 @@ function loadFromStorage(): DeployWizardState {
       // Ensure all fields exist (backfill for older saved state)
       if (!parsed.providerValues) parsed.providerValues = {};
       if (!parsed.poolSelections) parsed.poolSelections = {};
+      if (!parsed.infraSelections) parsed.infraSelections = {};
       if (!parsed.serviceKeyValues) parsed.serviceKeyValues = {};
       return parsed;
     }
@@ -100,6 +104,12 @@ export function useDeployWizardStore() {
     setPoolSelections(selections: Record<string, PoolSelection>): void {
       store.setState(produce(s => {
         s.poolSelections = { ...selections };
+      }));
+    },
+
+    setInfraSelections(selections: Record<string, InfraSelection>): void {
+      store.setState(produce(s => {
+        s.infraSelections = { ...selections };
       }));
     },
 

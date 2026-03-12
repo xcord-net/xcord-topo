@@ -15,7 +15,7 @@ RUN addgroup -g 1001 xcord-topo && \
     adduser -u 1001 -G xcord-topo -s /bin/sh -D xcord-topo
 
 # Create data directories
-RUN mkdir -p /data/topologies /data/terraform /data/credentials
+RUN mkdir -p /data/topologies /data/deployments
 
 # Copy pre-built backend publish output
 COPY .build/publish/ .

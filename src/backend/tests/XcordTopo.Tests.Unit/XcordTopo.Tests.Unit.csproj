@@ -24,4 +24,8 @@
     <ProjectReference Include="..\..\src\XcordTopo.Features\XcordTopo.Features.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Fixtures\*.json" />
+  </ItemGroup>
+
 </Project>

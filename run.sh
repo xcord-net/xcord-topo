@@ -12,10 +12,12 @@ BUILD_DIR="$SCRIPT_DIR/.build"
 log()  { printf '\033[1;34m==> %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m==> %s\033[0m\n' "$*"; }
 
+VITE_PID=""
+
 cleanup() {
   log "Cleaning up..."
+  [[ -n "$VITE_PID" ]] && kill "$VITE_PID" 2>/dev/null || true
   docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
-  docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
   rm -rf "$BUILD_DIR"
   ok "Done"
 }
@@ -66,6 +68,8 @@ run() {
   docker run \
     --name "$CONTAINER_NAME" \
     -p "$PORT:80" \
+    -u "$(id -u):$(id -g)" \
+    -v "$SCRIPT_DIR/docker/data:/data" \
     -e ASPNETCORE_ENVIRONMENT=Production \
     -e Data__BasePath=/data \
     "$IMAGE_NAME"
@@ -89,15 +93,19 @@ dev() {
   docker run -d \
     --name "$CONTAINER_NAME" \
     -p "$PORT:80" \
+    -u "$(id -u):$(id -g)" \
+    -v "$SCRIPT_DIR/docker/data:/data" \
     -e ASPNETCORE_ENVIRONMENT=Development \
     -e Data__BasePath=/data \
     "$IMAGE_NAME"
 
   ok "Backend running at http://localhost:$PORT"
-  ok "Starting Vite dev server at http://localhost:3000 (proxying /api → :$PORT)"
+  ok "Starting Vite dev server at http://localhost:3001 (proxying /api → :$PORT)"
 
   cd "$SCRIPT_DIR/src/frontend"
-  VITE_API_TARGET="http://localhost:$PORT" npx vite --port 3000
+  VITE_API_TARGET="http://localhost:$PORT" npx vite --port 3001 &
+  VITE_PID=$!
+  wait "$VITE_PID"
 }
 
 # ── Entry point ──────────────────────────────────────────────────────

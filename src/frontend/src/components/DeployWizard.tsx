@@ -4,7 +4,7 @@ import { useDeployWizardStore } from '../stores/deploy-wizard.store';
 import * as deployApi from '../lib/deploy-api';
 import { saveTopology } from '../lib/serialization';
 import { validateField, validateAllFields } from '../lib/credential-validation';
-import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, CostEstimate, TerraformOutputLine, HostingOptions, PoolSelection, TopologyValidationResult, ValidationItem } from '../types/deploy';
+import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, CostEstimate, TerraformOutputLine, HostingOptions, PoolSelection, InfraSelection, TopologyValidationResult, ValidationItem } from '../types/deploy';
 import type { MigrationDiffResult, MigrationDecision, MigrationPlan } from '../types/migration';
 import type { Topology, Container } from '../types/topology';
 
@@ -200,6 +200,14 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       _setPoolSelections(v); wizardStore.setPoolSelections(v);
     }
   };
+  const [infraSelections, _setInfraSelections] = createSignal<Record<string, InfraSelection>>(saved.infraSelections ?? {});
+  const setInfraSelections = (v: Record<string, InfraSelection> | ((prev: Record<string, InfraSelection>) => Record<string, InfraSelection>)) => {
+    if (typeof v === 'function') {
+      _setInfraSelections(prev => { const next = v(prev); wizardStore.setInfraSelections(next); return next; });
+    } else {
+      _setInfraSelections(v); wizardStore.setInfraSelections(v);
+    }
+  };
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
   const [fieldErrors, setFieldErrors] = createSignal<Record<string, string>>({});
@@ -329,7 +337,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
 
         await Promise.all(allKeys.map(async (pk) => {
           const [credRes, schema, regRes] = await Promise.all([
-            deployApi.getCredentialStatus(pk),
+            deployApi.getCredentialStatus(topo.topology.id, pk),
             deployApi.getCredentialSchema(pk),
             fetch(`/api/v1/providers/${pk}/regions`).then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); }),
           ]);
@@ -372,7 +380,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         // Single provider: original path
         const [regRes, credRes, schema] = await Promise.all([
           fetch(`/api/v1/providers/${key}/regions`).then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); }),
-          deployApi.getCredentialStatus(key),
+          deployApi.getCredentialStatus(topo.topology.id, key),
           deployApi.getCredentialSchema(key),
         ]);
         setRegions(regRes.regions);
@@ -404,7 +412,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       // Fetch service key schema and status in parallel
       const [skSchema, skStatus] = await Promise.all([
         deployApi.getServiceKeySchema(),
-        deployApi.getServiceKeyStatus(),
+        deployApi.getServiceKeyStatus(topo.topology.id),
       ]);
       setServiceKeySchema(skSchema);
       setServiceKeyStatus(skStatus);
@@ -527,7 +535,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
             if (v) vars[k] = v;
           }
           if (Object.keys(vars).length > 0) {
-            const status = await deployApi.saveCredentials(pk, vars);
+            const status = await deployApi.saveCredentials(topo.topology.id, pk, vars);
             updatedStatuses[pk] = status;
           }
         }
@@ -539,7 +547,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
           if (v) vars[k] = v;
         }
         if (Object.keys(vars).length > 0) {
-          const updatedCredStatus = await deployApi.saveCredentials(provider(), vars);
+          const updatedCredStatus = await deployApi.saveCredentials(topo.topology.id, provider(), vars);
           setCredentialStatus(updatedCredStatus);
         }
 
@@ -561,7 +569,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         if (v) skVars[k] = v;
       }
       if (Object.keys(skVars).length > 0) {
-        const updatedSkStatus = await deployApi.saveServiceKeys(skVars);
+        const updatedSkStatus = await deployApi.saveServiceKeys(topo.topology.id, skVars);
         setServiceKeyStatus(updatedSkStatus);
       }
 
@@ -615,6 +623,20 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
           }
         }
         setPoolSelections(defaults);
+
+        // Initialize infra selections with defaults (auto-selected plan from backend)
+        const infraDefaults: Record<string, InfraSelection> = {};
+        const savedInfra = infraSelections();
+        for (const img of hosting.infraImages) {
+          const savedSel = savedInfra[img.imageName];
+          const validPlan = savedSel && img.availablePlans.some(p => p.planId === savedSel.planId);
+          infraDefaults[img.imageName] = validPlan ? savedSel : {
+            imageName: img.imageName,
+            planId: img.planId,
+          };
+        }
+        setInfraSelections(infraDefaults);
+
         setStep('hosting');
       } else {
         await generateAndEstimate();
@@ -1387,7 +1409,19 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                 <Show when={serviceKeySchema().length > 0}>
                   <div class="border-t border-topo-border mt-4 pt-4">
                     <h3 class="text-sm font-semibold text-topo-text-primary mb-1">Service Configuration</h3>
-                    <p class="text-xs text-topo-text-muted mb-3">Third-party service credentials distributed to all provisioned instances.</p>
+                    <p class="text-xs text-topo-text-muted mb-3">Registry and third-party service credentials distributed to all provisioned instances.</p>
+
+                    {/* Docker Registry */}
+                    <Show when={serviceKeySchema().some(f => f.key.startsWith('registry_'))}>
+                      <div class="mb-3">
+                        <h4 class="text-xs font-medium text-topo-text-secondary mb-2">Docker Registry</h4>
+                        <div class="space-y-2">
+                          <For each={serviceKeySchema().filter(f => f.key.startsWith('registry_'))}>
+                            {(field) => renderServiceKeyField(field)}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
 
                     {/* Stripe */}
                     <Show when={serviceKeySchema().some(f => f.key.startsWith('stripe_'))}>
@@ -1572,6 +1606,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                           <th class="text-left py-1.5 px-3 font-medium">Image</th>
                           <th class="text-right py-1.5 px-3 font-medium">RAM</th>
                           <th class="text-left py-1.5 px-3 font-medium">Plan</th>
+                          <th class="text-right py-1.5 px-3 font-medium">Storage</th>
                           <th class="text-right py-1.5 px-3 font-medium">$/mo</th>
                           <th class="text-right py-1.5 px-3 font-medium">Replicas</th>
                           <th class="text-right py-1.5 px-3 font-medium">Cost Range</th>
@@ -1579,63 +1614,107 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                       </thead>
                       <tbody>
                         <For each={hostingOptions()?.infraImages ?? []}>
-                          {(img) => (<>
-                            <tr class="border-b border-topo-border/50">
-                              <td class="py-1.5 px-3">
-                                <span class="text-topo-text-primary font-medium">{img.imageName}</span>
-                                <span class="text-topo-text-muted ml-1.5 text-[10px]">{img.imageKind}</span>
-                              </td>
-                              <td class="py-1.5 px-3 text-right text-topo-text-secondary">
-                                {img.ramMb >= 1024 ? `${(img.ramMb / 1024).toFixed(0)} GB` : `${img.ramMb} MB`}
-                              </td>
-                              <td class="py-1.5 px-3 text-topo-text-secondary">{img.planLabel}</td>
-                              <td class="py-1.5 px-3 text-right text-topo-text-secondary">${img.priceMonthly}</td>
-                              <td class="py-1.5 px-3 text-right text-topo-text-secondary">
-                                {img.minReplicas === img.maxReplicas
-                                  ? img.minReplicas
-                                  : <>{img.minReplicas}{'\u2013'}{img.maxReplicas}</>}
-                              </td>
-                              <td class="py-1.5 px-3 text-right text-topo-text-primary font-medium">
-                                {img.minCostMonthly === img.maxCostMonthly
-                                  ? <>${img.minCostMonthly}/mo</>
-                                  : <>${img.minCostMonthly}{'\u2013'}${img.maxCostMonthly}/mo</>}
-                              </td>
-                            </tr>
-                            <Show when={img.services?.length}>
-                              <tr class="border-b border-topo-border/30">
-                                <td colSpan={6} class="px-2 py-1">
-                                  <details class="group">
-                                    <summary class="text-[10px] text-topo-text-secondary cursor-pointer hover:text-topo-brand">
-                                      Services ({img.services!.length})
-                                    </summary>
-                                    <div class="pl-4 py-1 space-y-0.5">
-                                      <For each={img.services!}>
-                                        {(svc) => (
-                                          <div class="flex justify-between text-[10px] text-topo-text-secondary">
-                                            <span>{svc.name} <span class="opacity-50">({svc.kind})</span></span>
-                                            <span>{svc.ramMb >= 1024 ? `${(svc.ramMb / 1024).toFixed(1)} GB` : `${svc.ramMb} MB`}</span>
-                                          </div>
+                          {(img) => {
+                            const sel = () => infraSelections()[img.imageName];
+                            const selectedPlan = () => img.availablePlans.find(p => p.planId === sel()?.planId) ?? img.availablePlans[0];
+                            const plan = () => selectedPlan();
+                            const price = () => plan()?.priceMonthly ?? img.priceMonthly;
+                            const disk = () => plan()?.diskGb ?? img.diskGb;
+                            const minCost = () => price() * img.minReplicas;
+                            const maxCost = () => price() * img.maxReplicas;
+
+                            return (<>
+                              <tr class="border-b border-topo-border/50">
+                                <td class="py-1.5 px-3">
+                                  <span class="text-topo-text-primary font-medium">{img.imageName}</span>
+                                  <span class="text-topo-text-muted ml-1.5 text-[10px]">{img.imageKind}</span>
+                                </td>
+                                <td class="py-1.5 px-3 text-right text-topo-text-secondary">
+                                  {img.ramMb >= 1024 ? `${(img.ramMb / 1024).toFixed(0)} GB` : `${img.ramMb} MB`}
+                                </td>
+                                <td class="py-1.5 px-3">
+                                  <Show when={img.availablePlans.length > 1} fallback={
+                                    <span class="text-topo-text-secondary">{img.planLabel}</span>
+                                  }>
+                                    <select
+                                      class="bg-topo-bg-tertiary text-topo-text-primary text-xs rounded border border-topo-border px-1.5 py-0.5 w-full"
+                                      value={sel()?.planId ?? img.planId}
+                                      onChange={(e) => {
+                                        setInfraSelections(prev => ({
+                                          ...prev,
+                                          [img.imageName]: { imageName: img.imageName, planId: e.currentTarget.value },
+                                        }));
+                                      }}
+                                    >
+                                      <For each={img.availablePlans}>
+                                        {(p) => (
+                                          <option value={p.planId}>
+                                            {p.planLabel} ({p.vCpus} vCPU, {p.memoryMb >= 1024 ? `${(p.memoryMb / 1024).toFixed(0)} GB` : `${p.memoryMb} MB`})
+                                          </option>
                                         )}
                                       </For>
-                                    </div>
-                                  </details>
+                                    </select>
+                                  </Show>
+                                </td>
+                                <td class="py-1.5 px-3 text-right text-topo-text-secondary">
+                                  {disk() >= 1000 ? `${(disk() / 1000).toFixed(1)} TB` : `${disk()} GB`}
+                                </td>
+                                <td class="py-1.5 px-3 text-right text-topo-text-secondary">${price().toFixed(2)}</td>
+                                <td class="py-1.5 px-3 text-right text-topo-text-secondary">
+                                  {img.minReplicas === img.maxReplicas
+                                    ? img.minReplicas
+                                    : <>{img.minReplicas}{'\u2013'}{img.maxReplicas}</>}
+                                </td>
+                                <td class="py-1.5 px-3 text-right text-topo-text-primary font-medium">
+                                  {minCost() === maxCost()
+                                    ? <>${minCost().toFixed(2)}/mo</>
+                                    : <>${minCost().toFixed(2)}{'\u2013'}${maxCost().toFixed(2)}/mo</>}
                                 </td>
                               </tr>
-                            </Show>
-                          </>)}
+                              <Show when={img.services?.length}>
+                                <tr class="border-b border-topo-border/30">
+                                  <td colSpan={7} class="px-2 py-1">
+                                    <details class="group">
+                                      <summary class="text-[10px] text-topo-text-secondary cursor-pointer hover:text-topo-brand">
+                                        Services ({img.services!.length})
+                                      </summary>
+                                      <div class="pl-4 py-1 space-y-0.5">
+                                        <For each={img.services!}>
+                                          {(svc) => (
+                                            <div class="flex justify-between text-[10px] text-topo-text-secondary">
+                                              <span>{svc.name} <span class="opacity-50">({svc.kind})</span></span>
+                                              <span>{svc.ramMb >= 1024 ? `${(svc.ramMb / 1024).toFixed(1)} GB` : `${svc.ramMb} MB`}</span>
+                                            </div>
+                                          )}
+                                        </For>
+                                      </div>
+                                    </details>
+                                  </td>
+                                </tr>
+                              </Show>
+                            </>);
+                          }}
                         </For>
                       </tbody>
                       <tfoot>
                         <tr class="bg-topo-bg-tertiary/30">
-                          <td colSpan={5} class="py-1.5 px-3 text-right text-xs text-topo-text-muted font-medium">Total</td>
+                          <td colSpan={6} class="py-1.5 px-3 text-right text-xs text-topo-text-muted font-medium">Total</td>
                           <td class="py-1.5 px-3 text-right text-xs text-topo-brand font-semibold">
                             {(() => {
                               const imgs = hostingOptions()?.infraImages ?? [];
-                              const minTotal = imgs.reduce((s, i) => s + i.minCostMonthly, 0);
-                              const maxTotal = imgs.reduce((s, i) => s + i.maxCostMonthly, 0);
+                              const sels = infraSelections();
+                              let minTotal = 0;
+                              let maxTotal = 0;
+                              for (const img of imgs) {
+                                const sel = sels[img.imageName];
+                                const plan = sel ? img.availablePlans.find(p => p.planId === sel.planId) : undefined;
+                                const price = plan?.priceMonthly ?? img.priceMonthly;
+                                minTotal += price * img.minReplicas;
+                                maxTotal += price * img.maxReplicas;
+                              }
                               return minTotal === maxTotal
-                                ? <>${minTotal}/mo</>
-                                : <>${minTotal}{'\u2013'}${maxTotal}/mo</>;
+                                ? <>${minTotal.toFixed(2)}/mo</>
+                                : <>${minTotal.toFixed(2)}{'\u2013'}${maxTotal.toFixed(2)}/mo</>;
                             })()}
                           </td>
                         </tr>
@@ -1687,6 +1766,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                                   <th class="text-left py-1.5 pr-3 font-medium w-6"></th>
                                   <th class="text-left py-1.5 pr-3 font-medium">Plan</th>
                                   <th class="text-right py-1.5 pr-3 font-medium">RAM</th>
+                                  <th class="text-right py-1.5 pr-3 font-medium">Storage</th>
                                   <th class="text-right py-1.5 pr-3 font-medium">vCPUs</th>
                                   <th class="text-right py-1.5 pr-3 font-medium">$/mo</th>
                                   <th class="text-right py-1.5 pr-3 font-medium">Tenants/Host</th>
@@ -1726,8 +1806,11 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                                         <td class="py-1.5 pr-3 text-right text-topo-text-secondary">
                                           {option.memoryMb >= 1024 ? `${(option.memoryMb / 1024).toFixed(0)} GB` : `${option.memoryMb} MB`}
                                         </td>
+                                        <td class="py-1.5 pr-3 text-right text-topo-text-secondary">
+                                          {option.diskGb >= 1000 ? `${(option.diskGb / 1000).toFixed(1)} TB` : `${option.diskGb} GB`}
+                                        </td>
                                         <td class="py-1.5 pr-3 text-right text-topo-text-secondary">{option.vCpus}</td>
-                                        <td class="py-1.5 pr-3 text-right text-topo-text-secondary">${option.priceMonthly}</td>
+                                        <td class="py-1.5 pr-3 text-right text-topo-text-secondary">${option.priceMonthly.toFixed(2)}</td>
                                         <td class="py-1.5 pr-3 text-right text-topo-text-secondary">{option.tenantsPerHost}</td>
                                         <td class="py-1.5 text-right text-topo-text-secondary">${option.costPerTenant}</td>
                                       </tr>
@@ -1922,7 +2005,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                           <tr>
                             <td colspan="4" class="py-1.5 px-2 text-topo-text-primary font-semibold">Infrastructure Total</td>
                             <td class="py-1.5 px-2 text-topo-brand font-semibold text-right">
-                              ${cost().hosts.filter(h => !h.tierProfileId).reduce((s, h) => s + h.pricePerMonth, 0)}/mo
+                              ${cost().hosts.filter(h => !h.tierProfileId).reduce((s, h) => s + h.pricePerMonth, 0).toFixed(2)}/mo
                             </td>
                           </tr>
                           <Show when={cost().hosts.some(h => !!h.tierProfileId)}>
@@ -1953,7 +2036,21 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                 {/* HCL file preview */}
                 <details class="group">
                   <summary class="text-xs font-semibold text-topo-text-primary cursor-pointer hover:text-topo-brand">
-                    HCL Files ({Object.keys(hclFiles()).length})
+                    <span class="inline-flex items-center gap-2">
+                      HCL Files ({Object.keys(hclFiles()).length})
+                      <button
+                        class="text-[10px] text-topo-text-secondary hover:text-topo-brand"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const all = Object.entries(hclFiles())
+                            .map(([name, content]) => `// === ${name} ===\n${content}`)
+                            .join('\n\n');
+                          navigator.clipboard.writeText(all);
+                        }}
+                      >
+                        copy
+                      </button>
+                    </span>
                   </summary>
                   <div class="mt-2 space-y-3 max-h-96 overflow-y-auto">
                     <For each={Object.entries(hclFiles())}>

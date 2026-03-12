@@ -100,7 +100,7 @@ public sealed class GatewayStorageEntry
 public sealed class GatewayDockerEntry
 {
     public string SocketProxyUrl { get; set; } = string.Empty;
-    public string InstanceImage { get; set; } = "ghcr.io/xcord/fed:latest";
+    public string InstanceImage { get; set; } = string.Empty;
 }
 public sealed class GatewayCaddyEntry { public string AdminUrl { get; set; } = string.Empty; }
 public sealed class GatewayLiveKitEntry

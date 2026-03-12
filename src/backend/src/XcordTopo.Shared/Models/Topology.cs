@@ -13,6 +13,7 @@ public sealed class Topology
     public List<Container> Containers { get; set; } = [];
     public List<Wire> Wires { get; set; } = [];
     public List<TierProfile> TierProfiles { get; set; } = [];
+    public string Registry { get; set; } = "docker.xcord.net";
     public int SchemaVersion { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -34,7 +35,8 @@ public enum ContainerKind
     Host,
     Caddy,
     ComputePool,
-    Dns
+    Dns,
+    DataPool
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -46,6 +48,7 @@ public enum ImageKind
     PostgreSQL,
     MinIO,
     LiveKit,
+    Registry,
     Custom
 }
 

@@ -8,7 +8,8 @@ public sealed record ImageMetadata(
     int MinRamMb,
     int SharedOverheadMb,
     string? CommandOverride,
-    Dictionary<string, string> EnvVarTemplates
+    Dictionary<string, string> EnvVarTemplates,
+    string? DockerImage = null
 );
 
 public sealed record CaddyContainerMetadata(
@@ -33,7 +34,8 @@ public static class ImageOperationalMetadata
                 ["POSTGRES_PASSWORD"] = "{password}",
                 ["POSTGRES_DB"] = "{dbName}",
                 ["POSTGRES_USER"] = "postgres"
-            }
+            },
+            DockerImage: "postgres:17-alpine"
         ),
         [ImageKind.Redis] = new(
             Ports: [6379],
@@ -41,7 +43,8 @@ public static class ImageOperationalMetadata
             MinRamMb: 256,
             SharedOverheadMb: 512,
             CommandOverride: "redis-server --requirepass {password}",
-            EnvVarTemplates: new()
+            EnvVarTemplates: new(),
+            DockerImage: "redis:7-alpine"
         ),
         [ImageKind.MinIO] = new(
             Ports: [9000, 9001],
@@ -53,7 +56,8 @@ public static class ImageOperationalMetadata
             {
                 ["MINIO_ROOT_USER"] = "{accessKey}",
                 ["MINIO_ROOT_PASSWORD"] = "{secretKey}"
-            }
+            },
+            DockerImage: "minio/minio:RELEASE.2025-02-28T09-55-16Z"
         ),
         [ImageKind.HubServer] = new(
             Ports: [80],
@@ -92,6 +96,15 @@ public static class ImageOperationalMetadata
             {
                 ["LIVEKIT_KEYS"] = "{apiKey}: {apiSecret}"
             }
+        ),
+        [ImageKind.Registry] = new(
+            Ports: [5000],
+            MountPath: "/var/lib/registry",
+            MinRamMb: 256,
+            SharedOverheadMb: 0,
+            CommandOverride: null,
+            EnvVarTemplates: new(),
+            DockerImage: "registry:2"
         ),
         [ImageKind.Custom] = new(
             Ports: [],

@@ -5,19 +5,19 @@ namespace XcordTopo.Tests.Integration;
 
 public sealed class TopoWebApplicationFactory : WebApplicationFactory<Program>
 {
-    private readonly string _tempDir = Path.Combine(
+    public string DataPath { get; } = Path.Combine(
         Path.GetTempPath(), $"xcord-topo-test-{Guid.NewGuid():N}");
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseSetting("Data:BasePath", _tempDir);
+        builder.UseSetting("Data:BasePath", DataPath);
     }
 
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
 
-        if (Directory.Exists(_tempDir))
-            Directory.Delete(_tempDir, true);
+        if (Directory.Exists(DataPath))
+            Directory.Delete(DataPath, true);
     }
 }

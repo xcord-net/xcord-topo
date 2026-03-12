@@ -301,8 +301,9 @@ public class TopologyValidatorTests
     }
 
     [Fact]
-    public void ValidateFull_ComputePoolWithoutFedServer_ReturnsError()
+    public void ValidateFull_ComputePoolWithoutFedServer_NoError()
     {
+        // ComputePool no longer requires FederationServer — they are hub-provisioned at runtime
         var topology = new Topology { Name = "Test" };
         topology.Containers.Add(new Container
         {
@@ -315,7 +316,43 @@ public class TopologyValidatorTests
 
         var result = _validator.ValidateFull(topology);
 
-        Assert.Contains(result.Errors, e => e.Message.Contains("FederationServer") && e.Message.Contains("Pool"));
+        Assert.DoesNotContain(result.Errors, e => e.Message.Contains("FederationServer"));
+    }
+
+    [Fact]
+    public void ValidateFull_DataPoolWithoutDataImage_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container
+        {
+            Name = "DataPool",
+            Kind = ContainerKind.DataPool,
+            Width = 300,
+            Height = 200,
+            Images = [new Image { Name = "Hub", Kind = ImageKind.HubServer, Width = 120, Height = 60 }]
+        });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.Contains(result.Errors, e => e.Message.Contains("DataPool") && e.Message.Contains("data service"));
+    }
+
+    [Fact]
+    public void ValidateFull_DataPoolWithDataImage_NoError()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container
+        {
+            Name = "DataPool",
+            Kind = ContainerKind.DataPool,
+            Width = 300,
+            Height = 200,
+            Images = [new Image { Name = "PG", Kind = ImageKind.PostgreSQL, Width = 120, Height = 60 }]
+        });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.DoesNotContain(result.Errors, e => e.Message.Contains("DataPool") && e.Message.Contains("data service"));
     }
 
     [Fact]
@@ -451,6 +488,26 @@ public class TopologyValidatorTests
         var result = _validator.ValidateFull(topology);
 
         Assert.Contains(result.Warnings, w => w.Message.Contains("custom") && w.Message.Contains("not referenced"));
+    }
+
+    [Fact]
+    public void ValidateFull_TierAgnosticPool_NoUnusedTierWarnings()
+    {
+        // A ComputePool with no tierProfile is tier-agnostic — all profiles are implicitly referenced
+        var topology = new Topology { Name = "Test" };
+        topology.TierProfiles.Add(new TierProfile { Id = "free", Name = "Free", ImageSpecs = new() });
+        topology.TierProfiles.Add(new TierProfile { Id = "pro", Name = "Pro", ImageSpecs = new() });
+        topology.Containers.Add(new Container
+        {
+            Name = "Pool",
+            Kind = ContainerKind.ComputePool,
+            Width = 300, Height = 200,
+            Config = new() // no tierProfile key
+        });
+
+        var result = _validator.ValidateFull(topology);
+
+        Assert.DoesNotContain(result.Warnings, w => w.Message.Contains("not referenced"));
     }
 
     [Fact]

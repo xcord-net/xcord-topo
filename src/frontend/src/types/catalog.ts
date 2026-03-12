@@ -7,6 +7,8 @@ export interface ConfigField {
   placeholder?: string;
   tooltip?: string;
   options?: { value: string; label: string }[];
+  /** Build options dynamically from topology data instead of static `options`. */
+  optionsFrom?: 'tierProfiles';
   parentKinds?: ContainerKind[];
   /** Returns an error message if the value is invalid, or null/undefined if valid. */
   validate?: (value: string) => string | null | undefined;

@@ -42,13 +42,18 @@ public sealed class EstimateCostHandler(
             {
                 case InstanceUnit inst:
                 {
+                    // DataPool is provisioned on demand — not a fixed infrastructure cost
+                    if (inst.Container?.Kind == ContainerKind.DataPool) continue;
                     var provider = registry.Get(inst.ProviderKey);
                     if (provider is null) continue;
                     var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
                     var plan = plans.FirstOrDefault(p => p.MemoryMb >= inst.TotalRamMb) ?? plans.Last();
                     var lineTotal = plan.PriceMonthly * inst.MinReplicas;
+                    var name = inst.Container?.Name
+                        ?? inst.Services.FirstOrDefault()?.Name
+                        ?? "instance";
                     entries.Add(new HostCostEntry(
-                        inst.Container?.Name ?? "instance",
+                        name,
                         plan.Id, plan.Label,
                         inst.TotalRamMb, inst.MinReplicas, lineTotal,
                         Services: inst.Services.Select(s => new ServiceBreakdownItem(s.Name, s.Kind, s.RamMb)).ToList()));
@@ -57,6 +62,8 @@ public sealed class EstimateCostHandler(
                 }
                 case PoolUnit pool:
                 {
+                    // Tier-agnostic pools (no tier profile) have no fixed infra cost — hub provisions at runtime
+                    if (pool.TierProfile is null) continue;
                     var provider = registry.Get(pool.ProviderKey);
                     if (provider is null) continue;
                     var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
@@ -66,7 +73,7 @@ public sealed class EstimateCostHandler(
                     var perTenantMb = 0;
                     foreach (var svc in pool.Services.Where(s => s.Scaling == ImageScaling.PerTenant))
                     {
-                        var spec = pool.TierProfile.ImageSpecs.GetValueOrDefault(svc.Kind);
+                        var spec = pool.TierProfile?.ImageSpecs.GetValueOrDefault(svc.Kind);
                         perTenantMb += spec?.MemoryMb ?? 256;
                     }
 
@@ -78,8 +85,9 @@ public sealed class EstimateCostHandler(
                         selectedPlan = plans.FirstOrDefault(p => p.MemoryMb >= sharedOverhead + perTenantMb) ?? plans.Last();
 
                     var poolImages = TopologyHelpers.CollectImages(pool.Container!);
-                    var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(
-                        selectedPlan.MemoryMb, pool.TierProfile, poolImages);
+                    var tenantsPerHost = pool.TierProfile != null
+                        ? ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile, poolImages)
+                        : 1;
                     var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
                     var ramPerHost = sharedOverhead + (tenantsPerHost * perTenantMb);
                     var lineTotal = selectedPlan.PriceMonthly * hostsRequired;
@@ -88,7 +96,7 @@ public sealed class EstimateCostHandler(
                         pool.Container?.Name ?? "pool",
                         selectedPlan.Id, selectedPlan.Label,
                         ramPerHost, hostsRequired, lineTotal,
-                        pool.TierProfile.Id, tenantsPerHost, pool.TargetTenants,
+                        pool.TierProfile?.Id, tenantsPerHost, pool.TargetTenants,
                         Services: pool.Services.Select(s => new ServiceBreakdownItem(s.Name, s.Kind, s.RamMb)).ToList()));
                     total += lineTotal;
                     break;

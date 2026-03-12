@@ -85,7 +85,7 @@ public sealed class TopologyMatcher
     {
         foreach (var container in containers)
         {
-            var currentHost = container.Kind == ContainerKind.Host ? container : hostAncestor;
+            var currentHost = container.Kind is ContainerKind.Host or ContainerKind.DataPool ? container : hostAncestor;
             var currentPath = string.IsNullOrEmpty(pathPrefix) ? container.Name : $"{pathPrefix}/{container.Name}";
 
             foreach (var image in container.Images)
@@ -498,7 +498,7 @@ public sealed class TopologyMatcher
     {
         foreach (var container in containers)
         {
-            if (container.Kind == ContainerKind.Host)
+            if (container.Kind is ContainerKind.Host or ContainerKind.DataPool)
                 hosts.Add(container);
             CollectHostsRecursive(container.Children, hosts);
         }

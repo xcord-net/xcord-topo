@@ -4,14 +4,14 @@ const API_BASE = '/api/v1';
 
 // --- Credentials ---
 
-export async function getCredentialStatus(providerKey: string): Promise<CredentialStatus> {
-  const res = await fetch(`${API_BASE}/providers/${providerKey}/credentials`);
+export async function getCredentialStatus(topologyId: string, providerKey: string): Promise<CredentialStatus> {
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/credentials/${providerKey}`);
   if (!res.ok) throw new Error(`Failed to get credential status: ${res.statusText}`);
   return res.json();
 }
 
-export async function saveCredentials(providerKey: string, variables: Record<string, string>): Promise<CredentialStatus> {
-  const res = await fetch(`${API_BASE}/providers/${providerKey}/credentials`, {
+export async function saveCredentials(topologyId: string, providerKey: string, variables: Record<string, string>): Promise<CredentialStatus> {
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/credentials/${providerKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ variables }),
@@ -39,14 +39,14 @@ export async function getServiceKeySchema(): Promise<CredentialField[]> {
   return data.fields;
 }
 
-export async function getServiceKeyStatus(): Promise<CredentialStatus> {
-  const res = await fetch(`${API_BASE}/service-keys`);
+export async function getServiceKeyStatus(topologyId: string): Promise<CredentialStatus> {
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/service-keys`);
   if (!res.ok) throw new Error(`Failed to get service key status: ${res.statusText}`);
   return res.json();
 }
 
-export async function saveServiceKeys(variables: Record<string, string>): Promise<CredentialStatus> {
-  const res = await fetch(`${API_BASE}/service-keys`, {
+export async function saveServiceKeys(topologyId: string, variables: Record<string, string>): Promise<CredentialStatus> {
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/service-keys`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ variables }),

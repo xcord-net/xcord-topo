@@ -21,7 +21,7 @@ export const imageDefinitions: ImageDefinition[] = [
       { id: '', name: 'pg', type: 'Database', direction: 'Out', side: 'Right', offset: 0.33 },
       { id: '', name: 'redis', type: 'Database', direction: 'Out', side: 'Right', offset: 0.67 },
     ],
-    defaultDockerImage: 'ghcr.io/xcord/hub:latest',
+    defaultDockerImage: '{registry}/hub:latest',
     configFields: [
       { key: 'scaling', label: 'Scaling', type: 'select', options: [
         { value: 'Shared', label: 'Shared (1 per host)' },
@@ -43,8 +43,9 @@ export const imageDefinitions: ImageDefinition[] = [
       { id: '', name: 'redis', type: 'Database', direction: 'Out', side: 'Right', offset: 0.5 },
       { id: '', name: 'minio', type: 'Storage', direction: 'Out', side: 'Right', offset: 0.75 },
     ],
-    defaultDockerImage: 'ghcr.io/xcord/fed:latest',
+    defaultDockerImage: '{registry}/fed:latest',
     configFields: [
+      { key: 'tier', label: 'Tier', type: 'select', optionsFrom: 'tierProfiles', parentKinds: ['ComputePool'] },
       { key: 'scaling', label: 'Scaling', type: 'select', options: [
         { value: 'Shared', label: 'Shared (1 per host)' },
         { value: 'PerTenant', label: 'Per Tenant' },
@@ -107,7 +108,7 @@ export const imageDefinitions: ImageDefinition[] = [
     defaultPorts: [
       { id: '', name: 's3', type: 'Storage', direction: 'In', side: 'Left', offset: 0.5 },
     ],
-    defaultDockerImage: 'minio/minio:latest',
+    defaultDockerImage: 'minio/minio:RELEASE.2025-02-28T09-55-16Z',
     configFields: [
       { key: 'scaling', label: 'Scaling', type: 'select', options: [
         { value: 'Shared', label: 'Shared (1 per host)' },
@@ -131,7 +132,7 @@ export const imageDefinitions: ImageDefinition[] = [
       { id: '', name: 'api', type: 'Network', direction: 'In', side: 'Left', offset: 0.67 },
       { id: '', name: 'redis', type: 'Database', direction: 'Out', side: 'Right', offset: 0.5 },
     ],
-    defaultDockerImage: 'livekit/livekit-server:latest',
+    defaultDockerImage: 'livekit/livekit-server:v1.8.3',
     configFields: [
       { key: 'scaling', label: 'Scaling', type: 'select', options: [
         { value: 'Shared', label: 'Shared (1 per host)' },
@@ -140,6 +141,20 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
     ],
     description: 'LiveKit WebRTC SFU',
+  },
+  {
+    kind: 'Registry',
+    label: 'Docker Registry',
+    color: '#2ac3de',
+    defaultWidth: 140,
+    defaultHeight: 60,
+    defaultPorts: [],
+    defaultDockerImage: 'registry:2',
+    configFields: [
+      { key: 'domain', label: 'Domain', placeholder: 'docker.xcord.net' },
+      { key: 'volumeSize', label: 'Volume (GB)', placeholder: '50' },
+    ],
+    description: 'Private Docker registry with auto-TLS via Caddy',
   },
   {
     kind: 'Custom',

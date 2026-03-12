@@ -585,7 +585,7 @@ public class LinodeProviderTests
         var files = _provider.GenerateHcl(topology);
 
         Assert.Contains("variable \"media_hosts\"", files["variables.tf"]);
-        Assert.Contains("type = \"number\"", files["variables.tf"]);
+        Assert.Contains("type = number", files["variables.tf"]);
         Assert.Contains("var.media_hosts", files["instances.tf"]);
     }
 
@@ -1042,6 +1042,33 @@ public class LinodeProviderTests
             container.Images.Add(image);
         topology.Containers.Add(container);
         return topology;
+    }
+
+    [Fact]
+    public void GenerateHcl_FirewallWithLiveKitOnCaddy_IncludesLiveKitPorts()
+    {
+        // LiveKit on a standalone Caddy (nested inside DNS) should still trigger firewall rules
+        var caddy = new Container
+        {
+            Id = Guid.NewGuid(), Name = "Caddy", Kind = ContainerKind.Caddy,
+            Width = 600, Height = 300,
+            Images = [new Image { Name = "LiveKit", Kind = ImageKind.LiveKit, Width = 120, Height = 50 }],
+            Config = new() { ["domain"] = "test.com" }
+        };
+        var dns = new Container
+        {
+            Id = Guid.NewGuid(), Name = "DNS", Kind = ContainerKind.Dns,
+            Width = 700, Height = 400,
+            Children = [caddy],
+            Config = new() { ["domain"] = "test.com" }
+        };
+        var topology = new Topology { Name = "test-topo", Containers = [dns] };
+
+        var files = _provider.GenerateHcl(topology);
+        var firewall = files["firewall.tf"];
+
+        Assert.Contains("allow-livekit-tcp", firewall);
+        Assert.Contains("7880-7882", firewall);
     }
 
     private static Topology CreateWiredHubTopology()

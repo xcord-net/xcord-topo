@@ -139,6 +139,23 @@ const Canvas: Component = () => {
       return;
     }
 
+    if (mode === 'resizing') {
+      const resize = interaction.resizeState;
+      if (!resize) return;
+      const canvasPos = clientToCanvas(e.clientX, e.clientY);
+      const dx = canvasPos.x - resize.startCanvasPos.x;
+      const dy = canvasPos.y - resize.startCanvasPos.y;
+      const MIN_W = 80;
+      const MIN_H = 60;
+      const updates: Partial<Container> = {};
+      if (resize.edge === 'right' || resize.edge === 'bottom-right')
+        updates.width = Math.max(MIN_W, resize.startWidth + dx);
+      if (resize.edge === 'bottom' || resize.edge === 'bottom-right')
+        updates.height = Math.max(MIN_H, resize.startHeight + dy);
+      topo.updateContainer(resize.containerId, updates);
+      return;
+    }
+
     if (mode === 'dragging') {
       const drag = interaction.dragState;
       if (!drag) return;
@@ -194,6 +211,25 @@ const Canvas: Component = () => {
       return;
     }
 
+    if (mode === 'resizing') {
+      // Propagate resize to parent containers
+      const resize = interaction.resizeState;
+      if (resize) {
+        const findParent = (containers: typeof topo.topology.containers): string | null => {
+          for (const c of containers) {
+            if (c.children.some(ch => ch.id === resize.containerId)) return c.id;
+            const found = findParent(c.children);
+            if (found) return found;
+          }
+          return null;
+        };
+        const parentId = findParent(topo.topology.containers);
+        if (parentId) topo.growToFit(parentId);
+      }
+      interaction.endResize();
+      return;
+    }
+
     if (mode === 'wiring') {
       // Check if we're over a port to complete the wire
       const hovered = interaction.hoveredPortId;
@@ -236,52 +272,67 @@ const Canvas: Component = () => {
       const drag = interaction.dragState;
       if (!drag) { interaction.endDrag(); return; }
 
-      if (drag.source.type === 'move' && drag.dropTargetId && drag.source.nodeIds.length === 1) {
-        const nodeId = drag.source.nodeIds[0];
-        const imageOwner = topo.findImageOwner(nodeId);
-
-        // Find container parent (if this is a child container)
-        const findContainerParent = (containers: typeof topo.topology.containers): string | null => {
-          for (const c of containers) {
-            if (c.children.some(ch => ch.id === nodeId)) return c.id;
-            const found = findContainerParent(c.children);
-            if (found) return found;
-          }
-          return null;
+      if (drag.source.type === 'move') {
+        // Helper to find a node's parent container
+        const findNodeParent = (nodeId: string): string | null => {
+          const imageOwner = topo.findImageOwner(nodeId);
+          if (imageOwner) return imageOwner;
+          const findContainerParent = (containers: typeof topo.topology.containers): string | null => {
+            for (const c of containers) {
+              if (c.children.some(ch => ch.id === nodeId)) return c.id;
+              const found = findContainerParent(c.children);
+              if (found) return found;
+            }
+            return null;
+          };
+          return findContainerParent(topo.topology.containers);
         };
-        const containerParent = findContainerParent(topo.topology.containers);
-        const currentParent = imageOwner ?? containerParent;
 
-        if (currentParent !== drag.dropTargetId) {
-          if (imageOwner) {
-            // Reparent image
-            const ownerAbs = absoluteContainerPosition(topo.topology.containers, imageOwner);
-            if (ownerAbs) {
-              // Find the image to get its current relative position
-              const findImg = (containers: typeof topo.topology.containers): { x: number; y: number } | null => {
-                for (const c of containers) {
-                  if (c.id === imageOwner) {
-                    const img = c.images.find(i => i.id === nodeId);
-                    if (img) return { x: ownerAbs.x + img.x, y: ownerAbs.y + 32 + img.y };
+        // Reparent if dropping on a different container (single node only)
+        if (drag.dropTargetId && drag.source.nodeIds.length === 1) {
+          const nodeId = drag.source.nodeIds[0];
+          const currentParent = findNodeParent(nodeId);
+
+          if (currentParent !== drag.dropTargetId) {
+            const imageOwner = topo.findImageOwner(nodeId);
+            if (imageOwner) {
+              const ownerAbs = absoluteContainerPosition(topo.topology.containers, imageOwner);
+              if (ownerAbs) {
+                const findImg = (containers: typeof topo.topology.containers): { x: number; y: number } | null => {
+                  for (const c of containers) {
+                    if (c.id === imageOwner) {
+                      const img = c.images.find(i => i.id === nodeId);
+                      if (img) return { x: ownerAbs.x + img.x, y: ownerAbs.y + 32 + img.y };
+                    }
+                    const found = findImg(c.children);
+                    if (found) return found;
                   }
-                  const found = findImg(c.children);
-                  if (found) return found;
+                  return null;
+                };
+                const absPos = findImg(topo.topology.containers);
+                if (absPos) {
+                  topo.reparentImage(nodeId, imageOwner, drag.dropTargetId, absPos.x, absPos.y);
                 }
-                return null;
-              };
-              const absPos = findImg(topo.topology.containers);
+              }
+            } else {
+              const absPos = absoluteContainerPosition(topo.topology.containers, nodeId);
               if (absPos) {
-                topo.reparentImage(nodeId, imageOwner, drag.dropTargetId, absPos.x, absPos.y);
+                topo.reparentContainer(nodeId, drag.dropTargetId, absPos.x, absPos.y);
               }
             }
-          } else {
-            // Reparent container
-            const absPos = absoluteContainerPosition(topo.topology.containers, nodeId);
-            if (absPos) {
-              topo.reparentContainer(nodeId, drag.dropTargetId, absPos.x, absPos.y);
-            }
           }
-          topo.growToFit(drag.dropTargetId);
+        }
+
+        // Always growToFit parent containers of moved nodes
+        const parentIds = new Set<string>();
+        for (const nodeId of drag.source.nodeIds) {
+          const parentId = findNodeParent(nodeId);
+          if (parentId) parentIds.add(parentId);
+        }
+        // Also grow the drop target if reparenting happened
+        if (drag.dropTargetId) parentIds.add(drag.dropTargetId);
+        for (const pid of parentIds) {
+          topo.growToFit(pid);
         }
       } else if (drag.source.type === 'palette') {
         const canvasPos = clientToCanvas(e.clientX, e.clientY);
@@ -480,6 +531,13 @@ const Canvas: Component = () => {
       }
     }
 
+    if (e.key === 'Escape' && interaction.mode === 'resizing') {
+      const prev = history.undo(topo.getSnapshot());
+      if (prev) topo.load(prev);
+      interaction.endResize();
+      return;
+    }
+
     if (e.key === 'Escape' && interaction.mode === 'dragging') {
       const prev = history.undo(topo.getSnapshot());
       if (prev) topo.load(prev);
@@ -517,6 +575,12 @@ const Canvas: Component = () => {
         cursor: (() => {
           const mode = interaction.mode;
           if (mode === 'panning') return 'grabbing';
+          if (mode === 'resizing') {
+            const edge = interaction.resizeState?.edge;
+            if (edge === 'right') return 'ew-resize';
+            if (edge === 'bottom') return 'ns-resize';
+            return 'nwse-resize';
+          }
           if (mode === 'dragging') {
             const drag = interaction.dragState;
             if (drag?.source.type === 'palette' && (drag.source as any).itemType === 'image' && !drag.dropTargetId) {

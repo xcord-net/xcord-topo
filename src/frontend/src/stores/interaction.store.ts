@@ -6,7 +6,8 @@ export type InteractionMode =
   | 'panning'
   | 'wiring'
   | 'selecting'
-  | 'dragging';
+  | 'dragging'
+  | 'resizing';
 
 export interface WiringState {
   fromNodeId: string;
@@ -30,6 +31,16 @@ export interface DragIntent {
   startPos: Point;
 }
 
+export type ResizeEdge = 'right' | 'bottom' | 'bottom-right';
+
+export interface ResizeState {
+  containerId: string;
+  edge: ResizeEdge;
+  startCanvasPos: Point;
+  startWidth: number;
+  startHeight: number;
+}
+
 const store = createRoot(() => {
   const [mode, setMode] = createSignal<InteractionMode>('idle');
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
@@ -39,6 +50,7 @@ const store = createRoot(() => {
   const [selectionBox, setSelectionBox] = createSignal<{ start: Point; end: Point } | null>(null);
   const [dragState, setDragState] = createSignal<DragState | null>(null);
   const [dragIntent, setDragIntent] = createSignal<DragIntent | null>(null);
+  const [resizeState, setResizeState] = createSignal<ResizeState | null>(null);
   return {
     mode, setMode,
     selectedNodeId, setSelectedNodeId,
@@ -48,6 +60,7 @@ const store = createRoot(() => {
     selectionBox, setSelectionBox,
     dragState, setDragState,
     dragIntent, setDragIntent,
+    resizeState, setResizeState,
   };
 });
 
@@ -61,6 +74,7 @@ export function useInteraction() {
     get selectionBox() { return store.selectionBox(); },
     get dragState() { return store.dragState(); },
     get dragIntent() { return store.dragIntent(); },
+    get resizeState() { return store.resizeState(); },
     setMode: store.setMode,
 
     select(nodeId: string, additive = false): void {
@@ -136,7 +150,7 @@ export function useInteraction() {
 
     updateDrag(current: Point, dropTargetId: string | null): void {
       const s = store.dragState();
-      if (s) store.setDragState({ ...s, origin: s.current, current, dropTargetId });
+      if (s) store.setDragState({ ...s, origin: current, current, dropTargetId });
     },
 
     endDrag(): void {
@@ -151,6 +165,16 @@ export function useInteraction() {
       store.setDragIntent(null);
     },
 
+    startResize(state: ResizeState): void {
+      store.setMode('resizing');
+      store.setResizeState(state);
+    },
+
+    endResize(): void {
+      store.setMode('idle');
+      store.setResizeState(null);
+    },
+
     reset(): void {
       store.setMode('idle');
       store.setSelectedNodeId(null);
@@ -160,6 +184,7 @@ export function useInteraction() {
       store.setSelectionBox(null);
       store.setDragState(null);
       store.setDragIntent(null);
+      store.setResizeState(null);
     },
   };
 }

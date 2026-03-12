@@ -2,6 +2,7 @@ import { createRoot } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
 import type { Topology, Container, Image, Wire, Port, DeployStatus } from '../types/topology';
 import { imageDefinitions } from '../catalog/images';
+import { defaultTierProfiles } from '../catalog/tierProfiles';
 
 const HEADER_HEIGHT = 32;
 
@@ -19,7 +20,8 @@ function createEmptyTopology(): Topology {
     serviceKeys: {},
     containers: [],
     wires: [],
-    tierProfiles: [],
+    tierProfiles: structuredClone(defaultTierProfiles),
+    registry: 'docker.xcord.net',
     schemaVersion: 1,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -74,6 +76,12 @@ function migrateTopology(topology: Topology): Topology {
   backfillChildren(topology.containers);
   // Backfill serviceKeys for topologies saved before service key support
   if (!topology.serviceKeys) topology.serviceKeys = {};
+  // Backfill tier profiles from defaults for topologies saved before tier support
+  if (!topology.tierProfiles || topology.tierProfiles.length === 0) {
+    topology.tierProfiles = structuredClone(defaultTierProfiles);
+  }
+  // Backfill registry for topologies saved before registry support
+  if (!topology.registry) topology.registry = 'docker.xcord.net';
   // Migrate image ports and backfill scaling from catalog defaults
   const migrateImages = (containers: Container[]) => {
     for (const c of containers) {

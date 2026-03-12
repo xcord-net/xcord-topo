@@ -6,41 +6,27 @@ namespace XcordTopo.Tests.Unit;
 public sealed class CredentialValidatorTests
 {
     [Fact]
-    public void RequiredFieldMissing_ReturnsError()
+    public void MissingRequiredField_SkippedOnPartialSave()
     {
         var schema = new List<CredentialField>
         {
             new() { Key = "token", Label = "Token", Required = true }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string>(), []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string>());
 
-        Assert.Contains("token", errors.Keys);
-        Assert.Equal("Token is required", errors["token"]);
+        Assert.Empty(errors);
     }
 
     [Fact]
-    public void RequiredFieldEmpty_ReturnsError()
+    public void EmptyRequiredField_SkippedOnPartialSave()
     {
         var schema = new List<CredentialField>
         {
             new() { Key = "token", Label = "Token", Required = true }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["token"] = "  " }, []);
-
-        Assert.Contains("token", errors.Keys);
-    }
-
-    [Fact]
-    public void RequiredSensitiveFieldAlreadySaved_NoError()
-    {
-        var schema = new List<CredentialField>
-        {
-            new() { Key = "token", Label = "Token", Required = true, Sensitive = true }
-        };
-
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string>(), ["token"]);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["token"] = "  " });
 
         Assert.Empty(errors);
     }
@@ -57,7 +43,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["token"] = "abc" }, []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["token"] = "abc" });
 
         Assert.Contains("token", errors.Keys);
         Assert.Equal("Too short", errors["token"]);
@@ -75,7 +61,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["token"] = "abc" }, []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["token"] = "abc" });
 
         Assert.Empty(errors);
     }
@@ -92,7 +78,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["name"] = "toolong" }, []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["name"] = "toolong" });
 
         Assert.Contains("name", errors.Keys);
         Assert.Equal("Too long", errors["name"]);
@@ -110,7 +96,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["domain"] = "not a domain!" }, []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["domain"] = "not a domain!" });
 
         Assert.Contains("domain", errors.Keys);
         Assert.Equal("Invalid domain", errors["domain"]);
@@ -128,7 +114,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["domain"] = "example.com" }, []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["domain"] = "example.com" });
 
         Assert.Empty(errors);
     }
@@ -145,7 +131,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["key"] = "AKIAIOSFODNN7EXAMPLE" }, []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["key"] = "AKIAIOSFODNN7EXAMPLE" });
 
         Assert.Empty(errors);
     }
@@ -162,7 +148,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["ssh"] = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample" }, []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["ssh"] = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample" });
 
         Assert.Empty(errors);
     }
@@ -179,7 +165,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string>(), []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string>());
 
         Assert.Empty(errors);
     }
@@ -196,7 +182,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["x"] = "any" }, []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["x"] = "any" });
 
         Assert.Empty(errors);
     }
@@ -217,7 +203,7 @@ public sealed class CredentialValidatorTests
             }
         };
 
-        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["x"] = "ab" }, []);
+        var errors = CredentialValidator.Validate(schema, new Dictionary<string, string> { ["x"] = "ab" });
 
         Assert.Equal("First error", errors["x"]);
     }

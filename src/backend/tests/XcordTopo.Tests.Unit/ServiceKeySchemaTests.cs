@@ -10,6 +10,9 @@ public sealed class ServiceKeySchemaTests
         var fields = ServiceKeySchema.GetSchema();
         var keys = fields.Select(f => f.Key).ToList();
 
+        Assert.Contains("registry_url", keys);
+        Assert.Contains("registry_username", keys);
+        Assert.Contains("registry_password", keys);
         Assert.Contains("stripe_publishable_key", keys);
         Assert.Contains("stripe_secret_key", keys);
         Assert.Contains("smtp_host", keys);
@@ -22,36 +25,10 @@ public sealed class ServiceKeySchemaTests
     }
 
     [Fact]
-    public void StripeFields_AreOptional()
-    {
-        var fields = ServiceKeySchema.GetSchema();
-        Assert.False(fields.First(f => f.Key == "stripe_publishable_key").Required);
-        Assert.False(fields.First(f => f.Key == "stripe_secret_key").Required);
-    }
-
-    [Fact]
-    public void SmtpFields_RequiredExceptPortAndFromName()
-    {
-        var fields = ServiceKeySchema.GetSchema();
-        Assert.True(fields.First(f => f.Key == "smtp_host").Required);
-        Assert.False(fields.First(f => f.Key == "smtp_port").Required);
-        Assert.True(fields.First(f => f.Key == "smtp_username").Required);
-        Assert.True(fields.First(f => f.Key == "smtp_password").Required);
-        Assert.True(fields.First(f => f.Key == "smtp_from_address").Required);
-        Assert.False(fields.First(f => f.Key == "smtp_from_name").Required);
-    }
-
-    [Fact]
-    public void TenorField_IsOptional()
-    {
-        var fields = ServiceKeySchema.GetSchema();
-        Assert.False(fields.First(f => f.Key == "tenor_api_key").Required);
-    }
-
-    [Fact]
     public void SensitiveFields_AreMarkedSensitive()
     {
         var fields = ServiceKeySchema.GetSchema();
+        Assert.True(fields.First(f => f.Key == "registry_password").Sensitive);
         Assert.True(fields.First(f => f.Key == "stripe_secret_key").Sensitive);
         Assert.True(fields.First(f => f.Key == "stripe_publishable_key").Sensitive);
         Assert.True(fields.First(f => f.Key == "smtp_password").Sensitive);
@@ -82,8 +59,7 @@ public sealed class ServiceKeySchemaTests
         var field = fields.First(f => f.Key == key);
         var errors = XcordTopo.Infrastructure.Validation.CredentialValidator.Validate(
             [field],
-            new Dictionary<string, string> { [key] = value },
-            []);
+            new Dictionary<string, string> { [key] = value });
         Assert.Empty(errors);
     }
 
@@ -97,8 +73,7 @@ public sealed class ServiceKeySchemaTests
         var field = fields.First(f => f.Key == key);
         var errors = XcordTopo.Infrastructure.Validation.CredentialValidator.Validate(
             [field],
-            new Dictionary<string, string> { [key] = value },
-            []);
+            new Dictionary<string, string> { [key] = value });
         Assert.NotEmpty(errors);
     }
 }

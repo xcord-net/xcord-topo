@@ -11,7 +11,7 @@ namespace XcordTopo.Infrastructure.Terraform;
 public sealed class ProcessTerraformExecutor : ITerraformExecutor
 {
     private readonly IHclFileManager _hclFileManager;
-    private readonly string _credentialsBasePath;
+    private readonly string _basePath;
     private readonly ILogger<ProcessTerraformExecutor> _logger;
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _runningProcesses = new();
     private readonly ConcurrentDictionary<Guid, ChannelReader<TerraformOutputLine>> _activeReaders = new();
@@ -22,7 +22,7 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
         ILogger<ProcessTerraformExecutor> logger)
     {
         _hclFileManager = hclFileManager;
-        _credentialsBasePath = Path.Combine(dataOptions.Value.BasePath, "credentials");
+        _basePath = dataOptions.Value.BasePath;
         _logger = logger;
     }
 
@@ -55,7 +55,7 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
         {
             foreach (var key in providerKeys)
             {
-                var credFile = Path.Combine(_credentialsBasePath, $"{key}.tfvars");
+                var credFile = Path.Combine(_basePath, "deployments", topologyId.ToString(), "credentials", $"{key}.tfvars");
                 if (File.Exists(credFile))
                     args += $" -var-file=\"{credFile}\"";
             }

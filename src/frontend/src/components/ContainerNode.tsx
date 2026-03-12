@@ -1,8 +1,10 @@
 import { Component, For, Show, createSignal, onMount } from 'solid-js';
-import { useInteraction } from '../stores/interaction.store';
+import { useInteraction, type ResizeEdge } from '../stores/interaction.store';
 import { useTopology } from '../stores/topology.store';
+import { useCanvas } from '../stores/canvas.store';
 import { useHistory } from '../stores/history.store';
 import { useValidation } from '../stores/validation.store';
+import { screenToCanvas } from '../lib/geometry';
 import type { Container as ContainerType } from '../types/topology';
 import { containerDefinitions } from '../catalog/containers';
 import ImageNode from './ImageNode';
@@ -17,6 +19,7 @@ const ContainerNode: Component<{
 }> = (props) => {
   const interaction = useInteraction();
   const topo = useTopology();
+  const canvasStore = useCanvas();
   const history = useHistory();
   const validation = useValidation();
 
@@ -239,6 +242,69 @@ const ContainerNode: Component<{
           />
         )}
       </For>
+
+      {/* Resize handles — shown when selected */}
+      <Show when={isSelected()}>
+        {(() => {
+          const startResize = (edge: ResizeEdge, e: PointerEvent & { currentTarget: Element }) => {
+            e.stopPropagation();
+            history.push(topo.getSnapshot());
+            const rect = (e.target as Element).closest('svg')!.getBoundingClientRect();
+            const canvasPos = screenToCanvas(
+              { x: e.clientX - rect.left, y: e.clientY - rect.top },
+              canvasStore.transform
+            );
+            interaction.startResize({
+              containerId: props.container.id,
+              edge,
+              startCanvasPos: canvasPos,
+              startWidth: props.container.width,
+              startHeight: props.container.height,
+            });
+          };
+
+          const HANDLE = 8;
+          const cx = absX() + props.container.width;
+          const cy = absY() + props.container.height;
+
+          return (
+            <>
+              {/* Right edge */}
+              <rect
+                x={cx - 3}
+                y={absY() + HEADER_HEIGHT}
+                width={6}
+                height={props.container.height - HEADER_HEIGHT - HANDLE}
+                fill="transparent"
+                style={{ cursor: 'ew-resize' }}
+                onPointerDown={[startResize, 'right']}
+              />
+              {/* Bottom edge */}
+              <rect
+                x={absX()}
+                y={cy - 3}
+                width={props.container.width - HANDLE}
+                height={6}
+                fill="transparent"
+                style={{ cursor: 'ns-resize' }}
+                onPointerDown={[startResize, 'bottom']}
+              />
+              {/* Bottom-right corner grip */}
+              <g style={{ cursor: 'nwse-resize' }} onPointerDown={[startResize, 'bottom-right']}>
+                <rect
+                  x={cx - HANDLE - 2}
+                  y={cy - HANDLE - 2}
+                  width={HANDLE + 4}
+                  height={HANDLE + 4}
+                  fill="transparent"
+                />
+                <line x1={cx - 2} y1={cy - 6} x2={cx - 6} y2={cy - 2} stroke="#7aa2f7" stroke-width={1.5} opacity={0.7} />
+                <line x1={cx - 2} y1={cy - 3} x2={cx - 3} y2={cy - 2} stroke="#7aa2f7" stroke-width={1.5} opacity={0.7} />
+              </g>
+            </>
+          );
+        })()}
+      </Show>
 
     </g>
   );

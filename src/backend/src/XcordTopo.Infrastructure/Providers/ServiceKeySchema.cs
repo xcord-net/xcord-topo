@@ -6,6 +6,70 @@ public static class ServiceKeySchema
 {
     public static List<CredentialField> GetSchema() =>
     [
+        // --- Docker Registry ---
+        new()
+        {
+            Key = "registry_url",
+            Label = "Registry URL",
+            Type = "text",
+            Sensitive = false,
+            Required = true,
+            Placeholder = "docker.xcord.net",
+            Help = new()
+            {
+                Summary = "Docker registry URL that all xcord images are pulled from during provisioning",
+                Steps =
+                [
+                    "If your topology includes a Registry node, use its configured domain",
+                    "Otherwise, use the URL of any Docker-compatible registry (Docker Hub, GHCR, ECR, etc.)",
+                    "All hosts will run 'docker login' against this URL before pulling images"
+                ]
+            },
+            Validation = [new() { Type = "minLength", Value = "3", Message = "Registry URL must be at least 3 characters" }]
+        },
+        new()
+        {
+            Key = "registry_username",
+            Label = "Registry Username",
+            Type = "text",
+            Sensitive = false,
+            Required = true,
+            Placeholder = "admin",
+            Help = new()
+            {
+                Summary = "Username for authenticating with the Docker registry",
+                Steps =
+                [
+                    "For a self-hosted registry, choose a username for htpasswd auth",
+                    "For Docker Hub, use your Docker Hub username",
+                    "For GHCR, use your GitHub username",
+                    "For ECR, use 'AWS' as the username"
+                ]
+            },
+            Validation = [new() { Type = "minLength", Value = "1", Message = "Registry username is required" }]
+        },
+        new()
+        {
+            Key = "registry_password",
+            Label = "Registry Password",
+            Type = "password",
+            Sensitive = true,
+            Required = true,
+            Placeholder = "Enter registry password or token",
+            Help = new()
+            {
+                Summary = "Password or access token for authenticating with the Docker registry",
+                Steps =
+                [
+                    "For a self-hosted registry, choose a strong password for htpasswd auth",
+                    "For Docker Hub, use a Personal Access Token (not your account password)",
+                    "For GHCR, use a GitHub PAT with read:packages scope",
+                    "For ECR, use the output of 'aws ecr get-login-password'"
+                ]
+            },
+            Validation = [new() { Type = "minLength", Value = "1", Message = "Registry password is required" }]
+        },
+
         // --- Stripe ---
         new()
         {

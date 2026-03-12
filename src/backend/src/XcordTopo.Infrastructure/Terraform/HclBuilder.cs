@@ -44,6 +44,16 @@ public sealed class HclBuilder
         return this;
     }
 
+    public HclBuilder MapBlock(string name, Action<HclBuilder> body)
+    {
+        Line($"{name} = {{");
+        _indent++;
+        body(this);
+        _indent--;
+        Line("}");
+        return this;
+    }
+
     public HclBuilder RawAttribute(string name, string expression)
     {
         Line($"{name} = {expression}");

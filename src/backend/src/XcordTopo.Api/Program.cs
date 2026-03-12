@@ -60,12 +60,9 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Ensure data directories exist
+// Ensure base data directory exists (per-topology subdirectories are created on demand)
 var dataOptions = app.Configuration.GetSection(DataOptions.SectionName).Get<DataOptions>() ?? new DataOptions();
-Directory.CreateDirectory(Path.Combine(dataOptions.BasePath, "topologies"));
-Directory.CreateDirectory(Path.Combine(dataOptions.BasePath, "terraform"));
-Directory.CreateDirectory(Path.Combine(dataOptions.BasePath, "credentials"));
-Directory.CreateDirectory(Path.Combine(dataOptions.BasePath, "migrations"));
+Directory.CreateDirectory(dataOptions.BasePath);
 
 app.UseExceptionHandler();
 app.UseCors();

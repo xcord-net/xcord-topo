@@ -1,15 +1,9 @@
 {
   "id": "00000000-0000-0000-0000-000000000001",
-  "name": "Production \u2014 Robust",
+  "name": "Production — Robust",
   "description": "Full HA deployment with tier-based tenant packing: Caddy reverse proxy, hub tier with load-balanced servers, shared LiveKit for voice/video, ComputePools for free and pro tiers with shared infrastructure (PG, Redis, MinIO per host), and a dedicated FederationGroup for enterprise tenants.",
   "provider": "aws",
   "providerConfig": {},
-  "serviceKeys": {
-    "smtp_host": "mail.xcord.net",
-    "smtp_username": "admin@mail.xcord.net",
-    "smtp_from_address": "noreply@xcord.net",
-    "smtp_from_name": "xcord-net"
-  },
   "containers": [
     {
       "id": "f4e6260a-c56c-4f16-b4b3-a1118586c623",
@@ -100,7 +94,7 @@
                   "offset": 0.67
                 }
               ],
-              "dockerImage": "ghcr.io/xcord/hub:latest",
+              "dockerImage": "ghcr.io/xcord/hub:v0.1.0",
               "config": {
                 "replicas": "1-3"
               },
@@ -249,41 +243,8 @@
                   "y": 62.051685915898986,
                   "width": 140,
                   "height": 60,
-                  "ports": [
-                    {
-                      "id": "b7e41d34-e75e-42ec-957d-d251aff8020a",
-                      "name": "http",
-                      "type": "Network",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    },
-                    {
-                      "id": "c7966771-309b-4e3a-a09f-8a830a85b96d",
-                      "name": "pg",
-                      "type": "Database",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.25
-                    },
-                    {
-                      "id": "a5872c2e-926d-407e-ac47-cbe46411d377",
-                      "name": "redis",
-                      "type": "Database",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.5
-                    },
-                    {
-                      "id": "0180637f-c63f-42b9-a537-f10253cb57ad",
-                      "name": "minio",
-                      "type": "Storage",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.75
-                    }
-                  ],
-                  "dockerImage": "ghcr.io/xcord/fed:latest",
+                  "ports": [],
+                  "dockerImage": "ghcr.io/xcord/fed:v0.1.0",
                   "config": {
                     "replicas": "1-10"
                   },
@@ -297,16 +258,7 @@
                   "y": 67.86189308459032,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "0d5c8392-311e-45c0-a629-520302be9e36",
-                      "name": "redis",
-                      "type": "Database",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "redis:7-alpine",
                   "config": {},
                   "scaling": "Shared"
@@ -319,16 +271,7 @@
                   "y": 127.03877422399495,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "81ef2775-72af-4b6f-b539-1f6c70bdaadf",
-                      "name": "s3",
-                      "type": "Storage",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "minio/minio:RELEASE.2025-02-28T09-55-16Z",
                   "config": {},
                   "scaling": "Shared"
@@ -341,16 +284,7 @@
                   "y": 9.544815778400789,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "1e98eda0-1511-461c-95e9-d6f9b20d5d84",
-                      "name": "postgres",
-                      "type": "Database",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "postgres:17-alpine",
                   "config": {},
                   "scaling": "Shared"
@@ -397,41 +331,8 @@
                   "y": 62.051685915898986,
                   "width": 140,
                   "height": 60,
-                  "ports": [
-                    {
-                      "id": "4aa4a133-0fa6-45ea-87a5-307ff0ad8d39",
-                      "name": "http",
-                      "type": "Network",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    },
-                    {
-                      "id": "578a16d6-671b-4d8d-8efd-3fd903ae77fe",
-                      "name": "pg",
-                      "type": "Database",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.25
-                    },
-                    {
-                      "id": "7fa7cad1-c5d1-4836-a693-462239fd789f",
-                      "name": "redis",
-                      "type": "Database",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.5
-                    },
-                    {
-                      "id": "4d7ac93a-d866-4ce5-8161-98b7eaf59d6e",
-                      "name": "minio",
-                      "type": "Storage",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.75
-                    }
-                  ],
-                  "dockerImage": "ghcr.io/xcord/fed:latest",
+                  "ports": [],
+                  "dockerImage": "ghcr.io/xcord/fed:v0.1.0",
                   "config": {
                     "replicas": "1-10"
                   },
@@ -445,16 +346,7 @@
                   "y": 67.86189308459032,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "2d80feae-57d9-4db9-9a9f-9a0365664f4b",
-                      "name": "redis",
-                      "type": "Database",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "redis:7-alpine",
                   "config": {},
                   "scaling": "Shared"
@@ -467,16 +359,7 @@
                   "y": 127.03877422399495,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "3db2d641-fe62-4573-a1e8-de36cbe2fc22",
-                      "name": "s3",
-                      "type": "Storage",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "minio/minio:RELEASE.2025-02-28T09-55-16Z",
                   "config": {},
                   "scaling": "Shared"
@@ -489,16 +372,7 @@
                   "y": 9.544815778400789,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "1bda9e09-4446-475e-93a5-14197c3f5d3e",
-                      "name": "postgres",
-                      "type": "Database",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "postgres:17-alpine",
                   "config": {},
                   "scaling": "Shared"
@@ -545,41 +419,8 @@
                   "y": 62.051685915898986,
                   "width": 140,
                   "height": 60,
-                  "ports": [
-                    {
-                      "id": "fe79c956-77f8-47ce-b551-9b6cfe602657",
-                      "name": "http",
-                      "type": "Network",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    },
-                    {
-                      "id": "a8b268e2-c92e-4d2f-8c90-06646f0fba63",
-                      "name": "pg",
-                      "type": "Database",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.25
-                    },
-                    {
-                      "id": "ed18858d-1d6b-4986-a577-e225b5d808ca",
-                      "name": "redis",
-                      "type": "Database",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.5
-                    },
-                    {
-                      "id": "4aa7f920-f068-4d85-95e9-8e47842cc0f6",
-                      "name": "minio",
-                      "type": "Storage",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.75
-                    }
-                  ],
-                  "dockerImage": "ghcr.io/xcord/fed:latest",
+                  "ports": [],
+                  "dockerImage": "ghcr.io/xcord/fed:v0.1.0",
                   "config": {},
                   "scaling": "PerTenant"
                 },
@@ -591,16 +432,7 @@
                   "y": 67.86189308459032,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "3063f278-a578-43fe-a687-12521fcca8b1",
-                      "name": "redis",
-                      "type": "Database",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "redis:7-alpine",
                   "config": {},
                   "scaling": "Shared"
@@ -613,16 +445,7 @@
                   "y": 127.03877422399495,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "0b235d9d-fcaa-428a-8cf0-fde7d9ad12da",
-                      "name": "s3",
-                      "type": "Storage",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "minio/minio:RELEASE.2025-02-28T09-55-16Z",
                   "config": {},
                   "scaling": "Shared"
@@ -635,16 +458,7 @@
                   "y": 9.544815778400789,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "a881c7ab-ffe7-456e-92bd-49d4c53826ec",
-                      "name": "postgres",
-                      "type": "Database",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "postgres:17-alpine",
                   "config": {},
                   "scaling": "Shared"
@@ -691,41 +505,8 @@
                   "y": 62.051685915898986,
                   "width": 140,
                   "height": 60,
-                  "ports": [
-                    {
-                      "id": "b1a8e3d3-9fb3-4f50-8b64-5971f21b6c35",
-                      "name": "http",
-                      "type": "Network",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    },
-                    {
-                      "id": "e3eeb019-4e36-4d42-bb72-115d26a7b629",
-                      "name": "pg",
-                      "type": "Database",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.25
-                    },
-                    {
-                      "id": "37b8f5e2-ba54-470a-90b5-78d480c44c5c",
-                      "name": "redis",
-                      "type": "Database",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.5
-                    },
-                    {
-                      "id": "f09c56e0-96fd-4d19-93be-8690cb6ddd7a",
-                      "name": "minio",
-                      "type": "Storage",
-                      "direction": "Out",
-                      "side": "Right",
-                      "offset": 0.75
-                    }
-                  ],
-                  "dockerImage": "ghcr.io/xcord/fed:latest",
+                  "ports": [],
+                  "dockerImage": "ghcr.io/xcord/fed:v0.1.0",
                   "config": {
                     "replicas": "1-3"
                   },
@@ -739,16 +520,7 @@
                   "y": 67.86189308459032,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "0e052a39-96e4-4653-928c-94bbf36afdcd",
-                      "name": "redis",
-                      "type": "Database",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "redis:7-alpine",
                   "config": {},
                   "scaling": "Shared"
@@ -761,16 +533,7 @@
                   "y": 127.03877422399495,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "3f024074-ff03-4196-9e50-0185a49c7ac0",
-                      "name": "s3",
-                      "type": "Storage",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "minio/minio:RELEASE.2025-02-28T09-55-16Z",
                   "config": {},
                   "scaling": "Shared"
@@ -783,16 +546,7 @@
                   "y": 9.544815778400789,
                   "width": 120,
                   "height": 50,
-                  "ports": [
-                    {
-                      "id": "19023824-34a5-4c8f-9d84-fc210f6b98c3",
-                      "name": "postgres",
-                      "type": "Database",
-                      "direction": "In",
-                      "side": "Left",
-                      "offset": 0.5
-                    }
-                  ],
+                  "ports": [],
                   "dockerImage": "postgres:17-alpine",
                   "config": {},
                   "scaling": "Shared"
@@ -923,6 +677,15 @@
       "toPortId": "3db2d641-fe62-4573-a1e8-de36cbe2fc22"
     }
   ],
+  "schemaVersion": 1,
+  "createdAt": "2026-02-20T00:00:00+00:00",
+  "updatedAt": "2026-03-10T02:37:41.143Z",
+  "serviceKeys": {
+    "smtp_host": "mail.xcord.net",
+    "smtp_username": "admin@mail.xcord.net",
+    "smtp_from_address": "noreply@xcord.net",
+    "smtp_from_name": "xcord-net"
+  },
   "tierProfiles": [
     {
       "id": "free",
@@ -969,9 +732,6 @@
       }
     }
   ],
-  "schemaVersion": 1,
-  "createdAt": "2026-02-20T00:00:00+00:00",
-  "updatedAt": "2026-03-11T05:32:26.2475636+00:00",
   "lastDeployStatus": null,
   "lastDeployedAt": null,
   "deployedResourceCount": 0

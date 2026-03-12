@@ -6,23 +6,24 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Features.Deploy;
 
-public sealed record GetServiceKeyStatusRequest;
+public sealed record GetServiceKeyStatusRequest(Guid TopologyId);
 
 public sealed class GetServiceKeyStatusHandler(ICredentialStore credentialStore)
     : IRequestHandler<GetServiceKeyStatusRequest, Result<CredentialStatus>>
 {
     public async Task<Result<CredentialStatus>> Handle(GetServiceKeyStatusRequest request, CancellationToken ct)
     {
-        return await credentialStore.GetStatusAsync("service-keys", ct);
+        return await credentialStore.GetStatusAsync(request.TopologyId, "service-keys", ct);
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)
     {
-        return app.MapGet("/api/v1/service-keys", async (
+        return app.MapGet("/api/v1/topologies/{topologyId:guid}/service-keys", async (
+            Guid topologyId,
             GetServiceKeyStatusHandler handler,
             CancellationToken ct) =>
         {
-            return await handler.ExecuteAsync(new GetServiceKeyStatusRequest(), ct);
+            return await handler.ExecuteAsync(new GetServiceKeyStatusRequest(topologyId), ct);
         })
         .WithName("GetServiceKeyStatus")
         .WithTags("Deploy");

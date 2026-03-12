@@ -7,6 +7,7 @@ namespace XcordTopo.Tests.Unit;
 
 public sealed class FileCredentialStoreTests : IDisposable
 {
+    private static readonly Guid TestTopologyId = Guid.Parse("00000000-0000-0000-0000-000000000001");
     private readonly string _tempDir;
     private readonly FileCredentialStore _store;
 
@@ -27,7 +28,7 @@ public sealed class FileCredentialStoreTests : IDisposable
     [Fact]
     public async Task GetStatusAsync_NoFile_ReturnsEmpty()
     {
-        var status = await _store.GetStatusAsync("linode");
+        var status = await _store.GetStatusAsync(TestTopologyId, "linode");
 
         Assert.False(status.HasCredentials);
         Assert.Empty(status.SetVariables);
@@ -44,8 +45,8 @@ public sealed class FileCredentialStoreTests : IDisposable
             ["domain"] = "example.com"
         };
 
-        await _store.SaveAsync("linode", variables);
-        var status = await _store.GetStatusAsync("linode");
+        await _store.SaveAsync(TestTopologyId, "linode", variables);
+        var status = await _store.GetStatusAsync(TestTopologyId, "linode");
 
         Assert.True(status.HasCredentials);
         Assert.Equal(3, status.SetVariables.Count);
@@ -64,20 +65,20 @@ public sealed class FileCredentialStoreTests : IDisposable
     [Fact]
     public async Task SaveAsync_MergesWithExisting()
     {
-        await _store.SaveAsync("linode", new Dictionary<string, string>
+        await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
         {
             ["region"] = "us-east",
             ["domain"] = "old.com"
         });
 
         // Update domain, add new key
-        await _store.SaveAsync("linode", new Dictionary<string, string>
+        await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
         {
             ["domain"] = "new.com",
             ["ssh_public_key"] = "ssh-rsa AAAA"
         });
 
-        var status = await _store.GetStatusAsync("linode");
+        var status = await _store.GetStatusAsync(TestTopologyId, "linode");
         Assert.Equal(3, status.SetVariables.Count);
         Assert.Equal("new.com", status.NonSensitiveValues["domain"]);
         Assert.Equal("us-east", status.NonSensitiveValues["region"]);
@@ -86,18 +87,18 @@ public sealed class FileCredentialStoreTests : IDisposable
     [Fact]
     public async Task SaveAsync_EmptyValueRemovesKey()
     {
-        await _store.SaveAsync("linode", new Dictionary<string, string>
+        await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
         {
             ["region"] = "us-east",
             ["domain"] = "example.com"
         });
 
-        await _store.SaveAsync("linode", new Dictionary<string, string>
+        await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
         {
             ["region"] = ""
         });
 
-        var status = await _store.GetStatusAsync("linode");
+        var status = await _store.GetStatusAsync(TestTopologyId, "linode");
         Assert.Single(status.SetVariables);
         Assert.Equal("domain", status.SetVariables[0]);
     }
@@ -127,13 +128,13 @@ public sealed class FileCredentialStoreTests : IDisposable
     [Fact]
     public async Task SaveAsync_EscapesSpecialCharacters()
     {
-        await _store.SaveAsync("linode", new Dictionary<string, string>
+        await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
         {
             ["value_with_quotes"] = "say \"hello\"",
             ["value_with_newline"] = "line1\nline2"
         });
 
-        var status = await _store.GetStatusAsync("linode");
+        var status = await _store.GetStatusAsync(TestTopologyId, "linode");
         Assert.True(status.HasCredentials);
         Assert.Equal(2, status.SetVariables.Count);
     }

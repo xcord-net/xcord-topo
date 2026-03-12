@@ -8,15 +8,17 @@ public sealed class WireResolver
     private readonly Dictionary<Guid, Port> _portById = new();
     private readonly Dictionary<Guid, Guid> _portToNode = new();
     private readonly Dictionary<Guid, Container> _nodeToHost = new();
+    private readonly Dictionary<Guid, Container> _nodeToPool = new();
+    private readonly Dictionary<Guid, Container> _nodeToCaddy = new();
     private readonly List<Wire> _wires;
 
     public WireResolver(Topology topology)
     {
         _wires = topology.Wires;
-        IndexContainers(topology.Containers, null);
+        IndexContainers(topology.Containers, null, null, null);
     }
 
-    private void IndexContainers(List<Container> containers, Container? hostAncestor)
+    private void IndexContainers(List<Container> containers, Container? hostAncestor, Container? poolAncestor, Container? caddyAncestor)
     {
         foreach (var container in containers)
         {
@@ -27,9 +29,20 @@ public sealed class WireResolver
                 _portToNode[port.Id] = container.Id;
             }
 
-            var currentHost = container.Kind == ContainerKind.Host ? container : hostAncestor;
+            // ComputePool is its own infrastructure boundary — stop host propagation,
+            // start pool tracking. Pool images are deployed on separate pool instances.
+            var currentPool = container.Kind == ContainerKind.ComputePool ? container : poolAncestor;
+            var currentHost = container.Kind is ContainerKind.Host or ContainerKind.DataPool ? container
+                : container.Kind == ContainerKind.ComputePool ? null
+                : hostAncestor;
+            var currentCaddy = container.Kind == ContainerKind.Caddy ? container : caddyAncestor;
+
             if (currentHost != null)
                 _nodeToHost[container.Id] = currentHost;
+            if (currentPool != null)
+                _nodeToPool[container.Id] = currentPool;
+            if (currentCaddy != null)
+                _nodeToCaddy[container.Id] = currentCaddy;
 
             foreach (var image in container.Images)
             {
@@ -41,9 +54,13 @@ public sealed class WireResolver
                 }
                 if (currentHost != null)
                     _nodeToHost[image.Id] = currentHost;
+                if (currentPool != null)
+                    _nodeToPool[image.Id] = currentPool;
+                if (currentCaddy != null)
+                    _nodeToCaddy[image.Id] = currentCaddy;
             }
 
-            IndexContainers(container.Children, currentHost);
+            IndexContainers(container.Children, currentHost, currentPool, currentCaddy);
         }
     }
 
@@ -93,6 +110,18 @@ public sealed class WireResolver
         _nodeToHost.GetValueOrDefault(nodeId);
 
     /// <summary>
+    /// Find the nearest ComputePool ancestor for a node.
+    /// </summary>
+    public Container? FindPoolFor(Guid nodeId) =>
+        _nodeToPool.GetValueOrDefault(nodeId);
+
+    /// <summary>
+    /// Find the nearest Caddy ancestor for a node.
+    /// </summary>
+    public Container? FindCaddyFor(Guid nodeId) =>
+        _nodeToCaddy.GetValueOrDefault(nodeId);
+
+    /// <summary>
     /// Check whether two nodes share the same Host ancestor.
     /// </summary>
     public bool AreOnSameHost(Guid nodeId1, Guid nodeId2)
@@ -103,26 +132,39 @@ public sealed class WireResolver
     }
 
     /// <summary>
-    /// For a Caddy container, resolve all HTTP-routable images.
+    /// For a Caddy container, resolve all HTTP-routable images in its subtree.
+    /// Includes direct images and images inside child containers (e.g., Hub under its own Host).
     /// Subdomain is derived from image kind (not user-configured).
     /// </summary>
     public List<(Image Image, string Subdomain)> ResolveCaddyUpstreams(Container caddyContainer)
     {
         var results = new List<(Image, string)>();
+        CollectRoutableImages(caddyContainer, results);
+        return results;
+    }
 
-        foreach (var image in caddyContainer.Images)
+    private void CollectRoutableImages(Container container, List<(Image, string)> results)
+    {
+        foreach (var image in container.Images)
         {
             var subdomain = GetSubdomain(image);
             if (subdomain != null)
                 results.Add((image, subdomain));
         }
 
-        return results;
+        foreach (var child in container.Children)
+        {
+            // Skip pool children — their infrastructure is deferred (count=0 on initial deploy).
+            // Hub configures routing to pools at runtime via Caddy admin API.
+            if (child.Kind is ContainerKind.ComputePool or ContainerKind.DataPool)
+                continue;
+            CollectRoutableImages(child, results);
+        }
     }
 
     private static string? GetSubdomain(Image image) => image.Kind switch
     {
-        ImageKind.HubServer => "hub",
+        ImageKind.HubServer => "www",
         ImageKind.FederationServer => "*",
         ImageKind.LiveKit => "livekit",
         ImageKind.Custom => ValidateSubdomain(image.Config.GetValueOrDefault("subdomain")),

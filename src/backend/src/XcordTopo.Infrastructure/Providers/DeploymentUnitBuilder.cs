@@ -5,13 +5,16 @@ namespace XcordTopo.Infrastructure.Providers;
 /// <summary>
 /// Walks a topology tree and produces a flat list of DeploymentUnits
 /// that cloud providers can translate into infrastructure resources.
+/// Tracks two pieces of state through the recursion:
+///   currentUnit  — the deployment unit being built (InstanceUnit or PoolUnit)
+///   currentPool  — the nearest enclosing pool (propagates through entire subtree)
 /// </summary>
 public static class DeploymentUnitBuilder
 {
     public static List<DeploymentUnit> Build(Topology topology, List<TopologyHelpers.PoolSelection>? selections = null)
     {
         var units = new List<DeploymentUnit>();
-        Walk(topology.Containers, topology, selections, currentUnit: null, units);
+        Walk(topology.Containers, topology, selections, currentUnit: null, currentPool: null, units);
         return units;
     }
 
@@ -20,6 +23,7 @@ public static class DeploymentUnitBuilder
         Topology topology,
         List<TopologyHelpers.PoolSelection>? selections,
         DeploymentUnit? currentUnit,
+        PoolUnit? currentPool,
         List<DeploymentUnit> units)
     {
         foreach (var container in containers)
@@ -29,6 +33,7 @@ public static class DeploymentUnitBuilder
             switch (container.Kind)
             {
                 case ContainerKind.Host:
+                case ContainerKind.DataPool:
                 {
                     var (min, max) = TopologyHelpers.ParseReplicaRange(container.Config);
                     var instanceUnit = new InstanceUnit(
@@ -38,7 +43,7 @@ public static class DeploymentUnitBuilder
                         MinReplicas: min,
                         MaxReplicas: max);
 
-                    Descend(container, topology, selections, instanceUnit, units);
+                    Descend(container, topology, selections, instanceUnit, currentPool, units);
                     units.Add(instanceUnit);
                     break;
                 }
@@ -48,12 +53,12 @@ public static class DeploymentUnitBuilder
                     if (currentUnit is InstanceUnit instance)
                     {
                         instance.Services.Add(ServiceEntry.FromCaddy(container));
-                        Descend(container, topology, selections, currentUnit, units);
+                        Descend(container, topology, selections, currentUnit, currentPool, units);
                     }
                     else if (currentUnit is PoolUnit pool)
                     {
                         pool.Services.Add(ServiceEntry.FromCaddy(container));
-                        Descend(container, topology, selections, currentUnit, units);
+                        Descend(container, topology, selections, currentUnit, currentPool, units);
                     }
                     else
                     {
@@ -66,7 +71,7 @@ public static class DeploymentUnitBuilder
                             MinReplicas: min,
                             MaxReplicas: max);
 
-                        Descend(container, topology, selections, caddyUnit, units);
+                        Descend(container, topology, selections, caddyUnit, currentPool, units);
                         units.Add(caddyUnit);
                     }
                     break;
@@ -78,9 +83,13 @@ public static class DeploymentUnitBuilder
                         ? topology.TierProfiles
                         : ImageOperationalMetadata.DefaultTierProfiles;
 
-                    var tierProfileId = container.Config.GetValueOrDefault("tierProfile", "free");
-                    var tierProfile = tierProfiles.FirstOrDefault(t => t.Id == tierProfileId)
-                        ?? tierProfiles.First();
+                    var tierProfileId = container.Config.GetValueOrDefault("tierProfile", "");
+                    TierProfile? tierProfile = null;
+                    if (!string.IsNullOrEmpty(tierProfileId))
+                    {
+                        tierProfile = tierProfiles.FirstOrDefault(t => t.Id == tierProfileId)
+                            ?? tierProfiles.First();
+                    }
 
                     var selection = selections?.FirstOrDefault(s =>
                         s.PoolName.Equals(container.Name, StringComparison.OrdinalIgnoreCase));
@@ -95,7 +104,8 @@ public static class DeploymentUnitBuilder
                         TargetTenants: targetTenants,
                         SelectedPlanId: selectedPlanId);
 
-                    Descend(container, topology, selections, poolUnit, units);
+                    // Pool becomes both currentUnit AND currentPool — pool context propagates
+                    Descend(container, topology, selections, poolUnit, poolUnit, units);
                     units.Add(poolUnit);
                     break;
                 }
@@ -110,14 +120,14 @@ public static class DeploymentUnitBuilder
 
                     units.Add(dnsUnit);
                     // DNS is a passthrough — descend with the current unit, not the DNS unit
-                    Descend(container, topology, selections, currentUnit, units);
+                    Descend(container, topology, selections, currentUnit, currentPool, units);
                     break;
                 }
 
                 default:
                 {
                     // Grouping node — descend with current unit
-                    Descend(container, topology, selections, currentUnit, units);
+                    Descend(container, topology, selections, currentUnit, currentPool, units);
                     break;
                 }
             }
@@ -129,21 +139,43 @@ public static class DeploymentUnitBuilder
         Topology topology,
         List<TopologyHelpers.PoolSelection>? selections,
         DeploymentUnit? currentUnit,
+        PoolUnit? currentPool,
         List<DeploymentUnit> units)
     {
-        // Add images first
-        if (currentUnit is InstanceUnit instanceUnit)
+        var providerKey = TopologyHelpers.ResolveProviderKey(container, topology);
+
+        foreach (var image in container.Images)
         {
-            foreach (var image in container.Images)
-                instanceUnit.Services.Add(ServiceEntry.FromImage(image));
-        }
-        else if (currentUnit is PoolUnit poolUnit)
-        {
-            foreach (var image in container.Images)
-                poolUnit.Services.Add(ServiceEntry.FromImage(image));
+            // Inside a pool subtree — all images are Swarm-managed, never break out
+            if (currentPool is not null)
+            {
+                currentPool.Services.Add(ServiceEntry.FromImage(image, TopologyHelpers.ResolveRegistry(topology)));
+                continue;
+            }
+
+            // Elastic images (replicas > 1) break out into own InstanceUnit (autoscaling group)
+            var (min, max) = TopologyHelpers.ParseReplicaRange(image.Config);
+            if (min > 1 || max > 1)
+            {
+                var elasticUnit = new InstanceUnit(
+                    Container: null,
+                    ProviderKey: providerKey,
+                    Services: new List<ServiceEntry> { ServiceEntry.FromImage(image, TopologyHelpers.ResolveRegistry(topology)) },
+                    MinReplicas: min,
+                    MaxReplicas: max);
+                units.Add(elasticUnit);
+            }
+            else if (currentUnit is InstanceUnit instanceUnit)
+            {
+                instanceUnit.Services.Add(ServiceEntry.FromImage(image, TopologyHelpers.ResolveRegistry(topology)));
+            }
+            else if (currentUnit is PoolUnit poolUnit)
+            {
+                poolUnit.Services.Add(ServiceEntry.FromImage(image, TopologyHelpers.ResolveRegistry(topology)));
+            }
         }
 
         // Then walk child containers
-        Walk(container.Children, topology, selections, currentUnit, units);
+        Walk(container.Children, topology, selections, currentUnit, currentPool, units);
     }
 }

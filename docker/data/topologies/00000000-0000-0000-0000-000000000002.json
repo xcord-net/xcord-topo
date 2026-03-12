@@ -109,7 +109,7 @@
               "offset": 0.5
             }
           ],
-          "dockerImage": "minio/minio:latest",
+          "dockerImage": "minio/minio:RELEASE.2025-02-28T09-55-16Z",
           "config": {
             "replicas": "1",
             "volumeSize": "50"

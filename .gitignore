@@ -34,6 +34,9 @@ dist/
 *.pfx
 *.key
 
+# Runtime deployment data (credentials, terraform state, migrations)
+docker/data/deployments/
+
 # Claude Code (local-only)
 .claude/
 CLAUDE.md

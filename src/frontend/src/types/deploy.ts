@@ -75,6 +75,7 @@ export interface PoolHostingOption {
   planLabel: string;
   memoryMb: number;
   vCpus: number;
+  diskGb: number;
   priceMonthly: number;
   tenantsPerHost: number;
   costPerTenant: number;
@@ -87,6 +88,15 @@ export interface PoolHostingEntry {
   options: PoolHostingOption[];
 }
 
+export interface InfraImagePlan {
+  planId: string;
+  planLabel: string;
+  memoryMb: number;
+  vCpus: number;
+  diskGb: number;
+  priceMonthly: number;
+}
+
 export interface InfraImageCost {
   imageName: string;
   imageKind: string;
@@ -94,11 +104,13 @@ export interface InfraImageCost {
   ramMb: number;
   planId: string;
   planLabel: string;
+  diskGb: number;
   priceMonthly: number;
   minReplicas: number;
   maxReplicas: number;
   minCostMonthly: number;
   maxCostMonthly: number;
+  availablePlans: InfraImagePlan[];
   services?: ServiceBreakdown[];
 }
 
@@ -111,6 +123,11 @@ export interface PoolSelection {
   poolName: string;
   planId: string;
   targetTenants: number;
+}
+
+export interface InfraSelection {
+  imageName: string;
+  planId: string;
 }
 
 // --- Topology validation ---

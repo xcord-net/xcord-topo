@@ -141,7 +141,7 @@ public class WireResolverTests
         var upstreams = resolver.ResolveCaddyUpstreams(caddy);
 
         Assert.Equal(2, upstreams.Count);
-        Assert.Contains(upstreams, u => u.Subdomain == "hub");
+        Assert.Contains(upstreams, u => u.Subdomain == "www");
         Assert.Contains(upstreams, u => u.Subdomain == "*");
     }
 

@@ -274,16 +274,19 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
 
     private static void CheckComputePoolRequiredImages(Topology topology, List<TopologyValidationError> items)
     {
+        // ComputePool no longer requires FederationServer images — they are hub-provisioned at runtime.
+        // DataPool should contain at least one data service image.
         void Walk(List<Container> containers)
         {
             foreach (var container in containers)
             {
-                if (container.Kind == ContainerKind.ComputePool)
+                if (container.Kind == ContainerKind.DataPool)
                 {
-                    var hasFed = container.Images.Any(i => i.Kind == ImageKind.FederationServer);
-                    if (!hasFed)
+                    var hasDataImage = container.Images.Any(i =>
+                        i.Kind is ImageKind.PostgreSQL or ImageKind.Redis or ImageKind.MinIO);
+                    if (!hasDataImage)
                         items.Add(new(ValidationSeverity.Error,
-                            $"ComputePool '{container.Name}' must contain at least one FederationServer image.",
+                            $"DataPool '{container.Name}' must contain at least one data service image (PostgreSQL, Redis, or MinIO).",
                             NodeId: container.Id.ToString()));
                 }
 
@@ -425,6 +428,8 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
 
         var referencedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        var hasAgnosticPool = false;
+
         void Walk(List<Container> containers)
         {
             foreach (var c in containers)
@@ -432,7 +437,10 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
                 if (c.Kind == ContainerKind.ComputePool)
                 {
                     var tierRef = c.Config.GetValueOrDefault("tierProfile", "");
-                    if (!string.IsNullOrEmpty(tierRef)) referencedIds.Add(tierRef);
+                    if (!string.IsNullOrEmpty(tierRef))
+                        referencedIds.Add(tierRef);
+                    else
+                        hasAgnosticPool = true; // tier-agnostic pool serves all tiers
                 }
 
                 Walk(c.Children);
@@ -440,6 +448,9 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
         }
 
         Walk(topology.Containers);
+
+        // A tier-agnostic pool (no tierProfile) implicitly references all profiles
+        if (hasAgnosticPool) return;
 
         foreach (var profile in topology.TierProfiles)
         {

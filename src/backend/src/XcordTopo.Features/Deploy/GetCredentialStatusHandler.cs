@@ -7,7 +7,7 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Features.Deploy;
 
-public sealed record GetCredentialStatusRequest(string ProviderKey);
+public sealed record GetCredentialStatusRequest(Guid TopologyId, string ProviderKey);
 
 public sealed class GetCredentialStatusHandler(
     ICredentialStore credentialStore,
@@ -19,18 +19,19 @@ public sealed class GetCredentialStatusHandler(
         if (registry.Get(request.ProviderKey) is null)
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{request.ProviderKey}' not found");
 
-        return await credentialStore.GetStatusAsync(request.ProviderKey, ct);
+        return await credentialStore.GetStatusAsync(request.TopologyId, request.ProviderKey, ct);
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)
     {
-        return app.MapGet("/api/v1/providers/{providerKey}/credentials", async (
+        return app.MapGet("/api/v1/topologies/{topologyId:guid}/credentials/{providerKey}", async (
+            Guid topologyId,
             string providerKey,
             GetCredentialStatusHandler handler,
             CancellationToken ct) =>
         {
             return await handler.ExecuteAsync(
-                new GetCredentialStatusRequest(providerKey), ct);
+                new GetCredentialStatusRequest(topologyId, providerKey), ct);
         })
         .WithName("GetCredentialStatus")
         .WithTags("Deploy");

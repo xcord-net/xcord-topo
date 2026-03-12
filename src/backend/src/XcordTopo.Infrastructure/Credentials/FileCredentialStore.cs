@@ -12,20 +12,19 @@ public sealed class FileCredentialStore : ICredentialStore
         "token", "secret", "password", "key"
     };
 
-    private readonly string _credentialsPath;
+    private readonly string _basePath;
     private readonly ILogger<FileCredentialStore> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     public FileCredentialStore(IOptions<DataOptions> options, ILogger<FileCredentialStore> logger)
     {
-        _credentialsPath = Path.Combine(options.Value.BasePath, "credentials");
-        Directory.CreateDirectory(_credentialsPath);
+        _basePath = options.Value.BasePath;
         _logger = logger;
     }
 
-    public async Task<CredentialStatus> GetStatusAsync(string providerKey, CancellationToken ct = default)
+    public async Task<CredentialStatus> GetStatusAsync(Guid topologyId, string providerKey, CancellationToken ct = default)
     {
-        var filePath = GetFilePath(providerKey);
+        var filePath = GetFilePath(topologyId, providerKey);
         if (!File.Exists(filePath))
             return new CredentialStatus { HasCredentials = false };
 
@@ -46,12 +45,13 @@ public sealed class FileCredentialStore : ICredentialStore
         return status;
     }
 
-    public async Task SaveAsync(string providerKey, Dictionary<string, string> variables, CancellationToken ct = default)
+    public async Task SaveAsync(Guid topologyId, string providerKey, Dictionary<string, string> variables, CancellationToken ct = default)
     {
         await _lock.WaitAsync(ct);
         try
         {
-            var filePath = GetFilePath(providerKey);
+            var filePath = GetFilePath(topologyId, providerKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
 
             // Merge with existing variables (new values overwrite, empty values remove)
             var existing = File.Exists(filePath)
@@ -69,7 +69,8 @@ public sealed class FileCredentialStore : ICredentialStore
             var lines = existing.Select(kv => $"{kv.Key} = \"{EscapeTfValue(kv.Value)}\"");
             await File.WriteAllTextAsync(filePath, string.Join('\n', lines) + '\n', ct);
 
-            _logger.LogDebug("Saved credentials for provider {Provider} to {Path}", providerKey, filePath);
+            _logger.LogDebug("Saved credentials for provider {Provider} topology {Id} to {Path}",
+                providerKey, topologyId, filePath);
         }
         finally
         {
@@ -77,8 +78,8 @@ public sealed class FileCredentialStore : ICredentialStore
         }
     }
 
-    private string GetFilePath(string providerKey) =>
-        Path.Combine(_credentialsPath, $"{providerKey}.tfvars");
+    private string GetFilePath(Guid topologyId, string providerKey) =>
+        Path.Combine(_basePath, "deployments", topologyId.ToString(), "credentials", $"{providerKey}.tfvars");
 
     internal static bool IsSensitive(string key) =>
         SensitivePatterns.Any(p => key.Contains(p, StringComparison.OrdinalIgnoreCase));

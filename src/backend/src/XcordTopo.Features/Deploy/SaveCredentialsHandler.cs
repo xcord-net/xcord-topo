@@ -8,7 +8,7 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Features.Deploy;
 
-public sealed record SaveCredentialsRequest(string ProviderKey, Dictionary<string, string> Variables);
+public sealed record SaveCredentialsRequest(Guid TopologyId, string ProviderKey, Dictionary<string, string> Variables);
 
 public sealed record SaveCredentialsResponse(string Status, CredentialStatus UpdatedStatus);
 
@@ -33,30 +33,29 @@ public sealed class SaveCredentialsHandler(
             return Error.NotFound("PROVIDER_NOT_FOUND", $"Provider '{request.ProviderKey}' not found");
 
         var schema = provider.GetCredentialSchema();
-        var status = await credentialStore.GetStatusAsync(request.ProviderKey, ct);
-        var alreadySaved = status.SetVariables.ToHashSet();
-        var errors = CredentialValidator.Validate(schema, request.Variables, alreadySaved);
+        var errors = CredentialValidator.Validate(schema, request.Variables);
         if (errors.Count > 0)
         {
             var detail = string.Join("; ", errors.Select(e => $"{e.Key}: {e.Value}"));
             return Error.Validation("CREDENTIAL_VALIDATION_FAILED", detail);
         }
 
-        await credentialStore.SaveAsync(request.ProviderKey, request.Variables, ct);
-        var updatedStatus = await credentialStore.GetStatusAsync(request.ProviderKey, ct);
+        await credentialStore.SaveAsync(request.TopologyId, request.ProviderKey, request.Variables, ct);
+        var updatedStatus = await credentialStore.GetStatusAsync(request.TopologyId, request.ProviderKey, ct);
         return new SaveCredentialsResponse("saved", updatedStatus);
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)
     {
-        return app.MapPost("/api/v1/providers/{providerKey}/credentials", async (
+        return app.MapPost("/api/v1/topologies/{topologyId:guid}/credentials/{providerKey}", async (
+            Guid topologyId,
             string providerKey,
             SaveCredentialsBody body,
             SaveCredentialsHandler handler,
             CancellationToken ct) =>
         {
             return await handler.ExecuteAsync(
-                new SaveCredentialsRequest(providerKey, body.Variables), ct);
+                new SaveCredentialsRequest(topologyId, providerKey, body.Variables), ct);
         })
         .WithName("SaveCredentials")
         .WithTags("Deploy");

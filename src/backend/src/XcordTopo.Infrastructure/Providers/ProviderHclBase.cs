@@ -57,7 +57,7 @@ public abstract class ProviderHclBase : ICloudProvider
         return plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
     }
 
-    protected static void CollectHostReplicaVariables(List<TopologyHelpers.HostEntry> hosts, HclBuilder vars)
+    internal static void CollectHostReplicaVariables(List<TopologyHelpers.HostEntry> hosts, HclBuilder vars)
     {
         foreach (var entry in hosts)
         {
@@ -78,7 +78,7 @@ public abstract class ProviderHclBase : ICloudProvider
             vars.Line();
             vars.Block($"variable \"{varName}\"", b =>
             {
-                b.Attribute("type", "number");
+                b.RawAttribute("type", "number");
                 b.Attribute("default", defaultValue);
                 b.Attribute("description", $"Number of replicas for host '{entry.Host.Name}'");
 
@@ -107,7 +107,11 @@ public abstract class ProviderHclBase : ICloudProvider
         }
     }
 
-    protected static string GenerateSecrets(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver)
+    internal static string GenerateSecrets(
+        List<TopologyHelpers.HostEntry> hosts,
+        WireResolver resolver,
+        List<TopologyHelpers.ComputePoolEntry>? pools = null,
+        List<Container>? standaloneCaddies = null)
     {
         var secrets = new HclBuilder();
         foreach (var entry in hosts)
@@ -123,6 +127,47 @@ public abstract class ProviderHclBase : ICloudProvider
                 secrets.Line();
             }
         }
+
+        // Standalone Caddy images (pg_hub, redis_hub, etc.) need secrets too
+        if (standaloneCaddies != null)
+        {
+            foreach (var caddy in standaloneCaddies)
+            {
+                var caddyEntry = new TopologyHelpers.HostEntry(caddy);
+                var caddySecrets = TopologyHelpers.CollectSecrets(caddyEntry, resolver, excludePools: true);
+                foreach (var secret in caddySecrets)
+                {
+                    secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
+                    {
+                        b.Attribute("length", 32);
+                        b.RawAttribute("special", "false");
+                    });
+                    secrets.Line();
+                }
+            }
+        }
+
+        // Pool shared service secrets — data-driven from actual pool images
+        if (pools != null)
+        {
+            foreach (var pool in pools)
+            {
+                var poolSecrets = TopologyHelpers.CollectPoolSecrets(pool);
+                foreach (var secret in poolSecrets)
+                {
+                    var length = secret.ResourceName.Contains("access_key") ? 20
+                        : secret.ResourceName.Contains("secret_key") || secret.ResourceName.Contains("api_secret") ? 40
+                        : 32;
+                    secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
+                    {
+                        b.Attribute("length", length);
+                        b.RawAttribute("special", "false");
+                    });
+                    secrets.Line();
+                }
+            }
+        }
+
         return secrets.ToString();
     }
 
@@ -182,11 +227,24 @@ public abstract class ProviderHclBase : ICloudProvider
             outputs.Line();
         }
 
+        // Elastic image outputs (replicas > 1, broken out into own instances)
+        var elasticImages = TopologyHelpers.CollectElasticImages(hosts, standaloneCaddies);
+        foreach (var image in elasticImages)
+        {
+            var resourceName = TopologyHelpers.SanitizeName(image.Name);
+            outputs.Block($"output \"{resourceName}_ips\"", b =>
+            {
+                b.RawAttribute("value", $"{InstanceResourceType}.{resourceName}[*].{PublicIpField}");
+                b.Attribute("description", $"Public IPs of {image.Name} instances");
+            });
+            outputs.Line();
+        }
+
         return outputs.ToString();
     }
 
     /// <summary>
-    /// Get the Terraform IP reference for a host based on which provider owns it.
+    /// Get the Terraform public IP reference for a host based on which provider owns it.
     /// </summary>
     internal static string GetIpReference(string hostName, string providerKey, bool isReplicated)
     {
@@ -194,6 +252,20 @@ public abstract class ProviderHclBase : ICloudProvider
             return isReplicated ? $"aws_instance.{hostName}[0].public_ip" : $"aws_instance.{hostName}.public_ip";
 
         return isReplicated ? $"linode_instance.{hostName}[0].ip_address" : $"linode_instance.{hostName}.ip_address";
+    }
+
+    /// <summary>
+    /// Get the Terraform private IP reference for a host based on which provider owns it.
+    /// Used for cross-host internal communication (e.g., Hub → PG on a different host).
+    /// </summary>
+    internal static string GetPrivateIpReference(string hostName, string providerKey, bool isReplicated)
+    {
+        if (string.Equals(providerKey, "aws", StringComparison.OrdinalIgnoreCase))
+            return isReplicated ? $"aws_instance.{hostName}[0].private_ip" : $"aws_instance.{hostName}.private_ip";
+
+        return isReplicated
+            ? $"linode_instance.{hostName}[0].private_ip_address"
+            : $"linode_instance.{hostName}.private_ip_address";
     }
 
     /// <summary>
@@ -205,43 +277,138 @@ public abstract class ProviderHclBase : ICloudProvider
         List<TopologyHelpers.ComputePoolEntry> pools)
     {
         var plans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
+        GeneratePoolVariables(vars, pools, plans);
+        GenerateDataPoolVariables(vars, topology);
+        GenerateServiceKeyVariables(vars, topology);
+    }
+
+    /// <summary>
+    /// Generates Terraform variable blocks for elastic image replica counts.
+    /// Called for hosts and standalone caddies that have images with replicas > 1.
+    /// </summary>
+    internal static void CollectElasticImageVariables(
+        List<TopologyHelpers.HostEntry> hosts,
+        List<Container> standaloneCaddies,
+        HclBuilder vars)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void ProcessContainer(Container container)
+        {
+            var images = TopologyHelpers.CollectImagesExcludingPools(container);
+            foreach (var image in images)
+            {
+                var (min, max) = TopologyHelpers.ParseReplicaRange(image.Config);
+                if (min <= 1 && max <= 1) continue;
+
+                var varName = $"{TopologyHelpers.SanitizeName(image.Name)}_replicas";
+                if (!seen.Add(varName)) continue;
+
+                vars.Line();
+                vars.Block($"variable \"{varName}\"", b =>
+                {
+                    b.RawAttribute("type", "number");
+                    b.Attribute("default", min);
+                    b.Attribute("description", $"Number of replicas for {image.Name}");
+
+                    if (min != max)
+                    {
+                        b.Block("validation", vb =>
+                        {
+                            vb.RawAttribute("condition", $"var.{varName} >= {min} && var.{varName} <= {max}");
+                            vb.Attribute("error_message", $"Replicas must be between {min} and {max}.");
+                        });
+                    }
+                });
+            }
+        }
+
+        foreach (var entry in hosts)
+            ProcessContainer(entry.Host);
+        foreach (var caddy in standaloneCaddies)
+            ProcessContainer(caddy);
+    }
+
+    internal static void GeneratePoolVariables(
+        HclBuilder vars,
+        List<TopologyHelpers.ComputePoolEntry> pools,
+        List<ComputePlan> plans)
+    {
         foreach (var pool in pools)
         {
             var poolName = TopologyHelpers.SanitizeName(pool.Pool.Name);
             var selectedPlan = ResolvePoolPlan(pool, plans);
             var poolImages = TopologyHelpers.CollectImages(pool.Pool);
             var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(selectedPlan.MemoryMb, pool.TierProfile, poolImages);
-            var hostsRequired = ImageOperationalMetadata.CalculateHostsRequired(pool.TargetTenants, tenantsPerHost);
 
             vars.Line();
             vars.Block($"variable \"{poolName}_host_count\"", b =>
             {
-                b.Attribute("type", "number");
-                b.Attribute("default", hostsRequired);
-                b.Attribute("description", $"Number of compute hosts for pool '{pool.Pool.Name}' ({pool.TierProfile.Name}, {pool.TargetTenants} tenants)");
+                b.RawAttribute("type", "number");
+                b.Attribute("default", 0);
+                b.Attribute("description", $"Number of compute hosts for pool '{pool.Pool.Name}' ({pool.TierProfile.Name})");
             });
             vars.Line();
             vars.Block($"variable \"{poolName}_tenants_per_host\"", b =>
             {
-                b.Attribute("type", "number");
+                b.RawAttribute("type", "number");
                 b.Attribute("default", tenantsPerHost > 0 ? tenantsPerHost : 1);
                 b.Attribute("description", $"Number of tenants per host in pool '{pool.Pool.Name}'");
             });
         }
+    }
 
-        foreach (var field in ServiceKeySchema.GetSchema())
+    internal static void GenerateDataPoolVariables(
+        HclBuilder vars,
+        Topology topology)
+    {
+        var hosts = TopologyHelpers.CollectHosts(topology.Containers);
+        foreach (var entry in hosts)
         {
-            if (!topology.ServiceKeys.ContainsKey(field.Key)) continue;
+            if (entry.Host.Kind != ContainerKind.DataPool) continue;
+            var poolName = TopologyHelpers.SanitizeName(entry.Host.Name);
 
             vars.Line();
-            vars.Block($"variable \"{field.Key}\"", b =>
+            vars.Block($"variable \"{poolName}_count\"", b =>
             {
-                b.Attribute("type", "string");
-                if (field.Sensitive)
-                    b.RawAttribute("sensitive", "true");
-                b.Attribute("description", field.Label);
-                b.Attribute("default", "");
+                b.RawAttribute("type", "number");
+                b.Attribute("default", 0);
+                b.Attribute("description", $"Number of data pool instances for '{entry.Host.Name}' (0 = deferred)");
             });
+        }
+    }
+
+    internal static void GenerateServiceKeyVariables(
+        HclBuilder vars,
+        Topology topology)
+    {
+        // Group service keys by prefix (e.g., "registry_", "smtp_", "stripe_", "tenor_").
+        // If ANY key in a group is present in topology.ServiceKeys, emit ALL keys in that group.
+        // This ensures sensitive keys stored in the credential store (not in ServiceKeys)
+        // still get Terraform variables emitted.
+        var schema = ServiceKeySchema.GetSchema();
+        var groups = schema.GroupBy(f => f.Key.Split('_')[0]).ToList();
+
+        foreach (var group in groups)
+        {
+            // Registry variables are hardcoded per-provider with ResolveRegistry() defaults — skip here
+            if (string.Equals(group.Key, "registry", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var anyPresent = group.Any(f => topology.ServiceKeys.ContainsKey(f.Key));
+            if (!anyPresent) continue;
+
+            foreach (var field in group)
+            {
+                vars.Line();
+                vars.Block($"variable \"{field.Key}\"", b =>
+                {
+                    b.RawAttribute("type", "string");
+                    if (field.Sensitive)
+                        b.RawAttribute("sensitive", "true");
+                    b.Attribute("description", field.Label);
+                    b.Attribute("default", "");
+                });
+            }
         }
     }
 }

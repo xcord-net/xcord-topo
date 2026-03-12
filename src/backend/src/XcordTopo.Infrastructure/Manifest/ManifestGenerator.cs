@@ -36,7 +36,8 @@ public sealed class ManifestGenerator
             var images = parentHost != null ? TopologyHelpers.CollectImages(parentHost.Host) : [];
 
             var publicIps = ResolvePublicIps(hostName, outputs);
-            var privateIp = ResolveOutput(hostName + "_private_ip", outputs) ?? publicIps.FirstOrDefault() ?? "127.0.0.1";
+            var privateIp = ResolveOutput(hostName + "_private_ip", outputs) ?? publicIps.FirstOrDefault()
+                ?? throw new InvalidOperationException($"No IP resolved for pool host '{hostName}'. Terraform state may be missing or incomplete.");
 
             // Find service images
             var pgImage = images.FirstOrDefault(i => i.Kind == ImageKind.PostgreSQL);
@@ -70,8 +71,12 @@ public sealed class ManifestGenerator
                 Database = BuildDatabaseEntry(pgImage, hostName, privateIp, secrets),
                 Redis = BuildRedisEntry(redisImage, hostName, privateIp, secrets),
                 Storage = BuildStorageEntry(minioImage, hostName, privateIp, secrets),
-                Docker = new GatewayDockerEntry { SocketProxyUrl = $"http://{privateIp}:2375" },
-                Caddy = new GatewayCaddyEntry { AdminUrl = $"http://{privateIp}:2019" },
+                Docker = new GatewayDockerEntry
+                {
+                    SocketProxyUrl = $"https://{privateIp}:2376",
+                    InstanceImage = TopologyHelpers.GetDefaultDockerImage(ImageKind.FederationServer, TopologyHelpers.ResolveRegistry(topology))
+                },
+                Caddy = new GatewayCaddyEntry { AdminUrl = $"https://{privateIp}:2019" },
                 LiveKit = BuildLiveKitEntry(livekitImage, hostName, privateIp, secrets),
                 Capacity = new GatewayCapacityEntry
                 {
@@ -241,8 +246,8 @@ public sealed class ManifestGenerator
 
         var imgName = TopologyHelpers.SanitizeName(pgImage.Name);
         var secretKey = $"{hostName}_{imgName}_password";
-        secrets.TryGetValue(secretKey, out var password);
-        password ??= string.Empty;
+        if (!secrets.TryGetValue(secretKey, out var password))
+            throw new InvalidOperationException($"Missing secret '{secretKey}' for PostgreSQL. Terraform state may be incomplete.");
 
         return new GatewayDatabaseEntry
         {
@@ -258,8 +263,8 @@ public sealed class ManifestGenerator
 
         var imgName = TopologyHelpers.SanitizeName(redisImage.Name);
         var secretKey = $"{hostName}_{imgName}_password";
-        secrets.TryGetValue(secretKey, out var password);
-        password ??= string.Empty;
+        if (!secrets.TryGetValue(secretKey, out var password))
+            throw new InvalidOperationException($"Missing secret '{secretKey}' for Redis. Terraform state may be incomplete.");
 
         return new GatewayRedisEntry
         {
@@ -276,15 +281,17 @@ public sealed class ManifestGenerator
         var imgName = TopologyHelpers.SanitizeName(minioImage.Name);
         var accessKeyName = $"{hostName}_{imgName}_access_key";
         var secretKeyName = $"{hostName}_{imgName}_secret_key";
-        secrets.TryGetValue(accessKeyName, out var accessKey);
-        secrets.TryGetValue(secretKeyName, out var secretKey);
+        if (!secrets.TryGetValue(accessKeyName, out var accessKey))
+            throw new InvalidOperationException($"Missing secret '{accessKeyName}' for MinIO. Terraform state may be incomplete.");
+        if (!secrets.TryGetValue(secretKeyName, out var secretKey))
+            throw new InvalidOperationException($"Missing secret '{secretKeyName}' for MinIO. Terraform state may be incomplete.");
 
         return new GatewayStorageEntry
         {
-            Endpoint = $"{privateIp}:9000",
-            AccessKey = accessKey ?? string.Empty,
-            SecretKey = secretKey ?? string.Empty,
-            UseSsl = false
+            Endpoint = $"https://{privateIp}:9000",
+            AccessKey = accessKey,
+            SecretKey = secretKey,
+            UseSsl = true
         };
     }
 
@@ -297,14 +304,16 @@ public sealed class ManifestGenerator
         var imgName = TopologyHelpers.SanitizeName(livekitImage.Name);
         var apiKeyName = $"{hostName}_{imgName}_api_key";
         var apiSecretName = $"{hostName}_{imgName}_api_secret";
-        secrets.TryGetValue(apiKeyName, out var apiKey);
-        secrets.TryGetValue(apiSecretName, out var apiSecret);
+        if (!secrets.TryGetValue(apiKeyName, out var apiKey))
+            throw new InvalidOperationException($"Missing secret '{apiKeyName}' for LiveKit. Terraform state may be incomplete.");
+        if (!secrets.TryGetValue(apiSecretName, out var apiSecret))
+            throw new InvalidOperationException($"Missing secret '{apiSecretName}' for LiveKit. Terraform state may be incomplete.");
 
         return new GatewayLiveKitEntry
         {
-            Host = $"ws://{privateIp}:7880",
-            ApiKey = apiKey ?? string.Empty,
-            ApiSecret = apiSecret ?? string.Empty
+            Host = $"wss://{privateIp}:7880",
+            ApiKey = apiKey,
+            ApiSecret = apiSecret
         };
     }
 }

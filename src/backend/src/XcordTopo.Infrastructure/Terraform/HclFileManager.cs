@@ -11,13 +11,13 @@ public sealed class HclFileManager : IHclFileManager
 
     public HclFileManager(IOptions<DataOptions> options, ILogger<HclFileManager> logger)
     {
-        _basePath = Path.Combine(options.Value.BasePath, "terraform");
+        _basePath = options.Value.BasePath;
         _logger = logger;
     }
 
     public string GetTerraformDirectory(Guid topologyId)
     {
-        var dir = Path.Combine(_basePath, topologyId.ToString());
+        var dir = Path.Combine(_basePath, "deployments", topologyId.ToString(), "terraform");
         Directory.CreateDirectory(dir);
         return dir;
     }

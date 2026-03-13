@@ -71,7 +71,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
                     await WriteLineAsync(channel.Writer, $"--- docker build {image.RegistryName}:{image.GitRef} ---");
 
                     var buildExitCode = await RunDockerCommandAsync(
-                        $"build --build-arg VERSION={image.GitRef} -t {fullTag} {image.RepoUrl}#{image.GitRef}",
+                        $"buildx build --build-arg VERSION={image.GitRef} -t {fullTag} --load {image.RepoUrl}#{image.GitRef}",
                         channel.Writer, cts.Token);
 
                     if (buildExitCode != 0)

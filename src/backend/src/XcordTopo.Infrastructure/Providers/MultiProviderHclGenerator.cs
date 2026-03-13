@@ -74,11 +74,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         }
 
         // Strip empty files (e.g. instances_linode.tf when Linode only has DNS)
-        var emptyKeys = mergedFiles
-            .Where(kv => string.IsNullOrWhiteSpace(kv.Value))
-            .Select(kv => kv.Key)
-            .ToList();
-        foreach (var key in emptyKeys)
+        foreach (var key in mergedFiles.Where(kv => string.IsNullOrWhiteSpace(kv.Value)).Select(kv => kv.Key).ToList())
             mergedFiles.Remove(key);
 
         return mergedFiles;
@@ -127,6 +123,11 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
                     rp.Attribute("source", "hashicorp/random");
                     rp.Attribute("version", "~> 3.0");
                 });
+                p.MapBlock("tls", tp =>
+                {
+                    tp.Attribute("source", "hashicorp/tls");
+                    tp.Attribute("version", "~> 4.0");
+                });
             });
         });
         main.Line();
@@ -146,10 +147,16 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             {
                 b.RawAttribute("access_key", "var.aws_access_key_id");
                 b.RawAttribute("secret_key", "var.aws_secret_access_key");
-                b.RawAttribute("region", "var.region");
+                b.RawAttribute("region", "var.aws_region");
             });
             main.Line();
         }
+
+        main.Block("resource \"tls_private_key\" \"deploy\"", b =>
+        {
+            b.Attribute("algorithm", "ED25519");
+        });
+        main.Line();
 
         return main.ToString();
     }
@@ -193,43 +200,40 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             {
                 b.RawAttribute("type", "list(string)");
                 b.RawAttribute("default", "[]");
-                b.Attribute("description", "CIDR blocks allowed for SSH access (empty = no SSH)");
+                b.Attribute("description", "CIDR blocks allowed for SSH access (empty = allow all, required for provisioners)");
             });
             vars.Line();
         }
 
-        // Shared variables (region, domain, ssh_public_key)
-        var defaultRegion = activeKeys.Contains("aws")
-            ? topology.ProviderConfig.GetValueOrDefault("region", "us-east-1")
-            : topology.ProviderConfig.GetValueOrDefault("region", "us-east");
-
-        vars.Block("variable \"region\"", b =>
+        // Per-provider region variables (namespaced to avoid tfvars collision)
+        if (activeKeys.Contains("aws"))
         {
-            b.RawAttribute("type", "string");
-            b.Attribute("default", defaultRegion);
-            b.Attribute("description", "Deployment region");
-        });
-        vars.Line();
+            vars.Block("variable \"aws_region\"", b =>
+            {
+                b.RawAttribute("type", "string");
+                b.Attribute("default", topology.ProviderConfig.GetValueOrDefault("aws_region", "us-east-1"));
+                b.Attribute("description", "AWS region");
+            });
+            vars.Line();
+        }
+
+        if (activeKeys.Contains("linode"))
+        {
+            vars.Block("variable \"linode_region\"", b =>
+            {
+                b.RawAttribute("type", "string");
+                b.Attribute("default", topology.ProviderConfig.GetValueOrDefault("linode_region", "us-east"));
+                b.Attribute("description", "Linode region");
+            });
+            vars.Line();
+        }
+
         vars.Block("variable \"domain\"", b =>
         {
             b.RawAttribute("type", "string");
             b.Attribute("description", "Primary domain name");
         });
         vars.Line();
-        vars.Block("variable \"ssh_public_key\"", b =>
-        {
-            b.RawAttribute("type", "string");
-            b.Attribute("default", "");
-            b.Attribute("description", "SSH public key for instance access");
-        });
-        vars.Line();
-        vars.Block("variable \"ssh_private_key\"", b =>
-        {
-            b.RawAttribute("type", "string");
-            b.Attribute("default", "");
-            b.Attribute("description", "SSH private key for provisioner authentication");
-            b.RawAttribute("sensitive", "true");
-        });
 
         // Registry variables (hardcoded here like per-provider paths, with resolved default)
         vars.Line();

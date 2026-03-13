@@ -38,12 +38,7 @@ public abstract class ProviderHclBase : ICloudProvider
     internal string SelectPlan(int requiredRamMb)
     {
         var plans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-        foreach (var plan in plans)
-        {
-            if (plan.MemoryMb >= requiredRamMb)
-                return plan.Id;
-        }
-        return plans.Last().Id;
+        return (plans.FirstOrDefault(p => p.MemoryMb >= requiredRamMb) ?? plans.Last()).Id;
     }
 
     internal string SelectPlan(string name, int requiredRamMb, List<TopologyHelpers.InfraSelection>? infraSelections)
@@ -131,10 +126,21 @@ public abstract class ProviderHclBase : ICloudProvider
         List<Container>? standaloneCaddies = null)
     {
         var secrets = new HclBuilder();
-        foreach (var entry in hosts)
+        foreach (var secret in hosts.SelectMany(entry => TopologyHelpers.CollectSecrets(entry, resolver)))
         {
-            var allSecrets = TopologyHelpers.CollectSecrets(entry, resolver);
-            foreach (var secret in allSecrets)
+            secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
+            {
+                b.Attribute("length", 32);
+                b.RawAttribute("special", "false");
+            });
+            secrets.Line();
+        }
+
+        // Standalone Caddy images (pg_hub, redis_hub, etc.) need secrets too
+        if (standaloneCaddies != null)
+        {
+            foreach (var secret in standaloneCaddies.SelectMany(caddy =>
+                TopologyHelpers.CollectSecrets(new TopologyHelpers.HostEntry(caddy), resolver, excludePools: true)))
             {
                 secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
                 {
@@ -145,47 +151,22 @@ public abstract class ProviderHclBase : ICloudProvider
             }
         }
 
-        // Standalone Caddy images (pg_hub, redis_hub, etc.) need secrets too
-        if (standaloneCaddies != null)
-        {
-            foreach (var caddy in standaloneCaddies)
-            {
-                var caddyEntry = new TopologyHelpers.HostEntry(caddy);
-                var caddySecrets = TopologyHelpers.CollectSecrets(caddyEntry, resolver, excludePools: true);
-                foreach (var secret in caddySecrets)
-                {
-                    secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
-                    {
-                        b.Attribute("length", 32);
-                        b.RawAttribute("special", "false");
-                    });
-                    secrets.Line();
-                }
-            }
-        }
-
         // Pool shared service secrets — data-driven from actual pool images
         // Deduplicate by container since multiple tier entries share the same infra
         if (pools != null)
         {
-            var seenPools = new HashSet<Guid>();
-            foreach (var pool in pools)
+            foreach (var secret in pools.DistinctBy(p => p.Pool.Id)
+                .SelectMany(pool => TopologyHelpers.CollectPoolSecrets(pool)))
             {
-                if (!seenPools.Add(pool.Pool.Id)) continue;
-
-                var poolSecrets = TopologyHelpers.CollectPoolSecrets(pool);
-                foreach (var secret in poolSecrets)
+                var length = secret.ResourceName.Contains("access_key") ? 20
+                    : secret.ResourceName.Contains("secret_key") || secret.ResourceName.Contains("api_secret") ? 40
+                    : 32;
+                secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
                 {
-                    var length = secret.ResourceName.Contains("access_key") ? 20
-                        : secret.ResourceName.Contains("secret_key") || secret.ResourceName.Contains("api_secret") ? 40
-                        : 32;
-                    secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
-                    {
-                        b.Attribute("length", length);
-                        b.RawAttribute("special", "false");
-                    });
-                    secrets.Line();
-                }
+                    b.Attribute("length", length);
+                    b.RawAttribute("special", "false");
+                });
+                secrets.Line();
             }
         }
 

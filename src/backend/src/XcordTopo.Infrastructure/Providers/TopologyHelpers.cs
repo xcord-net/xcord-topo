@@ -19,6 +19,7 @@ public static class TopologyHelpers
         public string ResourceName => SanitizeName(Pool.Name) + "_" + SanitizeName(TierProfile.Id);
     }
     public record PoolSelection(string PoolName, string PlanId, int TargetTenants, string? TierProfileId = null);
+    public record InfraSelection(string ImageName, string PlanId);
     public record SecretEntry(string ResourceName, string Description);
 
     // --- Tree-walking ---
@@ -180,8 +181,8 @@ public static class TopologyHelpers
 
     /// <summary>
     /// Resolves the effective registry URL for the topology.
-    /// If a Registry image exists with a domain configured, use that.
-    /// Otherwise falls back to the topology-level Registry property.
+    /// If a Registry image exists, derives the domain from its name + topology domain
+    /// (same subdomain pattern as Caddy routing). Falls back to topology-level Registry.
     /// </summary>
     public static string ResolveRegistry(Topology topology)
     {
@@ -189,9 +190,9 @@ public static class TopologyHelpers
         var registry = registryImages.FirstOrDefault();
         if (registry != null)
         {
-            var domain = registry.Config.GetValueOrDefault("domain", "");
-            if (!string.IsNullOrEmpty(domain))
-                return domain;
+            var topoDomain = ResolveDomain(topology);
+            var subdomain = SanitizeName(registry.Name);
+            return $"{subdomain}.{topoDomain}";
         }
         return topology.Registry;
     }
@@ -1093,31 +1094,20 @@ public static class TopologyHelpers
             blocks.Add(string.Join("\n", block));
         }
 
-        // Bare domain (apex) route — both xcord.net and www.xcord.net serve the hub.
-        // Caddy's site address list handles both domains in a single block.
-        if (grouped.ContainsKey($"www.{domain}"))
+        // Bare domain (apex) route — xcord.net serves the hub.
+        // Find the HubServer's subdomain to reuse its backends for the apex block.
+        var hubUpstream = upstreams.FirstOrDefault(u => u.Image.Kind == ImageKind.HubServer);
+        if (hubUpstream != default)
         {
-            var hubBackends = grouped[$"www.{domain}"];
-            var block = new List<string> { $"{domain} {{" };
-            block.AddRange(securityHeaders);
-            block.Add($"  reverse_proxy {string.Join(" ", hubBackends)}");
-            block.Add("}");
-            blocks.Add(string.Join("\n", block));
-        }
-
-        // Registry images co-located with this Caddy get a route in the main Caddyfile
-        // instead of deploying a separate caddy_registry sidecar (which would conflict on ports 80/443)
-        var registryImages = CollectImagesExcludingPools(caddy)
-            .Where(i => i.Kind == ImageKind.Registry && !string.IsNullOrEmpty(i.Config.GetValueOrDefault("domain", "")))
-            .ToList();
-        foreach (var reg in registryImages)
-        {
-            var regDomain = reg.Config["domain"];
-            var regName = SanitizeName(reg.Name);
-            var block = new List<string> { $"{regDomain} {{" };
-            block.Add($"  reverse_proxy {regName}:5000");
-            block.Add("}");
-            blocks.Add(string.Join("\n", block));
+            var hubHost = $"{hubUpstream.Subdomain}.{domain}";
+            if (grouped.TryGetValue(hubHost, out var hubBackends))
+            {
+                var block = new List<string> { $"{domain} {{" };
+                block.AddRange(securityHeaders);
+                block.Add($"  reverse_proxy {string.Join(" ", hubBackends)}");
+                block.Add("}");
+                blocks.Add(string.Join("\n", block));
+            }
         }
 
         return string.Join("\n\n", blocks);
@@ -1134,6 +1124,124 @@ public static class TopologyHelpers
         foreach (var child in container.Children)
             result.AddRange(CollectRegistryImagesRecursive(child));
         return result;
+    }
+
+    // --- Public endpoints ---
+
+    /// <summary>
+    /// Collects public endpoints from the topology by walking all images with IsPublicEndpoint metadata.
+    /// All public images derive their subdomain from their name (same pattern as Caddy routing).
+    /// Uses the topology's display domain, not Terraform variable interpolation.
+    /// </summary>
+    public static List<(string Url, string Kind, string? Backend)> CollectPublicEndpoints(Topology topology)
+    {
+        var endpoints = new List<(string, string, string?)>();
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenImageIds = new HashSet<Guid>();
+        var resolver = new WireResolver(topology);
+        var domain = ResolveDomain(topology);
+
+        // Walk Caddy containers — images routed through Caddy get subdomain-based URLs
+        void WalkForCaddies(List<Container> containers)
+        {
+            foreach (var container in containers)
+            {
+                if (container.Kind == ContainerKind.Caddy)
+                {
+                    var upstreams = resolver.ResolveCaddyUpstreams(container);
+                    var grouped = new Dictionary<string, List<string>>();
+                    foreach (var (image, subdomain) in upstreams)
+                    {
+                        seenImageIds.Add(image.Id);
+                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+                        var port = meta?.Ports.FirstOrDefault() ?? 80;
+                        var host = $"{subdomain}.{domain}";
+                        var backend = $"{SanitizeName(image.Name)}:{port}";
+                        if (!grouped.TryGetValue(host, out var backends))
+                        {
+                            backends = [];
+                            grouped[host] = backends;
+                        }
+                        if (!backends.Contains(backend))
+                            backends.Add(backend);
+                    }
+
+                    foreach (var (host, backends) in grouped)
+                    {
+                        var url = $"https://{host}";
+                        if (seenUrls.Add(url))
+                            endpoints.Add((url, "reverse_proxy", string.Join(" ", backends)));
+                    }
+
+                    // Apex domain — find HubServer's subdomain dynamically
+                    var hubUpstream = upstreams.FirstOrDefault(u => u.Image.Kind == ImageKind.HubServer);
+                    if (hubUpstream != default)
+                    {
+                        var hubHost = $"{hubUpstream.Subdomain}.{domain}";
+                        if (grouped.TryGetValue(hubHost, out var hubBackends))
+                        {
+                            var apexUrl = $"https://{domain}";
+                            if (seenUrls.Add(apexUrl))
+                                endpoints.Add((apexUrl, "apex", string.Join(" ", hubBackends)));
+                        }
+                    }
+                }
+
+                WalkForCaddies(container.Children);
+            }
+        }
+
+        WalkForCaddies(topology.Containers);
+
+        // Walk all images — any with IsPublicEndpoint that wasn't already collected via Caddy routing
+        // gets added using name-derived subdomain (same pattern as Caddy upstream routing)
+        void WalkForPublicImages(List<Container> containers)
+        {
+            foreach (var container in containers)
+            {
+                foreach (var image in container.Images)
+                {
+                    if (seenImageIds.Contains(image.Id)) continue;
+                    var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+                    if (meta is not { IsPublicEndpoint: true }) continue;
+
+                    var subdomain = image.Name.ToLowerInvariant().Replace(' ', '-').Replace('_', '-');
+                    if (string.IsNullOrEmpty(subdomain)) continue;
+
+                    var port = meta.Ports.FirstOrDefault();
+                    if (port == 0) port = 80;
+                    var url = $"https://{subdomain}.{domain}";
+                    if (seenUrls.Add(url))
+                        endpoints.Add((url, image.Kind.ToString().ToLowerInvariant(), $"{SanitizeName(image.Name)}:{port}"));
+                }
+
+                WalkForPublicImages(container.Children);
+            }
+        }
+
+        WalkForPublicImages(topology.Containers);
+
+        return endpoints;
+    }
+
+    /// <summary>
+    /// Resolves the display domain from the topology's DNS container config.
+    /// Falls back to "example.com" if no DNS container exists.
+    /// </summary>
+    public static string ResolveDomain(Topology topology)
+    {
+        static string? FindDomain(List<Container> containers)
+        {
+            foreach (var c in containers)
+            {
+                if (c.Kind == ContainerKind.Dns && c.Config.TryGetValue("domain", out var domain))
+                    return domain;
+                var child = FindDomain(c.Children);
+                if (child != null) return child;
+            }
+            return null;
+        }
+        return FindDomain(topology.Containers) ?? "example.com";
     }
 
     // --- Utilities ---

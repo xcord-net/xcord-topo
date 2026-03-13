@@ -10,7 +10,9 @@ public interface ICloudProvider
     List<ComputePlan> GetPlans();
     List<CredentialField> GetCredentialSchema();
     Dictionary<string, string> GenerateHcl(
-        Topology topology, List<TopologyHelpers.PoolSelection>? poolSelections = null);
+        Topology topology,
+        List<TopologyHelpers.PoolSelection>? poolSelections = null,
+        List<TopologyHelpers.InfraSelection>? infraSelections = null);
 
     /// <summary>
     /// Generate HCL files for only the containers owned by this provider.
@@ -19,5 +21,6 @@ public interface ICloudProvider
     Dictionary<string, string> GenerateHclForContainers(
         Topology topology,
         IReadOnlyList<Container> ownedContainers,
-        List<TopologyHelpers.PoolSelection>? poolSelections = null);
+        List<TopologyHelpers.PoolSelection>? poolSelections = null,
+        List<TopologyHelpers.InfraSelection>? infraSelections = null);
 }

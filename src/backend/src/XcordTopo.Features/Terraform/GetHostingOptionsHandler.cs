@@ -27,7 +27,7 @@ public sealed record InfraImageCost(
     int DiskGb, decimal PriceMonthly, int MinReplicas, int MaxReplicas,
     decimal MinCostMonthly, decimal MaxCostMonthly,
     List<InfraImagePlan> AvailablePlans,
-    List<ServiceBreakdownItem>? Services = null);
+    List<ServiceDetail>? Services = null);
 
 public sealed record GetHostingOptionsResponse(
     List<PoolHostingEntry> Pools,
@@ -78,7 +78,7 @@ public sealed class GetHostingOptionsHandler(
                 selectedPlan.PriceMonthly * inst.MinReplicas,
                 selectedPlan.PriceMonthly * inst.MaxReplicas,
                 availablePlans,
-                Services: inst.Services.Select(s => new ServiceBreakdownItem(s.Name, s.Kind, s.RamMb)).ToList()));
+                Services: inst.Services.Select(s => new ServiceDetail(s.Name, s.Kind, s.RamMb)).ToList()));
         }
 
         // Build pool hosting options

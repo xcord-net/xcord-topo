@@ -8,7 +8,7 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Features.Terraform;
 
-public sealed record ExecuteTerraformRequest(Guid TopologyId, string Command);
+public sealed record ExecuteTerraformRequest(Guid TopologyId, string Command, bool DeployApps = false);
 
 public sealed record ExecuteTerraformResponse(string Status);
 
@@ -39,7 +39,10 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
             : new List<string> { "linode" };
 
         var command = Enum.Parse<TerraformCommand>(request.Command, ignoreCase: true);
-        await executor.ExecuteAsync(request.TopologyId, command, providerKeys, ct);
+        Dictionary<string, string>? extraVars = request.DeployApps
+            ? new() { ["deploy_apps"] = "true" }
+            : null;
+        await executor.ExecuteAsync(request.TopologyId, command, providerKeys, extraVars, ct);
 
         return new ExecuteTerraformResponse("started");
     }
@@ -47,9 +50,9 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)
     {
         return app.MapPost("/api/v1/topologies/{topologyId:guid}/terraform/{command}", async (
-            Guid topologyId, string command, ExecuteTerraformHandler handler, CancellationToken ct) =>
+            Guid topologyId, string command, bool? deployApps, ExecuteTerraformHandler handler, CancellationToken ct) =>
         {
-            return await handler.ExecuteAsync(new ExecuteTerraformRequest(topologyId, command), ct);
+            return await handler.ExecuteAsync(new ExecuteTerraformRequest(topologyId, command, deployApps ?? false), ct);
         })
         .WithName("ExecuteTerraform")
         .WithTags("Terraform");

@@ -78,6 +78,14 @@ public sealed class FileCredentialStore : ICredentialStore
         }
     }
 
+    public async Task<Dictionary<string, string>> GetRawVariablesAsync(Guid topologyId, string providerKey, CancellationToken ct = default)
+    {
+        var filePath = GetFilePath(topologyId, providerKey);
+        if (!File.Exists(filePath))
+            return new Dictionary<string, string>();
+        return await ParseTfVarsAsync(filePath, ct);
+    }
+
     private string GetFilePath(Guid topologyId, string providerKey) =>
         Path.Combine(_basePath, "deployments", topologyId.ToString(), "credentials", $"{providerKey}.tfvars");
 

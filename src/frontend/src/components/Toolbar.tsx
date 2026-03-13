@@ -10,7 +10,6 @@ const Toolbar: Component<{ onToggleDeploy: () => void }> = (props) => {
   const canvas = useCanvas();
   const history = useHistory();
   const validation = useValidation();
-  const [saving, setSaving] = createSignal(false);
   const [showTopologyList, setShowTopologyList] = createSignal(false);
 
   const [topologies, { refetch }] = createResource(
@@ -21,17 +20,6 @@ const Toolbar: Component<{ onToggleDeploy: () => void }> = (props) => {
       return result.topologies;
     },
   );
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await api.saveTopology(topo.topology);
-    } catch (e) {
-      console.error('Save failed:', e);
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleNew = async () => {
     try {
@@ -93,13 +81,6 @@ const Toolbar: Component<{ onToggleDeploy: () => void }> = (props) => {
         onClick={handleNew}
       >
         New
-      </button>
-      <button
-        class="px-3 py-1 text-xs rounded hover:bg-topo-bg-tertiary text-topo-text-secondary"
-        onClick={handleSave}
-        disabled={saving()}
-      >
-        {saving() ? 'Saving...' : 'Save'}
       </button>
       <div class="relative">
         <button

@@ -4,7 +4,7 @@ import { useDeployWizardStore } from '../stores/deploy-wizard.store';
 import * as deployApi from '../lib/deploy-api';
 import { saveTopology } from '../lib/serialization';
 import { validateField, validateAllFields } from '../lib/credential-validation';
-import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, CostEstimate, TerraformOutputLine, HostingOptions, PoolSelection, InfraSelection, TopologyValidationResult, ValidationItem } from '../types/deploy';
+import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, ResourceSummary, TerraformOutputLine, HostingOptions, PoolSelection, InfraSelection, TopologyValidationResult, ValidationItem } from '../types/deploy';
 import type { MigrationDiffResult, MigrationDecision, MigrationPlan } from '../types/migration';
 import type { Topology, Container } from '../types/topology';
 
@@ -163,7 +163,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     }
   };
   const [credentialSchema, setCredentialSchema] = createSignal<CredentialField[]>([]);
-  const [costEstimate, setCostEstimate] = createSignal<CostEstimate | null>(null);
+  const [resourceSummary, setResourceSummary] = createSignal<ResourceSummary | null>(null);
   const [hclFiles, setHclFiles] = createSignal<Record<string, string>>({});
   const hclResources = createMemo(() => {
     const grouped = new Map<string, string[]>();
@@ -663,16 +663,16 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     }
   };
 
-  // --- Generate HCL + estimate cost helper ---
-  const generateAndEstimate = async (selections?: PoolSelection[]) => {
+  // --- Generate HCL + resource summary helper ---
+  const generateAndEstimate = async (selections?: PoolSelection[], infraSels?: InfraSelection[]) => {
     const selArr = selections && selections.length > 0 ? selections : undefined;
-    const [hclResult, cost, deployments] = await Promise.all([
-      deployApi.generateHcl(topo.topology.id, selArr),
-      deployApi.estimateCost(topo.topology.id, selArr),
+    const infraArr = infraSels && infraSels.length > 0 ? infraSels : undefined;
+    const [hclResult, deployments] = await Promise.all([
+      deployApi.generateHcl(topo.topology.id, selArr, infraArr),
       deployApi.getActiveDeployments(),
     ]);
     setHclFiles(hclResult.files);
-    setCostEstimate(cost);
+    setResourceSummary(hclResult.summary);
     setActiveDeployments(deployments);
 
     const currentDeploy = deployments.find(d => d.topologyId === topo.topology.id);
@@ -710,7 +710,8 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     setError('');
     try {
       const selArr = Object.values(sels);
-      await generateAndEstimate(selArr);
+      const infraArr = Object.values(infraSelections());
+      await generateAndEstimate(selArr, infraArr);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -776,10 +777,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   };
 
   // --- Step 5: Execute ---
-  const runTerraformCommand = (command: string): Promise<boolean> => {
+  const runTerraformCommand = (command: string, deployApps?: boolean): Promise<boolean> => {
     return new Promise(async (resolve) => {
       try {
-        await deployApi.executeTerraform(topo.topology.id, command);
+        await deployApi.executeTerraform(topo.topology.id, command, deployApps);
         // Small delay to let the server set up the stream
         await new Promise(r => setTimeout(r, 200));
 
@@ -790,11 +791,37 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
           },
           () => {
             streamHandle = null;
-            // Check if last line indicates failure
+            // Require explicit "exited with code 0" to count as success.
+            // Missing terraform, spawn failures, or non-zero exits all fail.
             const lines = outputLines();
-            const lastLine = lines[lines.length - 1];
-            const failed = lastLine?.isError && lastLine.text.includes('exited with code') && !lastLine.text.includes('code 0');
-            resolve(!failed);
+            const succeeded = lines.some(l => l.text.includes("exited with code 0"));
+            resolve(succeeded);
+          },
+        );
+      } catch (e: any) {
+        setOutputLines(prev => [...prev, { text: `Error: ${e.message}`, isError: true }]);
+        resolve(false);
+      }
+    });
+  };
+
+  const runImagePush = (imageTag: string): Promise<boolean> => {
+    return new Promise(async (resolve) => {
+      try {
+        await deployApi.executeImagePush(topo.topology.id, imageTag);
+        // Small delay to let the server set up the stream
+        await new Promise(r => setTimeout(r, 200));
+
+        streamHandle = deployApi.connectImagePushStream(
+          topo.topology.id,
+          (line) => {
+            setOutputLines(prev => [...prev, line]);
+          },
+          () => {
+            streamHandle = null;
+            const lines = outputLines();
+            const succeeded = lines.some(l => l.text.includes("exited with code 0"));
+            resolve(succeeded);
           },
         );
       } catch (e: any) {
@@ -842,6 +869,18 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     setExecutePhase('apply');
     setOutputLines(prev => [...prev, { text: '\n=== Terraform Apply ===', isError: false }]);
     ok = await runTerraformCommand('apply');
+    if (!ok) { setExecuteResult('failure'); setExecuting(false); return; }
+
+    // Push images to registry
+    setExecutePhase('push-images');
+    setOutputLines(prev => [...prev, { text: '\n=== Push Images ===', isError: false }]);
+    ok = await runImagePush('latest');
+    if (!ok) { setExecuteResult('failure'); setExecuting(false); return; }
+
+    // Deploy application containers (second apply with deploy_apps=true)
+    setExecutePhase('deploy-apps');
+    setOutputLines(prev => [...prev, { text: '\n=== Deploy Applications ===', isError: false }]);
+    ok = await runTerraformCommand('apply', true);
     setExecuteResult(ok ? 'success' : 'failure');
 
     // Persist deploy status
@@ -934,13 +973,12 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         try {
           const selArr = Object.keys(saved.poolSelections).length > 0
             ? Object.values(saved.poolSelections) : undefined;
-          const [hclResult, cost, deployments] = await Promise.all([
+          const [hclResult, deployments] = await Promise.all([
             deployApi.generateHcl(topo.topology.id, selArr),
-            deployApi.estimateCost(topo.topology.id, selArr),
             deployApi.getActiveDeployments(),
           ]);
           setHclFiles(hclResult.files);
-          setCostEstimate(cost);
+          setResourceSummary(hclResult.summary);
           setActiveDeployments(deployments);
         } catch { /* will show on review step */ }
       }
@@ -1475,22 +1513,22 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
               </div>
 
               {/* Cost estimate sidebar */}
-              <Show when={costEstimate()}>
-                {(cost) => (
+              <Show when={resourceSummary()}>
+                {(summary) => (
                   <div class="w-56 shrink-0">
                     <div class="bg-topo-bg-primary border border-topo-border rounded-md p-3">
                       <h3 class="text-xs font-semibold text-topo-text-primary mb-2">Estimated Cost</h3>
                       <div class="space-y-1.5">
-                        <For each={cost().hosts.filter(h => !h.tierProfileId)}>
-                          {(h) => (
+                        <For each={summary().resources.filter(r => !r.isPool)}>
+                          {(r) => (
                             <div class="text-xs flex justify-between">
                               <span class="text-topo-text-secondary truncate mr-2">
-                                {h.hostName}
-                                <Show when={h.count > 1}>
-                                  <span class="text-topo-text-muted"> x{h.count}</span>
+                                {r.name}
+                                <Show when={r.count > 1}>
+                                  <span class="text-topo-text-muted"> x{r.count}</span>
                                 </Show>
                               </span>
-                              <span class="text-topo-text-muted whitespace-nowrap">${h.pricePerMonth}/mo</span>
+                              <span class="text-topo-text-muted whitespace-nowrap">${r.pricePerMonth}/mo</span>
                             </div>
                           )}
                         </For>
@@ -1498,12 +1536,12 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                       <div class="border-t border-topo-border mt-2 pt-2 flex justify-between text-xs font-semibold">
                         <span class="text-topo-text-primary">Infrastructure</span>
                         <span class="text-topo-brand">
-                          ${cost().hosts.filter(h => !h.tierProfileId).reduce((s, h) => s + h.pricePerMonth, 0)}/mo
+                          ${summary().resources.filter(r => !r.isPool).reduce((s, r) => s + r.pricePerMonth, 0)}/mo
                         </span>
                       </div>
-                      <Show when={cost().hosts.some(h => !!h.tierProfileId)}>
+                      <Show when={summary().resources.some(r => r.isPool)}>
                         <div class="text-[10px] text-topo-text-muted mt-2">
-                          + compute pools (scale with instances)
+                          + pools (scale with instances)
                         </div>
                       </Show>
                     </div>
@@ -1967,8 +2005,8 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                 </Show>
 
                 {/* Cost breakdown */}
-                <Show when={costEstimate()}>
-                  {(cost) => (
+                <Show when={resourceSummary()}>
+                  {(summary) => (
                     <div>
                       <h3 class="text-xs font-semibold text-topo-text-primary mb-2">Cost Breakdown</h3>
                       <table class="w-full text-left text-xs">
@@ -1982,24 +2020,24 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                           </tr>
                         </thead>
                         <tbody>
-                          <For each={cost().hosts.filter(h => !h.tierProfileId)}>
-                            {(h) => (<>
+                          <For each={summary().resources.filter(r => !r.isPool)}>
+                            {(r) => (<>
                               <tr class="border-b border-topo-border/50">
-                                <td class="py-1 px-2 text-topo-text-secondary">{h.hostName}</td>
-                                <td class="py-1 px-2 text-topo-text-muted">{h.planLabel}</td>
-                                <td class="py-1 px-2 text-topo-text-muted">{h.ramMb}MB</td>
-                                <td class="py-1 px-2 text-topo-text-muted">{h.count}</td>
-                                <td class="py-1 px-2 text-topo-text-secondary text-right">${h.pricePerMonth}</td>
+                                <td class="py-1 px-2 text-topo-text-secondary">{r.name}</td>
+                                <td class="py-1 px-2 text-topo-text-muted">{r.planLabel}</td>
+                                <td class="py-1 px-2 text-topo-text-muted">{r.ramMb}MB</td>
+                                <td class="py-1 px-2 text-topo-text-muted">{r.count}</td>
+                                <td class="py-1 px-2 text-topo-text-secondary text-right">${r.pricePerMonth}</td>
                               </tr>
-                              <Show when={h.services?.length}>
+                              <Show when={r.services?.length}>
                                 <tr class="border-b border-topo-border/30">
                                   <td colSpan={5} class="px-2 py-1">
                                     <details class="group">
                                       <summary class="text-[10px] text-topo-text-secondary cursor-pointer hover:text-topo-brand">
-                                        Services ({h.services!.length})
+                                        Services ({r.services!.length})
                                       </summary>
                                       <div class="pl-4 py-1 space-y-0.5">
-                                        <For each={h.services!}>
+                                        <For each={r.services!}>
                                           {(svc) => (
                                             <div class="flex justify-between text-[10px] text-topo-text-secondary">
                                               <span>{svc.name} <span class="opacity-50">({svc.kind})</span></span>
@@ -2017,24 +2055,26 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                           <tr>
                             <td colspan="4" class="py-1.5 px-2 text-topo-text-primary font-semibold">Infrastructure Total</td>
                             <td class="py-1.5 px-2 text-topo-brand font-semibold text-right">
-                              ${cost().hosts.filter(h => !h.tierProfileId).reduce((s, h) => s + h.pricePerMonth, 0).toFixed(2)}/mo
+                              ${summary().resources.filter(r => !r.isPool).reduce((s, r) => s + r.pricePerMonth, 0).toFixed(2)}/mo
                             </td>
                           </tr>
-                          <Show when={cost().hosts.some(h => !!h.tierProfileId)}>
+                          <Show when={summary().resources.some(r => r.isPool)}>
                             <tr>
                               <td colspan="5" class="pt-3 pb-1 px-2">
-                                <span class="text-[10px] font-semibold text-topo-text-primary uppercase tracking-wide">Compute Pools</span>
+                                <span class="text-[10px] font-semibold text-topo-text-primary uppercase tracking-wide">Pools</span>
                                 <span class="text-[10px] text-topo-text-muted ml-2">costs scale with provisioned instances</span>
                               </td>
                             </tr>
-                            <For each={cost().hosts.filter(h => !!h.tierProfileId)}>
-                              {(h) => (
+                            <For each={summary().resources.filter(r => r.isPool)}>
+                              {(r) => (
                                 <tr class="border-b border-topo-border/50">
-                                  <td class="py-1 px-2 text-topo-text-secondary">{h.hostName}</td>
-                                  <td class="py-1 px-2 text-topo-text-muted">{h.planLabel}</td>
-                                  <td class="py-1 px-2 text-topo-text-muted">{h.ramMb}MB</td>
-                                  <td class="py-1 px-2 text-topo-text-muted">{h.tenantsPerHost} tenants/host</td>
-                                  <td class="py-1 px-2 text-topo-text-muted text-right">${h.pricePerMonth}/host</td>
+                                  <td class="py-1 px-2 text-topo-text-secondary">{r.tierProfileName ?? r.name}</td>
+                                  <td class="py-1 px-2 text-topo-text-muted">{r.planLabel}</td>
+                                  <td class="py-1 px-2 text-topo-text-muted">{r.ramMb}MB</td>
+                                  <td class="py-1 px-2 text-topo-text-muted">
+                                    {r.tenantsPerHost ? `${r.tenantsPerHost} tenants/host` : 'per instance'}
+                                  </td>
+                                  <td class="py-1 px-2 text-topo-text-muted text-right">${r.pricePerMonth}/host</td>
                                 </tr>
                               )}
                             </For>
@@ -2043,6 +2083,28 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                       </table>
                     </div>
                   )}
+                </Show>
+
+                {/* Public endpoints */}
+                <Show when={resourceSummary()?.endpoints?.length}>
+                  <div>
+                    <h3 class="text-xs font-semibold text-topo-text-primary mb-2">Public Endpoints</h3>
+                    <div class="space-y-1">
+                      <For each={resourceSummary()!.endpoints}>
+                        {(ep) => (
+                          <div class="flex items-center gap-2 text-xs">
+                            <span class="text-topo-brand font-mono">{ep.url}</span>
+                            <Show when={ep.backend}>
+                              <span class="text-topo-text-muted">&#8594; {ep.backend}</span>
+                            </Show>
+                            <Show when={!ep.backend}>
+                              <span class="text-topo-text-muted">({ep.kind})</span>
+                            </Show>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </div>
                 </Show>
 
                 {/* HCL file preview */}
@@ -2227,7 +2289,11 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
               <div class="flex items-center justify-between mb-2 shrink-0">
                 <div class="text-xs text-topo-text-muted">
                   <Show when={executing()}>
-                    Running terraform {executePhase()}...
+                    {executePhase() === 'push-images'
+                      ? 'Pushing images to registry...'
+                      : executePhase() === 'deploy-apps'
+                      ? 'Deploying application containers...'
+                      : `Running terraform ${executePhase()}...`}
                   </Show>
                   <Show when={!executing() && !executeResult()}>
                     Ready to {deployMode() === 'destroy' ? 'destroy' : 'deploy'}.

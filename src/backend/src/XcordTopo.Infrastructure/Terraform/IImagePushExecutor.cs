@@ -3,13 +3,14 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Terraform;
 
-public interface ITerraformExecutor
+public interface IImagePushExecutor
 {
     Task<ChannelReader<TerraformOutputLine>> ExecuteAsync(
         Guid topologyId,
-        TerraformCommand command,
-        IReadOnlyList<string> providerKeys,
-        IReadOnlyDictionary<string, string>? extraVars = null,
+        string registryUrl,
+        string registryUsername,
+        string registryPassword,
+        string imageTag,
         CancellationToken ct = default);
 
     ChannelReader<TerraformOutputLine>? GetOutputStream(Guid topologyId);

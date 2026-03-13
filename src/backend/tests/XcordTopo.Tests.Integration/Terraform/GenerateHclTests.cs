@@ -85,6 +85,12 @@ public sealed class GenerateHclTests : IClassFixture<TopoWebApplicationFactory>
         var genBody = await genResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
         var files = genBody.GetProperty("files");
         Assert.True(files.EnumerateObject().Count() > 0);
+
+        // Summary is now included in the generate response
+        var summary = genBody.GetProperty("summary");
+        Assert.True(summary.TryGetProperty("resources", out _));
+        Assert.True(summary.TryGetProperty("endpoints", out _));
+        Assert.True(summary.TryGetProperty("totalMonthly", out _));
     }
 
     [Fact]
@@ -113,60 +119,4 @@ public sealed class GenerateHclTests : IClassFixture<TopoWebApplicationFactory>
         Assert.Empty(files.EnumerateObject().ToList());
     }
 
-    [Fact]
-    public async Task EstimateCost_ValidTopology_ReturnsCostBreakdown()
-    {
-        var createResponse = await _client.PostAsJsonAsync("/api/v1/topologies", new
-        {
-            name = "Cost Test"
-        });
-        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
-        var id = created.GetProperty("id").GetString();
-
-        var getResponse = await _client.GetAsync($"/api/v1/topologies/{id}");
-        var topology = await getResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
-        var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
-            topology.GetRawText(), JsonOptions)!;
-
-        var host = new
-        {
-            id = Guid.NewGuid(),
-            name = "cost-host",
-            kind = "Host",
-            x = 50,
-            y = 50,
-            width = 400,
-            height = 300,
-            ports = Array.Empty<object>(),
-            images = Array.Empty<object>(),
-            children = Array.Empty<object>(),
-            config = new Dictionary<string, string>
-            {
-                ["provider"] = "linode",
-                ["region"] = "us-east"
-            }
-        };
-
-        dict["containers"] = JsonSerializer.SerializeToElement(new[] { host }, JsonOptions);
-        dict["providerConfig"] = JsonSerializer.SerializeToElement(
-            new Dictionary<string, string> { ["region"] = "us-east" }, JsonOptions);
-
-        await _client.PutAsJsonAsync($"/api/v1/topologies/{id}", dict, JsonOptions);
-
-        var response = await _client.PostAsync(
-            $"/api/v1/topologies/{id}/terraform/estimate", null);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
-        Assert.True(body.TryGetProperty("hosts", out _));
-        Assert.True(body.TryGetProperty("totalMonthly", out _));
-    }
-
-    [Fact]
-    public async Task EstimateCost_NotFound_Returns404()
-    {
-        var response = await _client.PostAsync(
-            $"/api/v1/topologies/{Guid.NewGuid()}/terraform/estimate", null);
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
 }

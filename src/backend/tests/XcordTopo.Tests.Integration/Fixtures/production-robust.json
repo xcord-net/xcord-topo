@@ -1,0 +1,738 @@
+{
+  "id": "00000000-0000-0000-0000-000000000001",
+  "name": "Production — Robust",
+  "description": "Full HA deployment with tier-based tenant packing: Caddy reverse proxy, hub tier with load-balanced servers, shared LiveKit for voice/video, ComputePools for free and pro tiers with shared infrastructure (PG, Redis, MinIO per host), and a dedicated FederationGroup for enterprise tenants.",
+  "provider": "aws",
+  "providerConfig": {},
+  "containers": [
+    {
+      "id": "f4e6260a-c56c-4f16-b4b3-a1118586c623",
+      "name": "XCord Net",
+      "kind": "Dns",
+      "x": 94.22513322570018,
+      "y": -2.1539375143683284,
+      "width": 971.09272807752,
+      "height": 859.3357826775825,
+      "ports": [
+        {
+          "id": "f7a09255-d39b-4fbf-ba1c-3b9165b59e2c",
+          "name": "records",
+          "type": "Network",
+          "direction": "In",
+          "side": "Left",
+          "offset": 0.5
+        }
+      ],
+      "images": [],
+      "children": [
+        {
+          "id": "bfae5f4d-a222-4fec-80d8-5da3048a9ef3",
+          "name": "Caddy",
+          "kind": "Caddy",
+          "x": 26.538663325274513,
+          "y": 15.226008457321036,
+          "width": 924.5540647522454,
+          "height": 792.1097742202614,
+          "ports": [
+            {
+              "id": "d27637ef-12fd-417e-bbdd-e6725ef13192",
+              "name": "http_in",
+              "type": "Network",
+              "direction": "In",
+              "side": "Top",
+              "offset": 0.3
+            },
+            {
+              "id": "459970c1-0967-4f1d-88de-8b92dd21d971",
+              "name": "https_in",
+              "type": "Network",
+              "direction": "In",
+              "side": "Top",
+              "offset": 0.7
+            },
+            {
+              "id": "30028f45-7892-468c-b59b-9d197e761a17",
+              "name": "upstream",
+              "type": "Network",
+              "direction": "Out",
+              "side": "Bottom",
+              "offset": 0.5
+            }
+          ],
+          "images": [
+            {
+              "id": "0afca3b0-9161-42f8-8eaa-7ce886976652",
+              "name": "hub_server",
+              "kind": "HubServer",
+              "x": 494.2991699783036,
+              "y": 267.17475431567226,
+              "width": 140,
+              "height": 60,
+              "ports": [
+                {
+                  "id": "1946003c-3e67-4256-b6ea-62c22202fe19",
+                  "name": "http",
+                  "type": "Network",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                },
+                {
+                  "id": "cb7c8318-de74-4226-b1ac-c435eee14e87",
+                  "name": "pg",
+                  "type": "Database",
+                  "direction": "Out",
+                  "side": "Right",
+                  "offset": 0.33
+                },
+                {
+                  "id": "9edef0be-c0d0-4380-a4e6-333ca736fb4d",
+                  "name": "redis",
+                  "type": "Database",
+                  "direction": "Out",
+                  "side": "Right",
+                  "offset": 0.67
+                }
+              ],
+              "dockerImage": "ghcr.io/xcord/hub:v0.1.0",
+              "config": {
+                "replicas": "1-3"
+              },
+              "scaling": "Shared"
+            },
+            {
+              "id": "c219898a-7527-418d-a2b4-d21785552cb0",
+              "name": "live_kit",
+              "kind": "LiveKit",
+              "x": 509.9347644490309,
+              "y": 376.5496622163402,
+              "width": 120,
+              "height": 50,
+              "ports": [
+                {
+                  "id": "2fcd908e-3b75-40c0-a113-a0d1dca1fd72",
+                  "name": "rtc",
+                  "type": "Network",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.33
+                },
+                {
+                  "id": "04c6ffcd-b420-4a6b-815b-3c40e4f35316",
+                  "name": "api",
+                  "type": "Network",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.67
+                },
+                {
+                  "id": "ecb88ced-1039-484e-8ab1-87af44cb179b",
+                  "name": "redis",
+                  "type": "Database",
+                  "direction": "Out",
+                  "side": "Right",
+                  "offset": 0.5
+                }
+              ],
+              "dockerImage": "livekit/livekit-server:v1.8.3",
+              "config": {
+                "replicas": "1-100"
+              },
+              "scaling": "Shared"
+            },
+            {
+              "id": "337cacae-6069-41ff-aea3-987fa3632721",
+              "name": "redis_livekit",
+              "kind": "Redis",
+              "x": 712.0106962015998,
+              "y": 376.85862326327526,
+              "width": 120,
+              "height": 50,
+              "ports": [
+                {
+                  "id": "4fd7e4e1-9299-454b-8864-aeb9e10ac5ad",
+                  "name": "redis",
+                  "type": "Database",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                }
+              ],
+              "dockerImage": "redis:7-alpine",
+              "config": {},
+              "scaling": "Shared"
+            },
+            {
+              "id": "0e9f561a-9cbc-4c93-84ed-cd7087e33dc6",
+              "name": "redis_hub",
+              "kind": "Redis",
+              "x": 717.3852779793266,
+              "y": 302.3858752291901,
+              "width": 120,
+              "height": 50,
+              "ports": [
+                {
+                  "id": "fac4435f-a9c1-4d1c-8b36-73ba5807ee23",
+                  "name": "redis",
+                  "type": "Database",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                }
+              ],
+              "dockerImage": "redis:7-alpine",
+              "config": {},
+              "scaling": "Shared"
+            },
+            {
+              "id": "2883f0c7-7eab-4f90-affd-b05b006519cc",
+              "name": "pg_hub",
+              "kind": "PostgreSQL",
+              "x": 715.699608618817,
+              "y": 221.46369292272843,
+              "width": 120,
+              "height": 50,
+              "ports": [
+                {
+                  "id": "6536afa0-1732-42ac-85de-67b03ae656d4",
+                  "name": "postgres",
+                  "type": "Database",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                }
+              ],
+              "dockerImage": "postgres:17-alpine",
+              "config": {},
+              "scaling": "Shared"
+            }
+          ],
+          "children": [
+            {
+              "id": "d3efae01-40a2-46bb-80a2-b95fc5ef4eb6",
+              "name": "Pro Tier",
+              "kind": "ComputePool",
+              "x": 18.613282161306472,
+              "y": 511.0709999962665,
+              "width": 426.91873480942684,
+              "height": 229.03877422399495,
+              "ports": [
+                {
+                  "id": "0ece8bec-7835-482b-8c46-8235e55d1332",
+                  "name": "public",
+                  "type": "Network",
+                  "direction": "InOut",
+                  "side": "Right",
+                  "offset": 0.5
+                },
+                {
+                  "id": "1340614a-485f-4de3-aedc-fbd7448a51de",
+                  "name": "control",
+                  "type": "Control",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                }
+              ],
+              "images": [
+                {
+                  "id": "ba016db9-7caf-444c-842d-9054de9a2b79",
+                  "name": "fed_pro",
+                  "kind": "FederationServer",
+                  "x": 40.0316929395228,
+                  "y": 62.051685915898986,
+                  "width": 140,
+                  "height": 60,
+                  "ports": [],
+                  "dockerImage": "ghcr.io/xcord/fed:v0.1.0",
+                  "config": {
+                    "replicas": "1-10"
+                  },
+                  "scaling": "PerTenant"
+                },
+                {
+                  "id": "09621adf-08a5-45ed-9220-fd246c8861e2",
+                  "name": "redis_pro",
+                  "kind": "Redis",
+                  "x": 265.10584719875175,
+                  "y": 67.86189308459032,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "redis:7-alpine",
+                  "config": {},
+                  "scaling": "Shared"
+                },
+                {
+                  "id": "13eb0564-96a9-4bff-9d57-3f6093b8c64e",
+                  "name": "mio_pro",
+                  "kind": "MinIO",
+                  "x": 265.6075645223083,
+                  "y": 127.03877422399495,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "minio/minio:RELEASE.2025-02-28T09-55-16Z",
+                  "config": {},
+                  "scaling": "Shared"
+                },
+                {
+                  "id": "e517eec4-5f05-4b66-b517-a16e6887942d",
+                  "name": "pg_pro",
+                  "kind": "PostgreSQL",
+                  "x": 266.7010665244364,
+                  "y": 9.544815778400789,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "postgres:17-alpine",
+                  "config": {},
+                  "scaling": "Shared"
+                }
+              ],
+              "children": [],
+              "config": {
+                "tierProfile": "pro",
+                "targetTenants": "50"
+              }
+            },
+            {
+              "id": "23c5c1be-5615-479f-8115-bfb0cb827303",
+              "name": "Enterprise Tier",
+              "kind": "ComputePool",
+              "x": 477.63532994281854,
+              "y": 510.1319100120228,
+              "width": 426.91873480942684,
+              "height": 229.03877422399495,
+              "ports": [
+                {
+                  "id": "039bcd38-7a0b-4eb3-861a-3f4454a90485",
+                  "name": "public",
+                  "type": "Network",
+                  "direction": "InOut",
+                  "side": "Right",
+                  "offset": 0.5
+                },
+                {
+                  "id": "0e56683a-4ed4-4150-8760-ffa3e89a1032",
+                  "name": "control",
+                  "type": "Control",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                }
+              ],
+              "images": [
+                {
+                  "id": "9b9e831b-e193-4790-b6b6-2f464d789b7a",
+                  "name": "fed_enterprise",
+                  "kind": "FederationServer",
+                  "x": 40.0316929395228,
+                  "y": 62.051685915898986,
+                  "width": 140,
+                  "height": 60,
+                  "ports": [],
+                  "dockerImage": "ghcr.io/xcord/fed:v0.1.0",
+                  "config": {
+                    "replicas": "1-10"
+                  },
+                  "scaling": "Shared"
+                },
+                {
+                  "id": "76433dd6-2a1c-49f4-ab79-8bf9374f83ff",
+                  "name": "redis_enterprise",
+                  "kind": "Redis",
+                  "x": 265.10584719875175,
+                  "y": 67.86189308459032,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "redis:7-alpine",
+                  "config": {},
+                  "scaling": "Shared"
+                },
+                {
+                  "id": "deb2f4f8-bdb6-44f9-abb5-7ffdc8dfbad7",
+                  "name": "mio_enterprise",
+                  "kind": "MinIO",
+                  "x": 265.6075645223083,
+                  "y": 127.03877422399495,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "minio/minio:RELEASE.2025-02-28T09-55-16Z",
+                  "config": {},
+                  "scaling": "Shared"
+                },
+                {
+                  "id": "bba7f162-74f5-4996-9b05-a5b712e71c55",
+                  "name": "pg_enterprise",
+                  "kind": "PostgreSQL",
+                  "x": 266.7010665244364,
+                  "y": 9.544815778400789,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "postgres:17-alpine",
+                  "config": {},
+                  "scaling": "Shared"
+                }
+              ],
+              "children": [],
+              "config": {
+                "tierProfile": "enterprise",
+                "targetTenants": "50"
+              }
+            },
+            {
+              "id": "d96ceef4-cbd5-40c9-aff9-db44ebd40cba",
+              "name": "Free Tier",
+              "kind": "ComputePool",
+              "x": 18.931704207370842,
+              "y": 17.73756494235029,
+              "width": 426.91873480942684,
+              "height": 229.03877422399495,
+              "ports": [
+                {
+                  "id": "31a0798b-dc75-4f72-aa48-89ec795e85f6",
+                  "name": "public",
+                  "type": "Network",
+                  "direction": "InOut",
+                  "side": "Right",
+                  "offset": 0.5
+                },
+                {
+                  "id": "67711a8e-30b5-436c-b3bd-493a7e627a14",
+                  "name": "control",
+                  "type": "Control",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                }
+              ],
+              "images": [
+                {
+                  "id": "62ee0384-5a44-4138-b1f7-1b712cc9ccc6",
+                  "name": "fed_free",
+                  "kind": "FederationServer",
+                  "x": 40.0316929395228,
+                  "y": 62.051685915898986,
+                  "width": 140,
+                  "height": 60,
+                  "ports": [],
+                  "dockerImage": "ghcr.io/xcord/fed:v0.1.0",
+                  "config": {},
+                  "scaling": "PerTenant"
+                },
+                {
+                  "id": "83ea67e0-cb6d-47d2-aa1f-7c342b30eada",
+                  "name": "redis_free",
+                  "kind": "Redis",
+                  "x": 265.10584719875175,
+                  "y": 67.86189308459032,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "redis:7-alpine",
+                  "config": {},
+                  "scaling": "Shared"
+                },
+                {
+                  "id": "86f46de7-7193-4d13-9be2-a3e246002883",
+                  "name": "mio_free",
+                  "kind": "MinIO",
+                  "x": 265.6075645223083,
+                  "y": 127.03877422399495,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "minio/minio:RELEASE.2025-02-28T09-55-16Z",
+                  "config": {},
+                  "scaling": "Shared"
+                },
+                {
+                  "id": "86da7d20-df8d-475b-9f5d-0ca6455d4dba",
+                  "name": "pg_free",
+                  "kind": "PostgreSQL",
+                  "x": 266.7010665244364,
+                  "y": 9.544815778400789,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "postgres:17-alpine",
+                  "config": {},
+                  "scaling": "Shared"
+                }
+              ],
+              "children": [],
+              "config": {
+                "tierProfile": "free",
+                "targetTenants": "50"
+              }
+            },
+            {
+              "id": "f037ddce-9404-4d9d-8e0e-e789a59b93bb",
+              "name": "Basic Tier",
+              "kind": "ComputePool",
+              "x": 16.270642554252333,
+              "y": 261.8360657065904,
+              "width": 426.91873480942684,
+              "height": 229.03877422399495,
+              "ports": [
+                {
+                  "id": "760f9cc7-8dbb-4afa-82db-970b963d977f",
+                  "name": "public",
+                  "type": "Network",
+                  "direction": "InOut",
+                  "side": "Right",
+                  "offset": 0.5
+                },
+                {
+                  "id": "772026aa-ec3b-4946-8c9e-fb6f138fb86f",
+                  "name": "control",
+                  "type": "Control",
+                  "direction": "In",
+                  "side": "Left",
+                  "offset": 0.5
+                }
+              ],
+              "images": [
+                {
+                  "id": "e4621b40-91fe-4b8f-88fc-6e511302af68",
+                  "name": "fed_basic",
+                  "kind": "FederationServer",
+                  "x": 40.0316929395228,
+                  "y": 62.051685915898986,
+                  "width": 140,
+                  "height": 60,
+                  "ports": [],
+                  "dockerImage": "ghcr.io/xcord/fed:v0.1.0",
+                  "config": {
+                    "replicas": "1-3"
+                  },
+                  "scaling": "PerTenant"
+                },
+                {
+                  "id": "7961179e-b5a7-4db9-8682-306f3c282858",
+                  "name": "redis_basic",
+                  "kind": "Redis",
+                  "x": 265.10584719875175,
+                  "y": 67.86189308459032,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "redis:7-alpine",
+                  "config": {},
+                  "scaling": "Shared"
+                },
+                {
+                  "id": "08b8a0f6-645f-4f5a-92b7-6b8af6033241",
+                  "name": "mio_basic",
+                  "kind": "MinIO",
+                  "x": 265.6075645223083,
+                  "y": 127.03877422399495,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "minio/minio:RELEASE.2025-02-28T09-55-16Z",
+                  "config": {},
+                  "scaling": "Shared"
+                },
+                {
+                  "id": "2176de9b-9f22-4e28-88cf-d687a9a8664d",
+                  "name": "pg_basic",
+                  "kind": "PostgreSQL",
+                  "x": 266.7010665244364,
+                  "y": 9.544815778400789,
+                  "width": 120,
+                  "height": 50,
+                  "ports": [],
+                  "dockerImage": "postgres:17-alpine",
+                  "config": {},
+                  "scaling": "Shared"
+                }
+              ],
+              "children": [],
+              "config": {
+                "tierProfile": "basic",
+                "targetTenants": "50"
+              }
+            }
+          ],
+          "config": {
+            "domain": "xcord.net"
+          }
+        }
+      ],
+      "config": {
+        "domain": "xcord.net",
+        "provider": "linode"
+      }
+    }
+  ],
+  "wires": [
+    {
+      "id": "29ce9588-0694-4fdf-bc3d-6abaf9991683",
+      "fromNodeId": "83ea67e0-cb6d-47d2-aa1f-7c342b30eada",
+      "fromPortId": "3063f278-a578-43fe-a687-12521fcca8b1",
+      "toNodeId": "62ee0384-5a44-4138-b1f7-1b712cc9ccc6",
+      "toPortId": "ed18858d-1d6b-4986-a577-e225b5d808ca"
+    },
+    {
+      "id": "ddf2a5ee-b6ec-4854-9f91-1f50ae16ca9d",
+      "fromNodeId": "62ee0384-5a44-4138-b1f7-1b712cc9ccc6",
+      "fromPortId": "a8b268e2-c92e-4d2f-8c90-06646f0fba63",
+      "toNodeId": "86da7d20-df8d-475b-9f5d-0ca6455d4dba",
+      "toPortId": "a881c7ab-ffe7-456e-92bd-49d4c53826ec"
+    },
+    {
+      "id": "2fed7e8b-8a45-4430-85f8-dff99dc589c9",
+      "fromNodeId": "62ee0384-5a44-4138-b1f7-1b712cc9ccc6",
+      "fromPortId": "4aa7f920-f068-4d85-95e9-8e47842cc0f6",
+      "toNodeId": "86f46de7-7193-4d13-9be2-a3e246002883",
+      "toPortId": "0b235d9d-fcaa-428a-8cf0-fde7d9ad12da"
+    },
+    {
+      "id": "d29677cb-36c9-46fe-bae6-206e2db8d4b1",
+      "fromNodeId": "7961179e-b5a7-4db9-8682-306f3c282858",
+      "fromPortId": "0e052a39-96e4-4653-928c-94bbf36afdcd",
+      "toNodeId": "e4621b40-91fe-4b8f-88fc-6e511302af68",
+      "toPortId": "37b8f5e2-ba54-470a-90b5-78d480c44c5c"
+    },
+    {
+      "id": "61974f88-1e7c-494a-898c-131d92f0e92e",
+      "fromNodeId": "e4621b40-91fe-4b8f-88fc-6e511302af68",
+      "fromPortId": "e3eeb019-4e36-4d42-bb72-115d26a7b629",
+      "toNodeId": "2176de9b-9f22-4e28-88cf-d687a9a8664d",
+      "toPortId": "19023824-34a5-4c8f-9d84-fc210f6b98c3"
+    },
+    {
+      "id": "6ded7e5f-cef5-442a-8837-5ebacbc69451",
+      "fromNodeId": "e4621b40-91fe-4b8f-88fc-6e511302af68",
+      "fromPortId": "f09c56e0-96fd-4d19-93be-8690cb6ddd7a",
+      "toNodeId": "08b8a0f6-645f-4f5a-92b7-6b8af6033241",
+      "toPortId": "3f024074-ff03-4196-9e50-0185a49c7ac0"
+    },
+    {
+      "id": "5018dee9-ba48-4dca-8555-b95e27e0f169",
+      "fromNodeId": "0afca3b0-9161-42f8-8eaa-7ce886976652",
+      "fromPortId": "cb7c8318-de74-4226-b1ac-c435eee14e87",
+      "toNodeId": "2883f0c7-7eab-4f90-affd-b05b006519cc",
+      "toPortId": "6536afa0-1732-42ac-85de-67b03ae656d4"
+    },
+    {
+      "id": "ac382eb1-d430-40cb-b459-56e899dc596c",
+      "fromNodeId": "0afca3b0-9161-42f8-8eaa-7ce886976652",
+      "fromPortId": "9edef0be-c0d0-4380-a4e6-333ca736fb4d",
+      "toNodeId": "0e9f561a-9cbc-4c93-84ed-cd7087e33dc6",
+      "toPortId": "fac4435f-a9c1-4d1c-8b36-73ba5807ee23"
+    },
+    {
+      "id": "1e0cea04-e3b9-4ee7-acf3-11a171d0d8ab",
+      "fromNodeId": "09621adf-08a5-45ed-9220-fd246c8861e2",
+      "fromPortId": "0d5c8392-311e-45c0-a629-520302be9e36",
+      "toNodeId": "ba016db9-7caf-444c-842d-9054de9a2b79",
+      "toPortId": "a5872c2e-926d-407e-ac47-cbe46411d377"
+    },
+    {
+      "id": "ecb27894-1e89-4cbb-ba83-e17edbda0af3",
+      "fromNodeId": "ba016db9-7caf-444c-842d-9054de9a2b79",
+      "fromPortId": "c7966771-309b-4e3a-a09f-8a830a85b96d",
+      "toNodeId": "e517eec4-5f05-4b66-b517-a16e6887942d",
+      "toPortId": "1e98eda0-1511-461c-95e9-d6f9b20d5d84"
+    },
+    {
+      "id": "35a3f825-8952-47bf-9f50-7b057227d26f",
+      "fromNodeId": "ba016db9-7caf-444c-842d-9054de9a2b79",
+      "fromPortId": "0180637f-c63f-42b9-a537-f10253cb57ad",
+      "toNodeId": "13eb0564-96a9-4bff-9d57-3f6093b8c64e",
+      "toPortId": "81ef2775-72af-4b6f-b539-1f6c70bdaadf"
+    },
+    {
+      "id": "44968371-d598-4d4e-9e1e-640336ca5b6e",
+      "fromNodeId": "c219898a-7527-418d-a2b4-d21785552cb0",
+      "fromPortId": "ecb88ced-1039-484e-8ab1-87af44cb179b",
+      "toNodeId": "337cacae-6069-41ff-aea3-987fa3632721",
+      "toPortId": "4fd7e4e1-9299-454b-8864-aeb9e10ac5ad"
+    },
+    {
+      "id": "e734c53b-e20a-4ee4-81ba-bef5efcaaeab",
+      "fromNodeId": "76433dd6-2a1c-49f4-ab79-8bf9374f83ff",
+      "fromPortId": "2d80feae-57d9-4db9-9a9f-9a0365664f4b",
+      "toNodeId": "9b9e831b-e193-4790-b6b6-2f464d789b7a",
+      "toPortId": "7fa7cad1-c5d1-4836-a693-462239fd789f"
+    },
+    {
+      "id": "b2fa1c72-3ddc-4a50-b57b-356562c2bbe2",
+      "fromNodeId": "9b9e831b-e193-4790-b6b6-2f464d789b7a",
+      "fromPortId": "578a16d6-671b-4d8d-8efd-3fd903ae77fe",
+      "toNodeId": "bba7f162-74f5-4996-9b05-a5b712e71c55",
+      "toPortId": "1bda9e09-4446-475e-93a5-14197c3f5d3e"
+    },
+    {
+      "id": "fbc5d412-57f8-4b5a-9928-2c45a48d4e20",
+      "fromNodeId": "9b9e831b-e193-4790-b6b6-2f464d789b7a",
+      "fromPortId": "4d7ac93a-d866-4ce5-8161-98b7eaf59d6e",
+      "toNodeId": "deb2f4f8-bdb6-44f9-abb5-7ffdc8dfbad7",
+      "toPortId": "3db2d641-fe62-4573-a1e8-de36cbe2fc22"
+    }
+  ],
+  "schemaVersion": 1,
+  "createdAt": "2026-02-20T00:00:00+00:00",
+  "updatedAt": "2026-03-10T02:37:41.143Z",
+  "serviceKeys": {
+    "smtp_host": "mail.xcord.net",
+    "smtp_username": "admin@mail.xcord.net",
+    "smtp_from_address": "noreply@xcord.net",
+    "smtp_from_name": "xcord-net"
+  },
+  "tierProfiles": [
+    {
+      "id": "free",
+      "name": "Free Tier",
+      "imageSpecs": {
+        "FederationServer": {
+          "memoryMb": 256,
+          "cpuMillicores": 250,
+          "diskMb": 512
+        }
+      }
+    },
+    {
+      "id": "basic",
+      "name": "Basic Tier",
+      "imageSpecs": {
+        "FederationServer": {
+          "memoryMb": 512,
+          "cpuMillicores": 500,
+          "diskMb": 2048
+        }
+      }
+    },
+    {
+      "id": "pro",
+      "name": "Pro Tier",
+      "imageSpecs": {
+        "FederationServer": {
+          "memoryMb": 1024,
+          "cpuMillicores": 1000,
+          "diskMb": 5120
+        }
+      }
+    },
+    {
+      "id": "enterprise",
+      "name": "Enterprise Tier",
+      "imageSpecs": {
+        "FederationServer": {
+          "memoryMb": 2048,
+          "cpuMillicores": 2000,
+          "diskMb": 25600
+        }
+      }
+    }
+  ],
+  "lastDeployStatus": null,
+  "lastDeployedAt": null,
+  "deployedResourceCount": 0
+}

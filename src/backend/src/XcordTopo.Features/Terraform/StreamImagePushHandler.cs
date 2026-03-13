@@ -7,7 +7,7 @@ using XcordTopo.Infrastructure.Terraform;
 
 namespace XcordTopo.Features.Terraform;
 
-public static class StreamTerraformHandler
+public static class StreamImagePushHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -17,9 +17,9 @@ public static class StreamTerraformHandler
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)
     {
-        return app.MapGet("/api/v1/topologies/{topologyId:guid}/terraform/stream", async (
+        return app.MapGet("/api/v1/topologies/{topologyId:guid}/images/stream", async (
             Guid topologyId,
-            ITerraformExecutor executor,
+            IImagePushExecutor executor,
             HttpContext httpContext,
             CancellationToken ct) =>
         {
@@ -30,7 +30,7 @@ public static class StreamTerraformHandler
             var reader = executor.GetOutputStream(topologyId);
             if (reader is null)
             {
-                await httpContext.Response.WriteAsync($"data: {{\"text\":\"No active execution\",\"isError\":true}}\n\n", ct);
+                await httpContext.Response.WriteAsync($"data: {{\"text\":\"No active image push\",\"isError\":true}}\n\n", ct);
                 await httpContext.Response.WriteAsync("data: [DONE]\n\n", ct);
                 await httpContext.Response.Body.FlushAsync(ct);
                 return;
@@ -54,7 +54,7 @@ public static class StreamTerraformHandler
             await httpContext.Response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
             await httpContext.Response.Body.FlushAsync(CancellationToken.None);
         })
-        .WithName("StreamTerraform")
-        .WithTags("Terraform");
+        .WithName("StreamImagePush")
+        .WithTags("Images");
     }
 }

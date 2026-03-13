@@ -1,4 +1,4 @@
-import type { CredentialStatus, CredentialField, CostEstimate, DeployedTopology, TerraformOutputLine, HostingOptions, PoolSelection, TopologyValidationResult } from '../types/deploy';
+import type { CredentialStatus, CredentialField, DeployedTopology, TerraformOutputLine, HostingOptions, TopologyValidationResult } from '../types/deploy';
 
 const API_BASE = '/api/v1';
 
@@ -91,21 +91,47 @@ export async function getHostingOptions(topologyId: string): Promise<HostingOpti
   return res.json();
 }
 
-// --- Cost estimate ---
+// --- Image push ---
 
-export async function estimateCost(
-  topologyId: string, poolSelections?: PoolSelection[],
-): Promise<CostEstimate> {
-  const hasBody = poolSelections && poolSelections.length > 0;
-  const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/estimate`, {
+export async function executeImagePush(topologyId: string, imageTag: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/images/push`, {
     method: 'POST',
-    ...(hasBody ? {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ poolSelections }),
-    } : {}),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageTag }),
   });
-  if (!res.ok) throw new Error(`Failed to estimate cost: ${res.statusText}`);
-  return res.json();
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.detail ?? `Failed to start image push: ${res.statusText}`);
+  }
+}
+
+export function connectImagePushStream(
+  topologyId: string,
+  onLine: (line: TerraformOutputLine) => void,
+  onDone: () => void,
+): { close: () => void } {
+  const eventSource = new EventSource(`${API_BASE}/topologies/${topologyId}/images/stream`);
+
+  eventSource.onmessage = (event) => {
+    if (event.data === '[DONE]') {
+      eventSource.close();
+      onDone();
+      return;
+    }
+    try {
+      const line: TerraformOutputLine = JSON.parse(event.data);
+      onLine(line);
+    } catch {
+      onLine({ text: event.data, isError: false });
+    }
+  };
+
+  eventSource.onerror = () => {
+    eventSource.close();
+    onDone();
+  };
+
+  return { close: () => eventSource.close() };
 }
 
 // --- SSE stream ---

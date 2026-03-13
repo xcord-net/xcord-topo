@@ -42,21 +42,28 @@ export async function deleteTopology(id: string): Promise<void> {
 export async function generateHcl(
   topologyId: string,
   poolSelections?: import('../types/deploy').PoolSelection[],
-): Promise<{ files: Record<string, string> }> {
-  const hasBody = poolSelections && poolSelections.length > 0;
+  infraSelections?: import('../types/deploy').InfraSelection[],
+): Promise<{ files: Record<string, string>; summary: import('../types/deploy').ResourceSummary }> {
+  const hasPoolBody = poolSelections && poolSelections.length > 0;
+  const hasInfraBody = infraSelections && infraSelections.length > 0;
+  const hasBody = hasPoolBody || hasInfraBody;
   const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/generate`, {
     method: 'POST',
     ...(hasBody ? {
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ poolSelections }),
+      body: JSON.stringify({
+        ...(hasPoolBody ? { poolSelections } : {}),
+        ...(hasInfraBody ? { infraSelections } : {}),
+      }),
     } : {}),
   });
   if (!res.ok) throw new Error(`Failed to generate HCL: ${res.statusText}`);
   return res.json();
 }
 
-export async function executeTerraform(topologyId: string, command: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/${command}`, { method: 'POST' });
+export async function executeTerraform(topologyId: string, command: string, deployApps?: boolean): Promise<void> {
+  const params = deployApps ? '?deployApps=true' : '';
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/${command}${params}`, { method: 'POST' });
   if (!res.ok) throw new Error(`Failed to execute terraform ${command}: ${res.statusText}`);
 }
 

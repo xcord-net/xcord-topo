@@ -14,21 +14,35 @@ export interface DeployedTopology {
   resourceCount: number;
 }
 
-export interface HostCostEntry {
-  hostName: string;
+export interface ServiceDetail {
+  name: string;
+  kind: string;
+  ramMb: number;
+}
+
+export interface ResourceEntry {
+  name: string;
+  provider: string;
   planId: string;
   planLabel: string;
   ramMb: number;
   count: number;
   pricePerMonth: number;
-  tierProfileId?: string;
+  isPool: boolean;
+  tierProfileName?: string;
   tenantsPerHost?: number;
-  targetTenants?: number;
-  services?: ServiceBreakdown[];
+  services?: ServiceDetail[];
 }
 
-export interface CostEstimate {
-  hosts: HostCostEntry[];
+export interface PublicEndpoint {
+  url: string;
+  kind: string;
+  backend?: string;
+}
+
+export interface ResourceSummary {
+  resources: ResourceEntry[];
+  endpoints: PublicEndpoint[];
   totalMonthly: number;
 }
 
@@ -60,12 +74,6 @@ export interface CredentialField {
   placeholder?: string;
   help?: CredentialFieldHelp;
   validation: ValidationRule[];
-}
-
-export interface ServiceBreakdown {
-  name: string;
-  kind: string;
-  ramMb: number;
 }
 
 // --- Hosting options ---
@@ -111,7 +119,7 @@ export interface InfraImageCost {
   minCostMonthly: number;
   maxCostMonthly: number;
   availablePlans: InfraImagePlan[];
-  services?: ServiceBreakdown[];
+  services?: ServiceDetail[];
 }
 
 export interface HostingOptions {

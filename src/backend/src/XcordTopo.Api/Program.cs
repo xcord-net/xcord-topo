@@ -29,6 +29,7 @@ builder.Services.AddSingleton<ITopologyStore, FileTopologyStore>();
 builder.Services.AddSingleton<ITopologyValidator, TopologyValidator>();
 builder.Services.AddSingleton<IHclFileManager, HclFileManager>();
 builder.Services.AddSingleton<ITerraformExecutor, ProcessTerraformExecutor>();
+builder.Services.AddSingleton<IImagePushExecutor, ProcessImagePushExecutor>();
 
 // Providers
 builder.Services.AddSingleton<LinodeProvider>();

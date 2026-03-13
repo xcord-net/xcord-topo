@@ -30,6 +30,7 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
         Guid topologyId,
         TerraformCommand command,
         IReadOnlyList<string> providerKeys,
+        IReadOnlyDictionary<string, string>? extraVars = null,
         CancellationToken ct = default)
     {
         if (_runningProcesses.ContainsKey(topologyId))
@@ -58,6 +59,13 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
                 var credFile = Path.Combine(_basePath, "deployments", topologyId.ToString(), "credentials", $"{key}.tfvars");
                 if (File.Exists(credFile))
                     args += $" -var-file=\"{credFile}\"";
+            }
+
+            // Append extra inline variables (e.g., deploy_apps=true)
+            if (extraVars != null)
+            {
+                foreach (var (varName, varValue) in extraVars)
+                    args += $" -var=\"{varName}={varValue}\"";
             }
         }
 
@@ -111,7 +119,8 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
             {
                 channel.Writer.Complete();
                 _runningProcesses.TryRemove(topologyId, out _);
-                _activeReaders.TryRemove(topologyId, out _);
+                // Don't remove reader here — the SSE stream handler needs to read buffered output
+                // even after the process exits. The reader is cleaned up by ConsumeOutputStream().
             }
         }, CancellationToken.None);
 
@@ -120,6 +129,9 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
 
     public ChannelReader<TerraformOutputLine>? GetOutputStream(Guid topologyId) =>
         _activeReaders.GetValueOrDefault(topologyId);
+
+    public void ReleaseOutputStream(Guid topologyId) =>
+        _activeReaders.TryRemove(topologyId, out _);
 
     public bool IsRunning(Guid topologyId) => _runningProcesses.ContainsKey(topologyId);
 

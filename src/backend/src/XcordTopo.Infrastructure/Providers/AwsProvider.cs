@@ -160,7 +160,9 @@ public sealed class AwsProvider : ProviderHclBase
     ];
 
     public override Dictionary<string, string> GenerateHcl(
-        Topology topology, List<TopologyHelpers.PoolSelection>? poolSelections = null)
+        Topology topology,
+        List<TopologyHelpers.PoolSelection>? poolSelections = null,
+        List<TopologyHelpers.InfraSelection>? infraSelections = null)
     {
         var files = new Dictionary<string, string>();
         var hosts = TopologyHelpers.CollectHosts(topology.Containers);
@@ -174,7 +176,7 @@ public sealed class AwsProvider : ProviderHclBase
         files["secrets.tf"] = GenerateSecrets(hosts, resolver, pools, standaloneCaddies);
         files["network.tf"] = GenerateNetwork(topology);
         files["security_groups.tf"] = GenerateSecurityGroups(topology, hosts);
-        files["instances.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies);
+        files["instances.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies, infraSelections);
         files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
         files["outputs.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
 
@@ -187,7 +189,8 @@ public sealed class AwsProvider : ProviderHclBase
     public override Dictionary<string, string> GenerateHclForContainers(
         Topology topology,
         IReadOnlyList<Container> ownedContainers,
-        List<TopologyHelpers.PoolSelection>? poolSelections = null)
+        List<TopologyHelpers.PoolSelection>? poolSelections = null,
+        List<TopologyHelpers.InfraSelection>? infraSelections = null)
     {
         var files = new Dictionary<string, string>();
         var hosts = TopologyHelpers.CollectHosts(ownedContainers.ToList())
@@ -210,7 +213,7 @@ public sealed class AwsProvider : ProviderHclBase
         files["secrets.tf"] = GenerateSecrets(hosts, resolver, pools, standaloneCaddies);
         files["network_aws.tf"] = GenerateNetwork(topology);
         files["security_groups_aws.tf"] = GenerateSecurityGroups(topology, hosts);
-        files["instances_aws.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies);
+        files["instances_aws.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies, infraSelections);
         files["provisioning_aws.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
         files["outputs_aws.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
 
@@ -307,12 +310,12 @@ public sealed class AwsProvider : ProviderHclBase
         {
             b.Block("required_providers", p =>
             {
-                p.Block("aws", ap =>
+                p.MapBlock("aws", ap =>
                 {
                     ap.Attribute("source", "hashicorp/aws");
                     ap.Attribute("version", "~> 5.0");
                 });
-                p.Block("random", rp =>
+                p.MapBlock("random", rp =>
                 {
                     rp.Attribute("source", "hashicorp/random");
                     rp.Attribute("version", "~> 3.0");
@@ -385,6 +388,13 @@ public sealed class AwsProvider : ProviderHclBase
         {
             b.RawAttribute("type", "string");
             b.Attribute("description", "Version tag for xcord application images (hub, fed)");
+        });
+        vars.Line();
+        vars.Block("variable \"deploy_apps\"", b =>
+        {
+            b.RawAttribute("type", "bool");
+            b.RawAttribute("default", "false");
+            b.Attribute("description", "Set to true after images are pushed to deploy application containers");
         });
         vars.Line();
         vars.Block("variable \"registry_username\"", b =>
@@ -602,7 +612,7 @@ public sealed class AwsProvider : ProviderHclBase
         return sg.ToString();
     }
 
-    private string GenerateInstances(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
+    private string GenerateInstances(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies, List<TopologyHelpers.InfraSelection>? infraSelections = null)
     {
         var topoName = TopologyHelpers.SanitizeName(topology.Name);
         var instances = new HclBuilder();
@@ -638,7 +648,7 @@ public sealed class AwsProvider : ProviderHclBase
         {
             var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
             var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host);
-            var instanceType = SelectPlan(ramRequired);
+            var instanceType = SelectPlan(entry.Host.Name, ramRequired, infraSelections);
             var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
 
             instances.Block($"resource \"aws_instance\" \"{resourceName}\"", b =>
@@ -726,7 +736,7 @@ public sealed class AwsProvider : ProviderHclBase
             var resourceName = TopologyHelpers.SanitizeName(image.Name);
             var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
             var ramRequired = meta?.MinRamMb ?? 256;
-            var instanceType = SelectPlan(ramRequired);
+            var instanceType = SelectPlan(image.Name, ramRequired, infraSelections);
             var varName = $"{resourceName}_replicas";
 
             instances.Block($"resource \"aws_instance\" \"{resourceName}\"", b =>
@@ -766,7 +776,7 @@ public sealed class AwsProvider : ProviderHclBase
         {
             var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
             var ramRequired = TopologyHelpers.CalculateStandaloneCaddyRam(caddy);
-            var instanceType = SelectPlan(ramRequired);
+            var instanceType = SelectPlan(caddy.Name, ramRequired, infraSelections);
 
             instances.Block($"resource \"aws_instance\" \"{resourceName}\"", b =>
             {
@@ -871,6 +881,10 @@ public sealed class AwsProvider : ProviderHclBase
 
                     foreach (var image in images)
                     {
+                        // Private registry images (Hub, Fed) are deployed post-push via deploy_apps phase
+                        if (TopologyHelpers.RequiresPrivateRegistry(image.Kind))
+                            continue;
+
                         var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
                         var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
@@ -974,10 +988,8 @@ public sealed class AwsProvider : ProviderHclBase
                     // Registry images: configure htpasswd auth
                     foreach (var image in images.Where(i => i.Kind == ImageKind.Registry))
                     {
-                        var domain = image.Config.GetValueOrDefault("domain", "");
-                        if (string.IsNullOrEmpty(domain)) continue;
-
                         var registryName = TopologyHelpers.SanitizeName(image.Name);
+                        var registrySubdomain = registryName;
 
                         // htpasswd auth when credentials are configured
                         b.Line($"  \"sudo mkdir -p /opt/registry/auth\",");
@@ -990,7 +1002,7 @@ public sealed class AwsProvider : ProviderHclBase
                         // (when co-located with Caddy, the registry domain route is merged into the main Caddyfile)
                         if (caddies.Count == 0)
                         {
-                            var registryCaddyfile = $"{domain} {{\\n  reverse_proxy {registryName}:5000\\n}}";
+                            var registryCaddyfile = $"{registrySubdomain}.${{var.domain}} {{\\n  reverse_proxy {registryName}:5000\\n}}";
                             b.Line($"  \"sudo mkdir -p /opt/caddy\",");
                             b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{registryCaddyfile}\\nCADDYEOF\",");
                             b.Line($"  \"sudo docker run -d --name caddy_registry --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
@@ -1011,6 +1023,8 @@ public sealed class AwsProvider : ProviderHclBase
         foreach (var pool in pools)
         {
             var poolName = pool.ResourceName;
+            // Secrets are shared across all tiers in the same pool — use pool-level name prefix
+            var poolSecretPrefix = TopologyHelpers.SanitizeName(pool.Pool.Name);
 
             // Build depends_on from actual pool secrets (shared across tiers)
             var poolSecrets = TopologyHelpers.CollectPoolSecrets(pool);
@@ -1050,7 +1064,7 @@ public sealed class AwsProvider : ProviderHclBase
                     // Deploy shared services from actual pool images (data-driven)
                     foreach (var image in pool.Pool.Images)
                     {
-                        var cmd = TopologyHelpers.GenerateSwarmServiceCommand(image, poolName, resolver, useSudo: true, pool.Pool.Images);
+                        var cmd = TopologyHelpers.GenerateSwarmServiceCommand(image, poolSecretPrefix, resolver, useSudo: true, pool.Pool.Images);
                         if (cmd != null)
                             b.Line($"  \"{cmd}\",");
                     }
@@ -1164,6 +1178,7 @@ public sealed class AwsProvider : ProviderHclBase
                     {
                         var (imgMin, imgMax) = TopologyHelpers.ParseReplicaRange(image.Config);
                         if (imgMin > 1 || imgMax > 1) continue; // Elastic — gets its own instance
+                        if (TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
 
                         var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
@@ -1221,6 +1236,8 @@ public sealed class AwsProvider : ProviderHclBase
         var elasticImages = TopologyHelpers.CollectElasticImages(hosts, standaloneCaddies);
         foreach (var image in elasticImages)
         {
+            if (TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
+
             var resourceName = TopologyHelpers.SanitizeName(image.Name);
             var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
             var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
@@ -1290,6 +1307,263 @@ public sealed class AwsProvider : ProviderHclBase
             provisioning.Line();
         }
 
+        // Application deployment — private registry images, gated by deploy_apps variable.
+        // These run after image push via a second `terraform apply -var deploy_apps=true`.
+        GenerateAppDeployResources(provisioning, hosts, standaloneCaddies, elasticImages, resolver, topology, allPortAssignments);
+
         return provisioning.ToString();
+    }
+
+    private static void GenerateAppDeployResources(
+        HclBuilder provisioning,
+        List<TopologyHelpers.HostEntry> hosts,
+        List<Container> standaloneCaddies,
+        List<Image> elasticImages,
+        WireResolver resolver,
+        Topology topology,
+        Dictionary<Guid, Dictionary<int, int>> allPortAssignments)
+    {
+        // Hosts with private-registry images
+        foreach (var entry in hosts)
+        {
+            var images = TopologyHelpers.CollectImages(entry.Host);
+            var privateImages = images.Where(i => TopologyHelpers.RequiresPrivateRegistry(i.Kind)).ToList();
+            if (privateImages.Count == 0) continue;
+
+            var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
+            var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
+            var useSwarm = TopologyHelpers.HostNeedsSwarmMode(entry.Host);
+
+            provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}\"", b =>
+            {
+                var countExpr = TopologyHelpers.GetHostCountExpression(entry);
+                if (isReplicated)
+                    b.RawAttribute("count", $"var.deploy_apps ? {countExpr ?? "1"} : 0");
+                else
+                    b.RawAttribute("count", "var.deploy_apps ? 1 : 0");
+
+                b.RawAttribute("depends_on", $"[null_resource.provision_{resourceName}]");
+                b.Line();
+
+                // Force recreation when app version changes
+                b.MapBlock("triggers", tb =>
+                {
+                    tb.RawAttribute("app_version", "var.app_version");
+                });
+                b.Line();
+
+                b.Block("connection", cb =>
+                {
+                    cb.Attribute("type", "ssh");
+                    cb.RawAttribute("host", isReplicated
+                        ? $"aws_instance.{resourceName}[count.index].public_ip"
+                        : $"aws_instance.{resourceName}.public_ip");
+                    cb.Attribute("user", "ubuntu");
+                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                });
+                b.Line();
+
+                b.Block("provisioner \"remote-exec\"", pb =>
+                {
+                    pb.RawAttribute("inline", "[");
+
+                    // Docker login for private registry
+                    b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
+
+                    foreach (var image in privateImages)
+                    {
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var containerName = TopologyHelpers.SanitizeName(image.Name);
+                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver);
+                        var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
+
+                        var publishPorts = meta?.Ports.Length > 0 &&
+                            (TopologyHelpers.HasCrossHostConsumers(image, entry.Host, resolver));
+
+                        // Remove existing container (re-deploy case), pull, and run
+                        b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
+                        b.Line($"  \"sudo docker pull {dockerImage}\",");
+
+                        if (useSwarm)
+                        {
+                            var replicas = TopologyHelpers.GetImageReplicaExpression(image);
+                            var flags = new List<string>
+                            {
+                                $"--name {containerName}",
+                                $"--replicas {replicas}",
+                                "--network xcord-bridge",
+                                "--restart-condition any"
+                            };
+
+                            foreach (var (key, value) in envVars)
+                                flags.Add($"-e {key}={value}");
+
+                            if (meta?.MountPath != null)
+                                flags.Add($"--mount type=volume,source={containerName}_data,target={meta.MountPath}");
+
+                            if (publishPorts && meta != null)
+                            {
+                                foreach (var port in meta.Ports)
+                                    flags.Add($"-p {port}:{port}");
+                            }
+
+                            var flagStr = string.Join(" ", flags);
+                            // For swarm re-deploy, remove service then recreate
+                            b.Line($"  \"sudo docker service rm {containerName} 2>/dev/null || true\",");
+                            b.Line($"  \"sudo docker service create {flagStr} {dockerImage}{cmd}\",");
+                        }
+                        else
+                        {
+                            var flags = new List<string>
+                            {
+                                "-d",
+                                $"--name {containerName}",
+                                "--network xcord-bridge",
+                                "--restart unless-stopped"
+                            };
+
+                            foreach (var (key, value) in envVars)
+                                flags.Add($"-e {key}={value}");
+
+                            if (meta?.MountPath != null)
+                                flags.Add($"-v {containerName}_data:{meta.MountPath}");
+
+                            if (publishPorts && meta != null)
+                            {
+                                foreach (var port in meta.Ports)
+                                    flags.Add($"-p {port}:{port}");
+                            }
+
+                            var flagStr = string.Join(" ", flags);
+                            b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
+                        }
+                    }
+
+                    pb.Line("]");
+                });
+            });
+            provisioning.Line();
+        }
+
+        // Standalone Caddies with private-registry co-located images
+        foreach (var caddy in standaloneCaddies)
+        {
+            var coLocatedImages = TopologyHelpers.CollectImagesExcludingPools(caddy);
+            var privateImages = coLocatedImages
+                .Where(i => TopologyHelpers.RequiresPrivateRegistry(i.Kind))
+                .Where(i =>
+                {
+                    var (min, max) = TopologyHelpers.ParseReplicaRange(i.Config);
+                    return min <= 1 && max <= 1; // Non-elastic only
+                })
+                .ToList();
+            if (privateImages.Count == 0) continue;
+
+            var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
+            var caddyEntry = new TopologyHelpers.HostEntry(caddy);
+
+            provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}_apps\"", b =>
+            {
+                b.RawAttribute("count", "var.deploy_apps ? 1 : 0");
+                b.RawAttribute("depends_on", $"[null_resource.provision_{resourceName}]");
+                b.Line();
+                b.MapBlock("triggers", tb => tb.RawAttribute("app_version", "var.app_version"));
+                b.Line();
+                b.Block("connection", cb =>
+                {
+                    cb.Attribute("type", "ssh");
+                    cb.RawAttribute("host", $"aws_instance.{resourceName}.public_ip");
+                    cb.Attribute("user", "ubuntu");
+                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                });
+                b.Line();
+                b.Block("provisioner \"remote-exec\"", pb =>
+                {
+                    pb.RawAttribute("inline", "[");
+
+                    // Docker login for private registry
+                    b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
+
+                    foreach (var image in privateImages)
+                    {
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var containerName = TopologyHelpers.SanitizeName(image.Name);
+                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, caddyEntry, resolver, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver);
+                        var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
+
+                        b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
+                        b.Line($"  \"sudo docker pull {dockerImage}\",");
+
+                        var flags = new List<string> { "-d", $"--name {containerName}", "--network xcord-bridge", "--restart unless-stopped" };
+                        foreach (var (key, value) in envVars) flags.Add($"-e {key}={value}");
+                        if (allPortAssignments.TryGetValue(image.Id, out var portMap))
+                            foreach (var (containerPort, hostPort) in portMap) flags.Add($"-p {hostPort}:{containerPort}");
+                        if (meta?.MountPath != null) flags.Add($"-v {containerName}_data:{meta.MountPath}");
+
+                        b.Line($"  \"sudo docker run {string.Join(" ", flags)} {dockerImage}{cmd}\",");
+                    }
+                    pb.Line("]");
+                });
+            });
+            provisioning.Line();
+        }
+
+        // Elastic private-registry images
+        foreach (var image in elasticImages)
+        {
+            if (!TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
+
+            var resourceName = TopologyHelpers.SanitizeName(image.Name);
+            var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+            var parentContainer = resolver.FindHostFor(image.Id) ?? resolver.FindCaddyFor(image.Id);
+            var parentEntry = parentContainer != null
+                ? new TopologyHelpers.HostEntry(parentContainer)
+                : new TopologyHelpers.HostEntry(new Container { Name = resourceName });
+            var resolveFrom = new Container { Id = Guid.NewGuid(), Name = resourceName };
+            var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, topology, resolveFrom, allPortAssignments);
+
+            provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}\"", b =>
+            {
+                var varName = $"{resourceName}_replicas";
+                b.RawAttribute("count", $"var.deploy_apps ? var.{varName} : 0");
+                b.RawAttribute("depends_on", $"[aws_instance.{resourceName}]");
+                b.Line();
+                b.MapBlock("triggers", tb => tb.RawAttribute("app_version", "var.app_version"));
+                b.Line();
+                b.Block("connection", cb =>
+                {
+                    cb.Attribute("type", "ssh");
+                    cb.RawAttribute("host", $"aws_instance.{resourceName}[count.index].public_ip");
+                    cb.Attribute("user", "ubuntu");
+                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                });
+                b.Line();
+                b.Block("provisioner \"remote-exec\"", pb =>
+                {
+                    pb.RawAttribute("inline", "[");
+
+                    // Docker login for private registry
+                    b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
+
+                    b.Line($"  \"sudo docker rm -f {resourceName} 2>/dev/null || true\",");
+                    b.Line($"  \"sudo docker pull {dockerImage}\",");
+
+                    var flags = new List<string> { "-d", $"--name {resourceName}", "--network xcord-bridge", "--restart unless-stopped" };
+                    foreach (var (key, value) in envVars) flags.Add($"-e {key}={value}");
+                    if (meta?.MountPath != null) flags.Add($"-v {resourceName}_data:{meta.MountPath}");
+                    if (meta?.Ports.Length > 0)
+                        foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");
+
+                    b.Line($"  \"sudo docker run {string.Join(" ", flags)} {dockerImage}\",");
+                    pb.Line("]");
+                });
+            });
+            provisioning.Line();
+        }
     }
 }

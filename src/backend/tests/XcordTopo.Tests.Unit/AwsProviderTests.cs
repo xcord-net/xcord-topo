@@ -256,8 +256,8 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var provisioning = files["provisioning.tf"];
 
-        // Elastic images should have their own provisioning blocks
-        var hubBlock = ExtractResourceBlock(provisioning, "provision_hub_server");
+        // Elastic images with private-registry images get deploy_* blocks (gated by deploy_apps)
+        var hubBlock = ExtractResourceBlock(provisioning, "deploy_hub_server");
         Assert.NotNull(hubBlock);
         Assert.Contains("hub_server", hubBlock);
 
@@ -357,7 +357,7 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var provisioning = files["provisioning.tf"];
 
-        var hubBlock = ExtractResourceBlock(provisioning, "provision_hub_server");
+        var hubBlock = ExtractResourceBlock(provisioning, "deploy_hub_server");
         Assert.NotNull(hubBlock);
         Assert.Contains("${var.registry_url}/hub:${var.app_version}", hubBlock);
 
@@ -705,8 +705,8 @@ public class AwsProviderTests
         Assert.NotNull(caddyBlock);
         Assert.Contains("docker login", caddyBlock);
 
-        // Elastic hub_server instance needs docker login to pull hub image
-        var hubBlock = ExtractResourceBlock(provisioning, "provision_hub_server");
+        // Elastic hub_server instance needs docker login to pull hub image (in deploy phase)
+        var hubBlock = ExtractResourceBlock(provisioning, "deploy_hub_server");
         Assert.NotNull(hubBlock);
         Assert.Contains("docker login", hubBlock);
     }
@@ -748,8 +748,8 @@ public class AwsProviderTests
         // Should NOT deploy a separate caddy_registry container (port conflict)
         Assert.DoesNotContain("caddy_registry", caddyBlock);
 
-        // The registry domain route should be in the main Caddyfile instead
-        Assert.Contains("docker.xcord.net", caddyBlock);
+        // The registry subdomain route should be in the main Caddyfile instead
+        Assert.Contains("registry.${var.domain}", caddyBlock);
     }
 
     // --- Issue 5: Registry container has data volume mount ---
@@ -817,7 +817,6 @@ public class AwsProviderTests
         {
             Id = Guid.NewGuid(), Name = "registry", Kind = ImageKind.Registry,
             Width = 140, Height = 60, Ports = [],
-            Config = new() { ["domain"] = "docker.xcord.net" },
             Scaling = ImageScaling.Shared
         };
 
@@ -1008,8 +1007,8 @@ public class AwsProviderTests
         var caddyBlock = ExtractResourceBlock(provisioning, "provision_caddy");
         Assert.NotNull(caddyBlock);
 
-        // Caddyfile should have a route for the registry domain
-        Assert.Contains("docker.xcord.net", caddyBlock);
+        // Caddyfile should have a route for the registry subdomain
+        Assert.Contains("registry.${var.domain}", caddyBlock);
         Assert.Contains("reverse_proxy", caddyBlock);
     }
 

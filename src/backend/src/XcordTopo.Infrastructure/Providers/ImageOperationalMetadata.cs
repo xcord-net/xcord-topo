@@ -9,7 +9,8 @@ public sealed record ImageMetadata(
     int SharedOverheadMb,
     string? CommandOverride,
     Dictionary<string, string> EnvVarTemplates,
-    string? DockerImage = null
+    string? DockerImage = null,
+    bool IsPublicEndpoint = false
 );
 
 public sealed record CaddyContainerMetadata(
@@ -69,7 +70,8 @@ public static class ImageOperationalMetadata
             {
                 ["ConnectionStrings__DefaultConnection"] = "{pg}",
                 ["ConnectionStrings__Redis"] = "{redis}"
-            }
+            },
+            IsPublicEndpoint: true
         ),
         [ImageKind.FederationServer] = new(
             Ports: [80],
@@ -95,7 +97,8 @@ public static class ImageOperationalMetadata
             EnvVarTemplates: new()
             {
                 ["LIVEKIT_KEYS"] = "{apiKey}: {apiSecret}"
-            }
+            },
+            IsPublicEndpoint: true
         ),
         [ImageKind.Registry] = new(
             Ports: [5000],
@@ -104,7 +107,8 @@ public static class ImageOperationalMetadata
             SharedOverheadMb: 0,
             CommandOverride: null,
             EnvVarTemplates: new(),
-            DockerImage: "registry:2"
+            DockerImage: "registry:2",
+            IsPublicEndpoint: true
         ),
         [ImageKind.Custom] = new(
             Ports: [],

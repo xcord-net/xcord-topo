@@ -166,10 +166,21 @@ public sealed class WireResolver
     {
         ImageKind.HubServer => "www",
         ImageKind.FederationServer => "*",
-        ImageKind.LiveKit => "livekit",
         ImageKind.Custom => ValidateSubdomain(image.Config.GetValueOrDefault("subdomain")),
-        _ => null
+        _ => DeriveSubdomainFromMetadata(image)
     };
+
+    /// <summary>
+    /// For images with IsPublicEndpoint metadata, derive a subdomain from the image name.
+    /// This keeps all public endpoint routing consistent — no special domain config needed.
+    /// </summary>
+    private static string? DeriveSubdomainFromMetadata(Image image)
+    {
+        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+        if (meta is not { IsPublicEndpoint: true }) return null;
+        var name = image.Name.ToLowerInvariant().Replace(' ', '-').Replace('_', '-');
+        return ValidateSubdomain(name);
+    }
 
     private static string? ValidateSubdomain(string? subdomain)
     {

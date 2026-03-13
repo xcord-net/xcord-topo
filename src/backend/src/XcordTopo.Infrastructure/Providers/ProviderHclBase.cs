@@ -24,11 +24,14 @@ public abstract class ProviderHclBase : ICloudProvider
     public abstract List<ComputePlan> GetPlans();
     public abstract List<CredentialField> GetCredentialSchema();
     public abstract Dictionary<string, string> GenerateHcl(
-        Topology topology, List<TopologyHelpers.PoolSelection>? poolSelections = null);
+        Topology topology,
+        List<TopologyHelpers.PoolSelection>? poolSelections = null,
+        List<TopologyHelpers.InfraSelection>? infraSelections = null);
     public abstract Dictionary<string, string> GenerateHclForContainers(
         Topology topology,
         IReadOnlyList<Container> ownedContainers,
-        List<TopologyHelpers.PoolSelection>? poolSelections = null);
+        List<TopologyHelpers.PoolSelection>? poolSelections = null,
+        List<TopologyHelpers.InfraSelection>? infraSelections = null);
 
     // --- Shared methods (identical across providers) ---
 
@@ -43,7 +46,20 @@ public abstract class ProviderHclBase : ICloudProvider
         return plans.Last().Id;
     }
 
-    protected static ComputePlan ResolvePoolPlan(TopologyHelpers.ComputePoolEntry pool, List<ComputePlan> plans)
+    internal string SelectPlan(string name, int requiredRamMb, List<TopologyHelpers.InfraSelection>? infraSelections)
+    {
+        var selection = infraSelections?.FirstOrDefault(
+            s => string.Equals(s.ImageName, name, StringComparison.OrdinalIgnoreCase));
+        if (selection is not null)
+        {
+            var plans = GetPlans();
+            if (plans.Any(p => p.Id == selection.PlanId))
+                return selection.PlanId;
+        }
+        return SelectPlan(requiredRamMb);
+    }
+
+    internal static ComputePlan ResolvePoolPlan(TopologyHelpers.ComputePoolEntry pool, List<ComputePlan> plans)
     {
         if (pool.SelectedPlanId is not null)
         {
@@ -52,7 +68,8 @@ public abstract class ProviderHclBase : ICloudProvider
         }
 
         var fedMemory = pool.TierProfile.ImageSpecs.GetValueOrDefault("FederationServer")?.MemoryMb ?? 256;
-        var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb();
+        var poolImages = TopologyHelpers.CollectImages(pool.Pool);
+        var sharedOverhead = ImageOperationalMetadata.CalculateSharedOverheadMb(poolImages);
         var minHostRam = sharedOverhead + fedMemory;
         return plans.FirstOrDefault(p => p.MemoryMb >= minHostRam) ?? plans.Last();
     }

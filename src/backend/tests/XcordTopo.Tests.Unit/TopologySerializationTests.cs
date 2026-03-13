@@ -259,9 +259,9 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl();
         var provisioning = files["provisioning_aws.tf"];
 
-        // hub_server is an elastic image — it needs provisioning
-        Assert.Contains("provision_hub_server", provisioning);
-        // live_kit is an elastic image — it needs provisioning
+        // hub_server is a private-registry image — deployed via deploy_apps phase
+        Assert.Contains("deploy_hub_server", provisioning);
+        // live_kit is a public image — provisioned directly
         Assert.Contains("provision_live_kit", provisioning);
     }
 
@@ -444,9 +444,9 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl();
         var provisioning = files["provisioning_aws.tf"];
 
-        // Find hub_server provisioning
-        var hubIdx = provisioning.IndexOf("provision_hub_server");
-        Assert.True(hubIdx >= 0, "Expected provision_hub_server resource");
+        // Find hub_server deploy resource (private-registry images use deploy_apps phase)
+        var hubIdx = provisioning.IndexOf("deploy_hub_server");
+        Assert.True(hubIdx >= 0, "Expected deploy_hub_server resource");
         var hubSection = provisioning[hubIdx..];
 
         // Connection string must use Caddy's private IP, not "pg_hub" container name
@@ -626,7 +626,7 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl("production-elastic.json");
         var provisioning = files["provisioning_aws.tf"];
 
-        var hubIdx = provisioning.IndexOf("provision_hub_server");
+        var hubIdx = provisioning.IndexOf("deploy_hub_server");
         Assert.True(hubIdx >= 0);
         var hubSection = provisioning[hubIdx..];
 
@@ -773,7 +773,9 @@ public class TopologySerializationTests : IDisposable
         // hub_server (1-3) and live_kit (1-10) are elastic — they get their own AWS instances
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
-        Assert.Contains("provision_hub_server", provisioning);
+        // hub_server is a private-registry image — deployed via deploy_apps phase
+        Assert.Contains("deploy_hub_server", provisioning);
+        // live_kit is a public image — provisioned directly
         Assert.Contains("provision_live_kit", provisioning);
     }
 
@@ -1045,11 +1047,11 @@ public class TopologySerializationTests : IDisposable
     public void SimpleFixture_HubServerImage_UsesRegistryVariable()
     {
         // HubServer is an xcord image — it must pull from the configurable registry,
-        // not a hardcoded ghcr.io URL. The registry_url variable defaults to docker.xcord.net.
+        // not a hardcoded ghcr.io URL. Deployed via deploy_apps phase (post-push).
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
 
-        var hubIdx = provisioning.IndexOf("provision_hub_server");
+        var hubIdx = provisioning.IndexOf("deploy_hub_server");
         Assert.True(hubIdx >= 0);
         var hubSection = provisioning[hubIdx..];
 
@@ -1137,8 +1139,8 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl("production-simple.json");
         var dns = files["dns_linode.tf"];
 
-        // Registry at docker.xcord.net needs a DNS A record
-        Assert.Contains("docker", dns);
+        // Registry needs a DNS A record using its name-derived subdomain
+        Assert.Contains("registry", dns);
     }
 
     // --- Issue 14: iptables rate limit 100/min too restrictive ---

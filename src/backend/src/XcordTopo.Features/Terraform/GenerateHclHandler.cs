@@ -9,11 +9,17 @@ using XcordTopo.Infrastructure.Validation;
 namespace XcordTopo.Features.Terraform;
 
 public sealed record GenerateHclRequest(
-    Guid TopologyId, List<TopologyHelpers.PoolSelection>? PoolSelections = null);
+    Guid TopologyId,
+    List<TopologyHelpers.PoolSelection>? PoolSelections = null,
+    List<TopologyHelpers.InfraSelection>? InfraSelections = null);
 
-public sealed record GenerateHclBody(List<TopologyHelpers.PoolSelection>? PoolSelections);
+public sealed record GenerateHclBody(
+    List<TopologyHelpers.PoolSelection>? PoolSelections,
+    List<TopologyHelpers.InfraSelection>? InfraSelections);
 
-public sealed record GenerateHclResponse(Dictionary<string, string> Files);
+public sealed record GenerateHclResponse(
+    Dictionary<string, string> Files,
+    ResourceSummary Summary);
 
 public sealed class GenerateHclHandler(
     ITopologyStore store,
@@ -31,15 +37,16 @@ public sealed class GenerateHclHandler(
         var validation = validator.ValidateFull(topology);
         if (!validation.CanDeploy)
         {
-            var summary = string.Join("; ", validation.Errors.Select(e => e.Message));
+            var errorSummary = string.Join("; ", validation.Errors.Select(e => e.Message));
             return Error.Validation("VALIDATION_FAILED",
-                $"Topology has {validation.Errors.Count} validation error(s): {summary}");
+                $"Topology has {validation.Errors.Count} validation error(s): {errorSummary}");
         }
 
-        var files = hclGenerator.Generate(topology, request.PoolSelections);
+        var files = hclGenerator.Generate(topology, request.PoolSelections, request.InfraSelections);
         await hclFileManager.WriteFilesAsync(request.TopologyId, files, ct);
 
-        return new GenerateHclResponse(files);
+        var summary = hclGenerator.BuildResourceSummary(topology, request.PoolSelections, request.InfraSelections);
+        return new GenerateHclResponse(files, summary);
     }
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)
@@ -47,14 +54,16 @@ public sealed class GenerateHclHandler(
         return app.MapPost("/api/v1/topologies/{topologyId:guid}/terraform/generate", async (
             Guid topologyId, HttpRequest httpRequest, GenerateHclHandler handler, CancellationToken ct) =>
         {
-            List<TopologyHelpers.PoolSelection>? selections = null;
+            List<TopologyHelpers.PoolSelection>? poolSelections = null;
+            List<TopologyHelpers.InfraSelection>? infraSelections = null;
             if (httpRequest.ContentLength is > 0)
             {
                 var body = await httpRequest.ReadFromJsonAsync<GenerateHclBody>(ct);
-                selections = body?.PoolSelections;
+                poolSelections = body?.PoolSelections;
+                infraSelections = body?.InfraSelections;
             }
             return await handler.ExecuteAsync(
-                new GenerateHclRequest(topologyId, selections), ct);
+                new GenerateHclRequest(topologyId, poolSelections, infraSelections), ct);
         })
         .WithName("GenerateHcl")
         .WithTags("Terraform");

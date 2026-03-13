@@ -1006,10 +1006,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   // If restoring to a step beyond 'provider', reload API data for that step
   const restoreWizardState = async () => {
     let restoredStep = saved.step;
-    // Don't restore to execute or migrate steps — fall back to review
+    // Don't restore to execute or migrate steps - fall back to review
     if (restoredStep === 'execute' || restoredStep === 'migrate') {
       restoredStep = 'review';
-      // Reset deploy mode — it will be recalculated at the review step
+      // Reset deploy mode - it will be recalculated at the review step
       setDeployMode('fresh');
     }
     if (restoredStep === 'provider' || !saved.provider) {
@@ -1027,7 +1027,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       const stepOrder: DeployStep[] = ['provider', 'configure', 'validate', 'hosting', 'review', 'migrate', 'execute'];
       const restoredIdx = stepOrder.indexOf(restoredStep);
 
-      // Save current canvas state before validating — the topology may have changed since last save
+      // Save current canvas state before validating - the topology may have changed since last save
       if (restoredIdx >= stepOrder.indexOf('validate')) {
         try {
           await saveTopology(topo.topology);
@@ -1961,7 +1961,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                 <div class="space-y-2">
                   <h3 class="text-xs font-semibold text-topo-text-primary uppercase tracking-wide">Pools</h3>
                   <p class="text-[11px] text-topo-text-muted bg-amber-500/5 border border-amber-500/20 rounded px-2.5 py-1.5">
-                    Pool infrastructure is deferred — created when the hub provisions the first tenant or data service.
+                    Pool infrastructure is deferred - created when the hub provisions the first tenant or data service.
                   </p>
                 </div>
 
@@ -2122,13 +2122,13 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                   'bg-topo-warning/10 text-topo-warning'
                 }`}>
                   <Show when={deployMode() === 'fresh'}>
-                    Fresh deployment — no existing infrastructure detected.
+                    Fresh deployment - no existing infrastructure detected.
                   </Show>
                   <Show when={deployMode() === 'update'}>
-                    Update — this topology is already deployed ({activeDeployments().find(d => d.topologyId === topo.topology.id)?.resourceCount ?? 0} resources).
+                    Update - this topology is already deployed ({activeDeployments().find(d => d.topologyId === topo.topology.id)?.resourceCount ?? 0} resources).
                   </Show>
                   <Show when={deployMode() === 'migrate'}>
-                    Migration available — "{activeDeployments().find(d => d.topologyId !== topo.topology.id)?.topologyName}" is currently deployed.
+                    Migration available - "{activeDeployments().find(d => d.topologyId !== topo.topology.id)?.topologyName}" is currently deployed.
                   </Show>
                   <Show when={topo.topology.lastDeployedAt}>
                     <div class="mt-1 text-topo-text-muted">

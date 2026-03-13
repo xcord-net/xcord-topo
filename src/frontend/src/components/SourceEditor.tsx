@@ -99,7 +99,7 @@ const SourceEditor: Component = () => {
             history_.push(topo.getSnapshot());
             topo.load(parsed);
           } catch {
-            // Invalid JSON — don't apply, user is still typing
+            // Invalid JSON - don't apply, user is still typing
           }
         }),
       ],

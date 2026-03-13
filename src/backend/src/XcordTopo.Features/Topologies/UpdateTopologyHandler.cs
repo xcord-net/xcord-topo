@@ -22,11 +22,11 @@ public sealed class UpdateTopologyHandler(
     public async Task<Result<Topology>> Handle(UpdateTopologyRequest request, CancellationToken ct)
     {
         var existing = await store.GetAsync(request.Topology.Id, ct);
-        // Upsert — preserve CreatedAt if topology already exists, otherwise set it now
+        // Upsert - preserve CreatedAt if topology already exists, otherwise set it now
         request.Topology.CreatedAt = existing?.CreatedAt ?? DateTimeOffset.UtcNow;
         await store.SaveAsync(request.Topology, ct);
 
-        // Best-effort HCL generation — write .tf files alongside the topology JSON
+        // Best-effort HCL generation - write .tf files alongside the topology JSON
         // so the full state is on disk and doesn't depend on browser storage.
         // Silently skip if generation fails (e.g. incomplete topology).
         try

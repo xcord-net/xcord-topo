@@ -62,7 +62,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     "Click your profile icon → API Tokens",
                     "Click \"Create a Personal Access Token\"",
                     "Set expiry and select scopes (see permissions below)",
-                    "Copy the token — it's only shown once"
+                    "Copy the token - it's only shown once"
                 ],
                 Permissions = "Linodes: Read/Write, Domains: Read/Write, Firewalls: Read/Write, Volumes: Read/Write",
                 Url = "https://cloud.linode.com/profile/tokens"
@@ -228,7 +228,7 @@ public sealed class LinodeProvider : ProviderHclBase
                 });
                 dns.Line();
 
-                // Caddy containers handle subdomain routing — create wildcard + bare domain records
+                // Caddy containers handle subdomain routing - create wildcard + bare domain records
                 if (container.Kind == ContainerKind.Caddy && !wildcardCreated)
                 {
                     dns.Block($"resource \"linode_domain_record\" \"wildcard\"", b =>
@@ -481,7 +481,7 @@ public sealed class LinodeProvider : ProviderHclBase
             instances.Line();
         }
 
-        // ComputePool instances — one resource block per tier
+        // ComputePool instances - one resource block per tier
         var allPlans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         foreach (var pool in pools)
         {
@@ -552,7 +552,7 @@ public sealed class LinodeProvider : ProviderHclBase
     {
         var firewall = new HclBuilder();
 
-        // Check entire topology for LiveKit — it may be on hosts, standalone Caddies, or pools
+        // Check entire topology for LiveKit - it may be on hosts, standalone Caddies, or pools
         var hasLiveKit = topology.Containers.Any(HasLiveKitRecursive);
 
         static bool HasLiveKitRecursive(Container c)
@@ -635,7 +635,7 @@ public sealed class LinodeProvider : ProviderHclBase
                 refs.Add($"linode_instance.{pool.ResourceName}[*].id");
             }
 
-            // Elastic images get their own instances — include them in the firewall
+            // Elastic images get their own instances - include them in the firewall
             var elasticImages = TopologyHelpers.CollectElasticImages(hosts, standaloneCaddies);
             foreach (var image in elasticImages)
             {
@@ -709,7 +709,7 @@ public sealed class LinodeProvider : ProviderHclBase
 
                     if (useSwarm)
                     {
-                        // Swarm mode — enables replicated services with built-in DNS load balancing
+                        // Swarm mode - enables replicated services with built-in DNS load balancing
                         b.Line("  \"docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')\",");
                         b.Line("  \"docker network create --driver overlay --attachable xcord-bridge 2>/dev/null || true\",");
                     }
@@ -862,11 +862,11 @@ public sealed class LinodeProvider : ProviderHclBase
             provisioning.Line();
         }
 
-        // ComputePool provisioning — one Swarm cluster per tier
+        // ComputePool provisioning - one Swarm cluster per tier
         foreach (var pool in pools)
         {
             var poolName = pool.ResourceName;
-            // Secrets are shared across all tiers in the same pool — use pool-level name prefix
+            // Secrets are shared across all tiers in the same pool - use pool-level name prefix
             var poolSecretPrefix = TopologyHelpers.SanitizeName(pool.Pool.Name);
 
             // Build depends_on from actual pool secrets (shared across tiers)
@@ -876,7 +876,7 @@ public sealed class LinodeProvider : ProviderHclBase
                 ? $"[linode_instance.{poolName}]"
                 : $"[linode_instance.{poolName}, {secretDeps}]";
 
-            // Manager provisioning (host 0) — init Swarm + deploy shared services
+            // Manager provisioning (host 0) - init Swarm + deploy shared services
             provisioning.Block($"resource \"null_resource\" \"provision_{poolName}_manager\"", b =>
             {
                 b.RawAttribute("count", $"var.{poolName}_host_count > 0 ? 1 : 0");
@@ -941,7 +941,7 @@ public sealed class LinodeProvider : ProviderHclBase
             });
             provisioning.Line();
 
-            // Worker provisioning (hosts 1+) — join Swarm
+            // Worker provisioning (hosts 1+) - join Swarm
             provisioning.Block($"resource \"null_resource\" \"provision_{poolName}_workers\"", b =>
             {
                 b.RawAttribute("count", $"var.{poolName}_host_count > 1 ? var.{poolName}_host_count - 1 : 0");
@@ -1019,7 +1019,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     foreach (var image in coLocatedImages)
                     {
                         var (imgMin, imgMax) = TopologyHelpers.ParseReplicaRange(image.Config);
-                        if (imgMin > 1 || imgMax > 1) continue; // Elastic — gets its own instance
+                        if (imgMin > 1 || imgMax > 1) continue; // Elastic - gets its own instance
                         if (TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
 
                         var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
@@ -1073,7 +1073,7 @@ public sealed class LinodeProvider : ProviderHclBase
             provisioning.Line();
         }
 
-        // Elastic image provisioning — images with replicas > 1 get their own instances
+        // Elastic image provisioning - images with replicas > 1 get their own instances
         var elasticImages = TopologyHelpers.CollectElasticImages(hosts, standaloneCaddies);
         foreach (var image in elasticImages)
         {
@@ -1088,7 +1088,7 @@ public sealed class LinodeProvider : ProviderHclBase
             var parentEntry = parentContainer != null
                 ? new TopologyHelpers.HostEntry(parentContainer)
                 : new TopologyHelpers.HostEntry(new Container { Name = resourceName });
-            // Elastic images run on their own instances — use a synthetic source host
+            // Elastic images run on their own instances - use a synthetic source host
             // so ResolveServiceHost knows this is NOT co-located with the parent
             var resolveFrom = new Container { Id = Guid.NewGuid(), Name = resourceName };
             var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, topology, resolveFrom, allPortAssignments);
@@ -1148,7 +1148,7 @@ public sealed class LinodeProvider : ProviderHclBase
             provisioning.Line();
         }
 
-        // Application deployment — private registry images, gated by deploy_apps variable.
+        // Application deployment - private registry images, gated by deploy_apps variable.
         // These run after image push via a second `terraform apply -var deploy_apps=true`.
         GenerateAppDeployResources(provisioning, hosts, standaloneCaddies, elasticImages, resolver, topology, allPortAssignments);
 
@@ -1244,7 +1244,7 @@ public sealed class LinodeProvider : ProviderHclBase
 
                         if (useSwarm)
                         {
-                            // Rolling update — zero downtime
+                            // Rolling update - zero downtime
                             b.Line($"  \"docker service update --image {dockerImage} {containerName} 2>/dev/null || docker service create --name {containerName} --replicas {TopologyHelpers.GetImageReplicaExpression(image)} --network xcord-bridge --restart-condition any {string.Join(" ", envVars.Select(e => $"-e '{e.Key}={e.Value}'"))}{(meta?.MountPath != null ? $" --mount type=volume,source={containerName}_data,target={meta.MountPath}" : "")}{(publishPorts && meta != null ? string.Concat(meta.Ports.Select(p => $" -p {p}:{p}")) : "")} {dockerImage}{cmd}\",");
                         }
                         else
@@ -1376,7 +1376,7 @@ public sealed class LinodeProvider : ProviderHclBase
                 {
                     pb.RawAttribute("inline", "[");
 
-                    // Elastic images get dedicated instances — install Docker (idempotent)
+                    // Elastic images get dedicated instances - install Docker (idempotent)
                     b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
                     b.Line("  \"systemctl enable docker\",");
                     b.Line("  \"systemctl start docker\",");

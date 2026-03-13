@@ -126,7 +126,7 @@ public class CollectPublicEndpointsTests
     [Fact]
     public void CollectPublicEndpoints_NonPublicImages_NotIncluded()
     {
-        // PostgreSQL has IsPublicEndpoint = false — should never appear in endpoints
+        // PostgreSQL has IsPublicEndpoint = false - should never appear in endpoints
         var pg = new Image
         {
             Id = Guid.NewGuid(), Name = "pg", Kind = ImageKind.PostgreSQL,

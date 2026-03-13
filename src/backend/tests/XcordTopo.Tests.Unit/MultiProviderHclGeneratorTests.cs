@@ -206,7 +206,7 @@ public class MultiProviderHclGeneratorTests
         Assert.Contains("linode_domain_record\" \"caddy\"", dns);
         Assert.Contains("linode_domain_record\" \"wildcard\"", dns);
 
-        // ComputePool should NOT get a DNS record — it's internal infrastructure
+        // ComputePool should NOT get a DNS record - it's internal infrastructure
         // accessed via Caddy reverse proxy, not direct DNS
         Assert.DoesNotContain("compute_pool", dns);
     }
@@ -220,7 +220,7 @@ public class MultiProviderHclGeneratorTests
         Assert.Contains("dns_linode.tf", files.Keys);
         var dns = files["dns_linode.tf"];
 
-        // DataPool should NOT get a DNS record — PG/Redis/MinIO are backend infra
+        // DataPool should NOT get a DNS record - PG/Redis/MinIO are backend infra
         Assert.DoesNotContain("data_pool", dns);
     }
 
@@ -249,7 +249,7 @@ public class MultiProviderHclGeneratorTests
         var vars = files["variables.tf"];
 
         // topology.ServiceKeys has smtp_host, smtp_username, smtp_from_address, smtp_from_name
-        // but NOT smtp_password or smtp_port — all group members should be emitted
+        // but NOT smtp_password or smtp_port - all group members should be emitted
         Assert.Contains("variable \"smtp_host\"", vars);
         Assert.Contains("variable \"smtp_password\"", vars);
         Assert.Contains("variable \"smtp_port\"", vars);
@@ -369,7 +369,7 @@ public class MultiProviderHclGeneratorTests
             ]
         };
 
-        // Caddy (standalone — becomes its own host)
+        // Caddy (standalone - becomes its own host)
         var caddy = new Container
         {
             Id = Guid.NewGuid(), Name = "Caddy", Kind = ContainerKind.Caddy,
@@ -494,7 +494,7 @@ public class MultiProviderHclGeneratorTests
 
         // Registry variables are hardcoded per-provider in GenerateVariables(),
         // so GenerateServiceKeyVariables should NOT emit them again.
-        // Count occurrences — each should appear exactly once.
+        // Count occurrences - each should appear exactly once.
         foreach (var key in files.Keys.Where(k => k.StartsWith("variables")))
         {
             var content = files[key];

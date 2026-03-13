@@ -47,7 +47,7 @@ public sealed class GetHostingOptionsHandler(
 
         var units = DeploymentUnitBuilder.Build(topology);
 
-        // Build infra image costs from InstanceUnits (skip DataPool — shown in pools section)
+        // Build infra image costs from InstanceUnits (skip DataPool - shown in pools section)
         var infraImages = new List<InfraImageCost>();
         foreach (var unit in units)
         {
@@ -84,7 +84,7 @@ public sealed class GetHostingOptionsHandler(
         // Build pool hosting options
         var pools = new List<PoolHostingEntry>();
 
-        // ComputePool — one entry per tier profile so each tier gets its own plan selector
+        // ComputePool - one entry per tier profile so each tier gets its own plan selector
         foreach (var unit in units)
         {
             if (unit is not PoolUnit pool) continue;
@@ -120,7 +120,7 @@ public sealed class GetHostingOptionsHandler(
             }
         }
 
-        // DataPool — no tier profile, just plan selection for the data host
+        // DataPool - no tier profile, just plan selection for the data host
         foreach (var unit in units)
         {
             if (unit is not InstanceUnit inst) continue;

@@ -66,7 +66,7 @@ public sealed class AwsProvider : ProviderHclBase
                     "Copy both the Access Key ID and Secret Access Key"
                 ],
                 Permissions = "EC2: RunInstances, TerminateInstances, DescribeInstances, DescribeImages, DescribeInstanceTypes, CreateTags, CreateKeyPair, DeleteKeyPair, DescribeKeyPairs | VPC: CreateVpc, DeleteVpc, DescribeVpcs, ModifyVpcAttribute, CreateSubnet, DeleteSubnet, DescribeSubnets, CreateInternetGateway, DeleteInternetGateway, AttachInternetGateway, DetachInternetGateway, DescribeInternetGateways, CreateRouteTable, DeleteRouteTable, CreateRoute, DescribeRouteTables, AssociateRouteTable, DisassociateRouteTable | Security Groups: CreateSecurityGroup, DeleteSecurityGroup, DescribeSecurityGroups, AuthorizeSecurityGroupIngress, AuthorizeSecurityGroupEgress, RevokeSecurityGroupIngress, RevokeSecurityGroupEgress (or use the AmazonEC2FullAccess managed policy)",
-                Note = "AWS will recommend using IAM roles instead — this is expected. IAM roles are for workloads running on AWS infrastructure; static access keys are the correct choice for external management tools.",
+                Note = "AWS will recommend using IAM roles instead - this is expected. IAM roles are for workloads running on AWS infrastructure; static access keys are the correct choice for external management tools.",
                 Url = "https://console.aws.amazon.com/iam/home#/users"
             },
             Validation = [new() { Type = "pattern", Value = @"^AKIA[A-Z0-9]{16}$", Message = "Must be a valid AWS access key ID (starts with AKIA, 20 characters)" }]
@@ -86,9 +86,9 @@ public sealed class AwsProvider : ProviderHclBase
                 [
                     "This is shown only once when creating the access key",
                     "If you lost it, create a new access key pair",
-                    "Store it securely — it grants full API access"
+                    "Store it securely - it grants full API access"
                 ],
-                Permissions = "Same as Access Key ID — they are a pair",
+                Permissions = "Same as Access Key ID - they are a pair",
                 Url = "https://console.aws.amazon.com/iam/home#/users"
             },
             Validation = [new() { Type = "minLength", Value = "20", Message = "Secret access key must be at least 20 characters" }]
@@ -312,7 +312,7 @@ public sealed class AwsProvider : ProviderHclBase
                 });
                 dns.Line();
 
-                // Caddy handles subdomain routing — add wildcard + bare domain records
+                // Caddy handles subdomain routing - add wildcard + bare domain records
                 if (container.Kind == ContainerKind.Caddy && !wildcardCreated)
                 {
                     dns.Block($"resource \"aws_route53_record\" \"wildcard\"", b =>
@@ -562,7 +562,7 @@ public sealed class AwsProvider : ProviderHclBase
         var name = TopologyHelpers.SanitizeName(topology.Name);
         var sg = new HclBuilder();
 
-        // Check entire topology for LiveKit — it may be on hosts, standalone Caddies, or elastic
+        // Check entire topology for LiveKit - it may be on hosts, standalone Caddies, or elastic
         var hasLiveKit = topology.Containers.Any(c => HasLiveKitRecursive(c));
 
         static bool HasLiveKitRecursive(Container c)
@@ -743,7 +743,7 @@ public sealed class AwsProvider : ProviderHclBase
             instances.Line();
         }
 
-        // ComputePool instances — one resource block per tier
+        // ComputePool instances - one resource block per tier
         var allPlans = GetPlans().OrderBy(p => p.PriceMonthly).ToList();
         foreach (var pool in pools)
         {
@@ -914,7 +914,7 @@ public sealed class AwsProvider : ProviderHclBase
 
                     if (useSwarm)
                     {
-                        // Swarm mode — enables replicated services with built-in DNS load balancing
+                        // Swarm mode - enables replicated services with built-in DNS load balancing
                         b.Line("  \"sudo docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')\",");
                         b.Line("  \"sudo docker network create --driver overlay --attachable xcord-bridge 2>/dev/null || true\",");
                     }
@@ -1086,11 +1086,11 @@ public sealed class AwsProvider : ProviderHclBase
             provisioning.Line();
         }
 
-        // ComputePool provisioning — one Swarm cluster per tier
+        // ComputePool provisioning - one Swarm cluster per tier
         foreach (var pool in pools)
         {
             var poolName = pool.ResourceName;
-            // Secrets are shared across all tiers in the same pool — use pool-level name prefix
+            // Secrets are shared across all tiers in the same pool - use pool-level name prefix
             var poolSecretPrefix = TopologyHelpers.SanitizeName(pool.Pool.Name);
 
             // Build depends_on from actual pool secrets (shared across tiers)
@@ -1100,7 +1100,7 @@ public sealed class AwsProvider : ProviderHclBase
                 ? $"[aws_instance.{poolName}]"
                 : $"[aws_instance.{poolName}, {secretDeps}]";
 
-            // Manager provisioning (host 0) — init Swarm + deploy shared services
+            // Manager provisioning (host 0) - init Swarm + deploy shared services
             provisioning.Block($"resource \"null_resource\" \"provision_{poolName}_manager\"", b =>
             {
                 b.RawAttribute("count", $"var.{poolName}_host_count > 0 ? 1 : 0");
@@ -1166,7 +1166,7 @@ public sealed class AwsProvider : ProviderHclBase
             });
             provisioning.Line();
 
-            // Worker provisioning (hosts 1+) — join Swarm
+            // Worker provisioning (hosts 1+) - join Swarm
             provisioning.Block($"resource \"null_resource\" \"provision_{poolName}_workers\"", b =>
             {
                 b.RawAttribute("count", $"var.{poolName}_host_count > 1 ? var.{poolName}_host_count - 1 : 0");
@@ -1246,7 +1246,7 @@ public sealed class AwsProvider : ProviderHclBase
                     foreach (var image in coLocatedImages)
                     {
                         var (imgMin, imgMax) = TopologyHelpers.ParseReplicaRange(image.Config);
-                        if (imgMin > 1 || imgMax > 1) continue; // Elastic — gets its own instance
+                        if (imgMin > 1 || imgMax > 1) continue; // Elastic - gets its own instance
                         if (TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
 
                         var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
@@ -1303,7 +1303,7 @@ public sealed class AwsProvider : ProviderHclBase
             provisioning.Line();
         }
 
-        // Elastic image provisioning — images with replicas > 1 get their own instances
+        // Elastic image provisioning - images with replicas > 1 get their own instances
         var elasticImages = TopologyHelpers.CollectElasticImages(hosts, standaloneCaddies);
         foreach (var image in elasticImages)
         {
@@ -1318,7 +1318,7 @@ public sealed class AwsProvider : ProviderHclBase
             var parentEntry = parentContainer != null
                 ? new TopologyHelpers.HostEntry(parentContainer)
                 : new TopologyHelpers.HostEntry(new Container { Name = resourceName });
-            // Elastic images run on their own instances — use a synthetic source host
+            // Elastic images run on their own instances - use a synthetic source host
             // so ResolveServiceHost knows this is NOT co-located with the parent
             var resolveFrom = new Container { Id = Guid.NewGuid(), Name = resourceName };
             var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, topology, resolveFrom, allPortAssignments);
@@ -1379,7 +1379,7 @@ public sealed class AwsProvider : ProviderHclBase
             provisioning.Line();
         }
 
-        // Application deployment — private registry images, gated by deploy_apps variable.
+        // Application deployment - private registry images, gated by deploy_apps variable.
         // These run after image push via a second `terraform apply -var deploy_apps=true`.
         GenerateAppDeployResources(provisioning, hosts, standaloneCaddies, elasticImages, resolver, topology, allPortAssignments);
 
@@ -1450,7 +1450,7 @@ public sealed class AwsProvider : ProviderHclBase
                 {
                     pb.RawAttribute("inline", "[");
 
-                    // Install Docker if this host had no provision resource (idempotent — skips if already installed)
+                    // Install Docker if this host had no provision resource (idempotent - skips if already installed)
                     if (!hasProvisionResource)
                     {
                         b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
@@ -1480,7 +1480,7 @@ public sealed class AwsProvider : ProviderHclBase
 
                         if (useSwarm)
                         {
-                            // Rolling update — zero downtime
+                            // Rolling update - zero downtime
                             b.Line($"  \"sudo docker service update --image {dockerImage} {containerName} 2>/dev/null || sudo docker service create --name {containerName} --replicas {TopologyHelpers.GetImageReplicaExpression(image)} --network xcord-bridge --restart-condition any {string.Join(" ", envVars.Select(e => $"-e '{e.Key}={e.Value}'"))}{(meta?.MountPath != null ? $" --mount type=volume,source={containerName}_data,target={meta.MountPath}" : "")}{(publishPorts && meta != null ? string.Concat(meta.Ports.Select(p => $" -p {p}:{p}")) : "")} {dockerImage}{cmd}\",");
                         }
                         else
@@ -1626,7 +1626,7 @@ public sealed class AwsProvider : ProviderHclBase
                 {
                     pb.RawAttribute("inline", "[");
 
-                    // Elastic images get dedicated instances — install Docker (idempotent)
+                    // Elastic images get dedicated instances - install Docker (idempotent)
                     b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
                     b.Line("  \"sudo usermod -aG docker ubuntu\",");
                     b.Line("  \"sudo systemctl enable docker\",");

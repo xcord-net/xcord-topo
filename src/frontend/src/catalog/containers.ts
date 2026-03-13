@@ -24,7 +24,7 @@ export const containerDefinitions: ContainerDefinition[] = [
       { key: 'backupFrequency', label: 'Backup Frequency', placeholder: 'daily' },
       { key: 'backupRetention', label: 'Backup Retention', placeholder: '7' },
     ],
-    description: 'Server or VM — deployment decides the architecture',
+    description: 'Server or VM - deployment decides the architecture',
   },
   {
     kind: 'Caddy',
@@ -106,6 +106,6 @@ export const containerDefinitions: ContainerDefinition[] = [
       ] },
       { key: 'domain', label: 'Domain', placeholder: 'example.com' },
     ],
-    description: 'DNS zone — wire hosts here to create A records',
+    description: 'DNS zone - wire hosts here to create A records',
   },
 ];

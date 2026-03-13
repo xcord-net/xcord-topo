@@ -54,10 +54,10 @@ public sealed class FileCredentialStoreTests : IDisposable
         Assert.Contains("linode_region", status.SetVariables);
         Assert.Contains("domain", status.SetVariables);
 
-        // Token is sensitive — should NOT appear in non-sensitive values
+        // Token is sensitive - should NOT appear in non-sensitive values
         Assert.DoesNotContain("linode_token", status.NonSensitiveValues.Keys);
 
-        // Region and domain are NOT sensitive — should appear
+        // Region and domain are NOT sensitive - should appear
         Assert.Equal("us-east", status.NonSensitiveValues["linode_region"]);
         Assert.Equal("example.com", status.NonSensitiveValues["domain"]);
     }

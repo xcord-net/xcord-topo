@@ -155,7 +155,7 @@ public sealed class TopologyMatcher
             }
             else if (sources.Count == 1 && targets.Count > 1)
             {
-                // 1:N split — use wire consumer analysis
+                // 1:N split - use wire consumer analysis
                 var s = sources[0];
                 matchedSourceIds.Add(s.Image.Id);
 
@@ -169,7 +169,7 @@ public sealed class TopologyMatcher
             }
             else
             {
-                // N:M — match by name first, then by position
+                // N:M - match by name first, then by position
                 MatchByName(sources, targets, matches, matchedSourceIds, matchedTargetIds);
             }
         }
@@ -268,7 +268,7 @@ public sealed class TopologyMatcher
             }
         }
 
-        // Any target not matched by consumer analysis — match by position or mark as Added
+        // Any target not matched by consumer analysis - match by position or mark as Added
         foreach (var t in targets)
         {
             if (matchedTargets.Contains(t.Image.Id)) continue;
@@ -690,7 +690,7 @@ public sealed class TopologyMatcher
             });
         }
 
-        // Variable values — check target topology for $VAR references
+        // Variable values - check target topology for $VAR references
         var varReferences = new HashSet<string>();
         foreach (var fi in targetImages)
         {

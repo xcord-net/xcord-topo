@@ -119,7 +119,7 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
             {
                 channel.Writer.Complete();
                 _runningProcesses.TryRemove(topologyId, out _);
-                // Don't remove reader here — the SSE stream handler needs to read buffered output
+                // Don't remove reader here - the SSE stream handler needs to read buffered output
                 // even after the process exits. The reader is cleaned up by ConsumeOutputStream().
             }
         }, CancellationToken.None);

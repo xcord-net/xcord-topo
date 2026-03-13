@@ -104,7 +104,7 @@ const Canvas: Component = () => {
     if (intent && interaction.mode !== 'dragging') {
       const dist = distance({ x: e.clientX, y: e.clientY }, intent.startPos);
       if (dist >= 5) {
-        // Exceeded threshold — start move drag
+        // Exceeded threshold - start move drag
         history.push(topo.getSnapshot());
         const nodeIds = interaction.selectedNodeIds.has(intent.nodeId)
           ? [...interaction.selectedNodeIds]
@@ -373,7 +373,7 @@ const Canvas: Component = () => {
             interaction.select(container.id);
           }
         } else {
-          // Image — must drop on a container
+          // Image - must drop on a container
           if (drag.dropTargetId) {
             const def = imageDefinitions.find(d => d.kind === src.kind);
             if (def) {
@@ -397,7 +397,7 @@ const Canvas: Component = () => {
               interaction.select(image.id);
             }
           }
-          // else: dropped on empty canvas with image — do nothing
+          // else: dropped on empty canvas with image - do nothing
         }
       }
       interaction.endDrag();

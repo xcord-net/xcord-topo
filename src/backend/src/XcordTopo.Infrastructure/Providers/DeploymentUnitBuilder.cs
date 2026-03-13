@@ -6,8 +6,8 @@ namespace XcordTopo.Infrastructure.Providers;
 /// Walks a topology tree and produces a flat list of DeploymentUnits
 /// that cloud providers can translate into infrastructure resources.
 /// Tracks two pieces of state through the recursion:
-///   currentUnit  — the deployment unit being built (InstanceUnit or PoolUnit)
-///   currentPool  — the nearest enclosing pool (propagates through entire subtree)
+///   currentUnit  - the deployment unit being built (InstanceUnit or PoolUnit)
+///   currentPool  - the nearest enclosing pool (propagates through entire subtree)
 /// </summary>
 public static class DeploymentUnitBuilder
 {
@@ -62,8 +62,8 @@ public static class DeploymentUnitBuilder
                     }
                     else
                     {
-                        // Standalone Caddy — wrap in its own InstanceUnit
-                        var (min, max) = TopologyHelpers.ParseReplicaRange(container.Config);
+                            // Standalone Caddy - wrap in its own InstanceUnit
+                            var (min, max) = TopologyHelpers.ParseReplicaRange(container.Config);
                         var caddyUnit = new InstanceUnit(
                             Container: container,
                             ProviderKey: providerKey,
@@ -104,8 +104,8 @@ public static class DeploymentUnitBuilder
                         TargetTenants: targetTenants,
                         SelectedPlanId: selectedPlanId);
 
-                    // Pool becomes both currentUnit AND currentPool — pool context propagates
-                    Descend(container, topology, selections, poolUnit, poolUnit, units);
+                        // Pool becomes both currentUnit AND currentPool - pool context propagates
+                        Descend(container, topology, selections, poolUnit, poolUnit, units);
                     units.Add(poolUnit);
                     break;
                 }
@@ -119,15 +119,15 @@ public static class DeploymentUnitBuilder
                         Domain: domain);
 
                     units.Add(dnsUnit);
-                    // DNS is a passthrough — descend with the current unit, not the DNS unit
-                    Descend(container, topology, selections, currentUnit, currentPool, units);
+                        // DNS is a passthrough - descend with the current unit, not the DNS unit
+                        Descend(container, topology, selections, currentUnit, currentPool, units);
                     break;
                 }
 
                 default:
                 {
-                    // Grouping node — descend with current unit
-                    Descend(container, topology, selections, currentUnit, currentPool, units);
+                        // Grouping node - descend with current unit
+                        Descend(container, topology, selections, currentUnit, currentPool, units);
                     break;
                 }
             }
@@ -146,7 +146,7 @@ public static class DeploymentUnitBuilder
 
         foreach (var image in container.Images)
         {
-            // Inside a pool subtree — all images are Swarm-managed, never break out
+            // Inside a pool subtree - all images are Swarm-managed, never break out
             if (currentPool is not null)
             {
                 currentPool.Services.Add(ServiceEntry.FromImage(image, TopologyHelpers.ResolveRegistry(topology)));

@@ -275,7 +275,7 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
 
     private static void CheckComputePoolRequiredImages(Topology topology, List<TopologyValidationError> items)
     {
-        // ComputePool no longer requires FederationServer images — they are hub-provisioned at runtime.
+        // ComputePool no longer requires FederationServer images - they are hub-provisioned at runtime.
         // DataPool should contain at least one data service image.
         void Walk(List<Container> containers)
         {

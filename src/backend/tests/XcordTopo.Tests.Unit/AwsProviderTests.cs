@@ -89,7 +89,7 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var vars = files["variables.tf"];
 
-        // targetTenants is UI-only — host_count defaults should be simple values (1),
+        // targetTenants is UI-only - host_count defaults should be simple values (1),
         // not computed from targetTenants.
         // Resource names are now tier-qualified: <pool_name>_<tier_id>
         Assert.Contains("variable \"free_tier_free_host_count\"", vars);
@@ -97,7 +97,7 @@ public class AwsProviderTests
         Assert.Contains("variable \"basic_tier_basic_host_count\"", vars);
         Assert.Contains("variable \"enterprise_tier_enterprise_host_count\"", vars);
 
-        // Pool host counts default to 0 — pool infrastructure is deferred.
+        // Pool host counts default to 0 - pool infrastructure is deferred.
         // Hub sets these > 0 via terraform apply when it needs to provision tenants.
         foreach (var poolName in new[] { "free_tier_free", "basic_tier_basic", "pro_tier_pro", "enterprise_tier_enterprise" })
         {
@@ -116,7 +116,7 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var instances = files["instances.tf"];
 
-        // Instance resource types — pool instances are now tier-qualified: <pool_name>_<tier_id>
+        // Instance resource types - pool instances are now tier-qualified: <pool_name>_<tier_id>
         Assert.Contains("aws_instance\" \"hub_server\"", instances);
         Assert.Contains("aws_instance\" \"live_kit\"", instances);
         Assert.Contains("aws_instance\" \"caddy\"", instances);
@@ -240,8 +240,8 @@ public class AwsProviderTests
         Assert.NotNull(caddyBlock);
 
         // Elastic images (hub_server replicas "1-3", live_kit replicas "1-100")
-        // get their own instances — should NOT be deployed as docker containers on Caddy host.
-        // Note: hub_server/live_kit may appear in the Caddyfile as reverse proxy upstreams — that's fine.
+        // get their own instances - should NOT be deployed as docker containers on Caddy host.
+        // Note: hub_server/live_kit may appear in the Caddyfile as reverse proxy upstreams - that's fine.
         // What should NOT happen is docker run/service create for these images' Docker images on the Caddy host.
         Assert.DoesNotContain("ghcr.io/xcord/hub", caddyBlock);
         Assert.DoesNotContain("livekit/livekit-server", caddyBlock);
@@ -271,7 +271,7 @@ public class AwsProviderTests
     [Fact]
     public void GenerateHcl_DnsContainer_GeneratesARecordsForWiredHosts()
     {
-        // DNS is on Linode, hosts on AWS — need multi-provider generator
+        // DNS is on Linode, hosts on AWS - need multi-provider generator
         var linode = new LinodeProvider();
         var aws = new AwsProvider();
         var registry = new ProviderRegistry([linode, aws]);
@@ -445,7 +445,7 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var outputs = files["outputs.tf"];
 
-        // Pool outputs — resource names are tier-qualified: <pool_name>_<tier_id>
+        // Pool outputs - resource names are tier-qualified: <pool_name>_<tier_id>
         Assert.Contains("output \"pro_tier_pro_ips\"", outputs);
         Assert.Contains("output \"free_tier_free_ips\"", outputs);
         Assert.Contains("output \"basic_tier_basic_ips\"", outputs);
@@ -512,7 +512,7 @@ public class AwsProviderTests
         };
     }
 
-    // --- Helper: Build the Production — Robust topology ---
+    // --- Helper: Build the Production - Robust topology ---
 
     private static Topology CreateProductionRobustTopology()
     {
@@ -664,7 +664,7 @@ public class AwsProviderTests
 
         return new Topology
         {
-            Name = "Production — Robust",
+            Name = "Production - Robust",
             Provider = "aws",
             Containers = [dnsContainer],
             Wires = wires,
@@ -773,7 +773,7 @@ public class AwsProviderTests
     public void GenerateHcl_CaddyDomain_HasBareDomainRoute()
     {
         // When Caddy has domain "xcord.net", the Caddyfile must handle
-        // the bare domain (xcord.net) — wildcards don't match apex
+        // the bare domain (xcord.net) - wildcards don't match apex
         var topology = CreateProductionRobustTopology();
         var files = _provider.GenerateHcl(topology);
         var provisioning = files["provisioning.tf"];
@@ -920,7 +920,7 @@ public class AwsProviderTests
     public void GenerateHcl_Caddyfile_NoStaticWildcardRouteForPools()
     {
         // Pool infrastructure is deferred (count=0 on initial deploy).
-        // Caddy must NOT have a static wildcard route to pool instances — when count=0,
+        // Caddy must NOT have a static wildcard route to pool instances - when count=0,
         // the compute_pool[0].private_ip reference would be invalid in Terraform.
         // Hub configures wildcard tenant routing via Caddy admin API at runtime.
         var topology = CreateProductionRobustTopology();
@@ -930,7 +930,7 @@ public class AwsProviderTests
         var caddyBlock = ExtractResourceBlock(provisioning, "provision_caddy");
         Assert.NotNull(caddyBlock);
 
-        // Must NOT have a wildcard route — pool IPs don't exist at initial deploy
+        // Must NOT have a wildcard route - pool IPs don't exist at initial deploy
         Assert.DoesNotContain("*.${var.domain}", caddyBlock);
     }
 
@@ -978,7 +978,7 @@ public class AwsProviderTests
         var caddyBlock = ExtractResourceBlock(provisioning, "provision_caddy");
         Assert.NotNull(caddyBlock);
 
-        // Hub uses iframes for instance embedding — DENY blocks all iframes
+        // Hub uses iframes for instance embedding - DENY blocks all iframes
         Assert.DoesNotContain("DENY", caddyBlock);
     }
 
@@ -994,7 +994,7 @@ public class AwsProviderTests
         var caddyBlock = ExtractResourceBlock(provisioning, "provision_caddy");
         Assert.NotNull(caddyBlock);
 
-        // Video calling needs camera access — camera=() blocks it entirely
+        // Video calling needs camera access - camera=() blocks it entirely
         Assert.DoesNotContain("camera=()", caddyBlock);
     }
 

@@ -74,7 +74,7 @@ public sealed class StreamTerraformEndpointTests : IClassFixture<TopoWebApplicat
         var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
         var id = created.GetProperty("id").GetString()!;
 
-        // Trigger terraform execution (will fail because terraform isn't installed —
+        // Trigger terraform execution (will fail because terraform isn't installed -
         // that's the exact scenario we're testing)
         var execResponse = await _client.PostAsync(
             $"/api/v1/topologies/{id}/terraform/init", null);
@@ -85,7 +85,7 @@ public sealed class StreamTerraformEndpointTests : IClassFixture<TopoWebApplicat
         // Give the background task time to fail
         await Task.Delay(500);
 
-        // Now connect to the SSE stream — the reader should still be available
+        // Now connect to the SSE stream - the reader should still be available
         // even though the process already exited (race condition fix)
         var streamRequest = new HttpRequestMessage(HttpMethod.Get,
             $"/api/v1/topologies/{id}/terraform/stream");

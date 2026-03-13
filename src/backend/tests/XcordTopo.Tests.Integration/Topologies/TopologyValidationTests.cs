@@ -32,7 +32,7 @@ public sealed class TopologyValidationTests : IClassFixture<TopoWebApplicationFa
 
         var response = await _client.PostAsync($"/api/v1/topologies/{id}/validate", null);
 
-        // Validate always returns 200 — pass/fail is in the body
+        // Validate always returns 200 - pass/fail is in the body
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);

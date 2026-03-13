@@ -212,8 +212,8 @@ public sealed class MigrationPlanGenerator
                     {
                         Order = order++,
                         Type = MigrationStepType.Manual,
-                        Description = "Fresh hub database — no data migration (hub state will be lost)",
-                        Script = "# No migration needed — target PG starts with empty database\n" +
+                        Description = "Fresh hub database - no data migration (hub state will be lost)",
+                        Script = "# No migration needed - target PG starts with empty database\n" +
                                  "# WARNING: All hub state (users, instances, billing) will be lost",
                         CausesDowntime = false,
                         EstimatedDuration = "0s"
@@ -263,8 +263,8 @@ public sealed class MigrationPlanGenerator
                     {
                         Order = order++,
                         Type = MigrationStepType.Manual,
-                        Description = "Fresh hub Redis — no data migration (sessions will be lost, users must re-login)",
-                        Script = "# No migration needed — target Redis starts empty\n" +
+                        Description = "Fresh hub Redis - no data migration (sessions will be lost, users must re-login)",
+                        Script = "# No migration needed - target Redis starts empty\n" +
                                  "# Users will need to re-authenticate",
                         CausesDowntime = false,
                         EstimatedDuration = "0s"

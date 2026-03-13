@@ -48,7 +48,7 @@ const ContainerNode: Component<{
 
   return (
     <g>
-      {/* Container body — pointer-events: none so nested children receive clicks/drops */}
+      {/* Container body - pointer-events: none so nested children receive clicks/drops */}
       <rect
         x={absX()}
         y={absY()}
@@ -137,7 +137,7 @@ const ContainerNode: Component<{
         {props.container.kind}
       </text>
 
-      {/* Fit-to-contents button — positioned to the left of the kind badge */}
+      {/* Fit-to-contents button - positioned to the left of the kind badge */}
       <g
         style={{ cursor: 'pointer' }}
         opacity={0.4}
@@ -167,7 +167,7 @@ const ContainerNode: Component<{
         />
       </g>
 
-      {/* Clickable content area — rendered before children so children are on top */}
+      {/* Clickable content area - rendered before children so children are on top */}
       <rect
         x={absX()}
         y={absY() + HEADER_HEIGHT}
@@ -243,7 +243,7 @@ const ContainerNode: Component<{
         )}
       </For>
 
-      {/* Resize handles — shown when selected */}
+      {/* Resize handles - shown when selected */}
       <Show when={isSelected()}>
         {(() => {
           const startResize = (edge: ResizeEdge, e: PointerEvent & { currentTarget: Element }) => {

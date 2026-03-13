@@ -39,7 +39,7 @@ public sealed class ProcessTerraformExecutorTests : IDisposable
         var streamReader = _executor.GetOutputStream(topologyId);
         Assert.NotNull(streamReader);
 
-        // Read all buffered output — should contain at least the exit code sentinel
+        // Read all buffered output - should contain at least the exit code sentinel
         var lines = new List<TerraformOutputLine>();
         await foreach (var line in streamReader!.ReadAllAsync(CancellationToken.None))
         {
@@ -139,7 +139,7 @@ public sealed class ProcessTerraformExecutorTests : IDisposable
         // Cancel immediately
         _executor.Cancel(topologyId);
 
-        // Read output — should contain either cancellation or error message
+        // Read output - should contain either cancellation or error message
         var lines = new List<TerraformOutputLine>();
         await foreach (var line in reader.ReadAllAsync(CancellationToken.None))
         {

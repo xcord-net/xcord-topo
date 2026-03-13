@@ -64,7 +64,7 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
         var command = Enum.Parse<TerraformCommand>(request.Command, ignoreCase: true);
         Dictionary<string, string>? extraVars = null;
 
-        // Always pass image versions when available — Terraform variables exist in all phases
+        // Always pass image versions when available - Terraform variables exist in all phases
         if (request.ImageVersions != null)
         {
             extraVars = new();

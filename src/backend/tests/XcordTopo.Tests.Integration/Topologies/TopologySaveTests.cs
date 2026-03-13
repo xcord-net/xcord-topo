@@ -27,7 +27,7 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
     {
         // Load the exact config the UI sends
         var assembly = typeof(TopologySaveTests).Assembly;
-        // The fixture lives in the unit test project — load it from the file system instead
+        // The fixture lives in the unit test project - load it from the file system instead
         var fixturePath = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "..",
             "tests", "XcordTopo.Tests.Unit", "Fixtures", "production-robust.json");
@@ -35,7 +35,7 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
         var topology = JsonSerializer.Deserialize<JsonElement>(fixtureJson, JsonOptions);
         var id = topology.GetProperty("id").GetString()!;
 
-        // PUT — same as clicking Save in the UI
+        // PUT - same as clicking Save in the UI
         var response = await _client.PutAsJsonAsync($"/api/v1/topologies/{id}", topology, JsonOptions);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -46,7 +46,7 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
         // Verify content is correct
         var savedJson = await File.ReadAllTextAsync(savedPath);
         var saved = JsonSerializer.Deserialize<JsonElement>(savedJson, JsonOptions);
-        Assert.Equal("Production — Robust", saved.GetProperty("name").GetString());
+        Assert.Equal("Production - Robust", saved.GetProperty("name").GetString());
 
         // updatedAt should have been refreshed (not the original static date)
         var updatedAt = saved.GetProperty("updatedAt").GetString()!;
@@ -81,14 +81,14 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
         // File on disk must reflect the change
         var secondContent = await File.ReadAllTextAsync(savedPath);
         Assert.Contains("Renamed Topology", secondContent);
-        Assert.DoesNotContain("Production — Robust", secondContent);
+        Assert.DoesNotContain("Production - Robust", secondContent);
     }
 
     [Fact]
     public async Task SaveTopology_AllFieldsSurviveRoundTrip()
     {
         // Build a topology that exercises every model field, enum value, and nesting level.
-        // This is the contract the UI depends on — if any field is silently dropped
+        // This is the contract the UI depends on - if any field is silently dropped
         // during PUT → disk → GET, this test catches it.
         var id = Guid.NewGuid();
         var dnsId = Guid.NewGuid();
@@ -318,11 +318,11 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
             }
         };
 
-        // PUT — same as clicking Save in the UI
+        // PUT - same as clicking Save in the UI
         var putResponse = await _client.PutAsJsonAsync($"/api/v1/topologies/{id}", topology, JsonOptions);
         Assert.Equal(HttpStatusCode.OK, putResponse.StatusCode);
 
-        // GET — same as UI reloading the topology
+        // GET - same as UI reloading the topology
         var getResponse = await _client.GetAsync($"/api/v1/topologies/{id}");
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
         var loaded = await getResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
@@ -395,7 +395,7 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
         Assert.Equal("Out", upstreamPort.GetProperty("direction").GetString());
         Assert.Equal("Bottom", upstreamPort.GetProperty("side").GetString());
 
-        // Caddy images — every ImageKind
+        // Caddy images - every ImageKind
         var caddyImages = caddy.GetProperty("images");
         Assert.Equal(5, caddyImages.GetArrayLength());
 
@@ -414,7 +414,7 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
         Assert.Equal("registry:2", registry.GetProperty("dockerImage").GetString());
         Assert.Equal(0, registry.GetProperty("ports").GetArrayLength());
 
-        // LiveKit image — InOut port direction
+        // LiveKit image - InOut port direction
         var livekit = caddyImages.EnumerateArray().Single(i => i.GetProperty("kind").GetString() == "LiveKit");
         Assert.Equal("livekit/livekit-server:v1.8.3", livekit.GetProperty("dockerImage").GetString());
         var livekitRtc = livekit.GetProperty("ports")[0];
@@ -439,7 +439,7 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
         var dpPublicPort = dpPorts.EnumerateArray().Single(p => p.GetProperty("name").GetString() == "public");
         Assert.Equal("InOut", dpPublicPort.GetProperty("direction").GetString());
 
-        // MinIO image in DataPool — Storage port
+        // MinIO image in DataPool - Storage port
         var dpImages = dataPool.GetProperty("images");
         Assert.Equal(1, dpImages.GetArrayLength());
         var minio = dpImages[0];

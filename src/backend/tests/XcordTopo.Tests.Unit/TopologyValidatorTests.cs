@@ -303,7 +303,7 @@ public class TopologyValidatorTests
     [Fact]
     public void ValidateFull_ComputePoolWithoutFedServer_NoError()
     {
-        // ComputePool no longer requires FederationServer — they are hub-provisioned at runtime
+        // ComputePool no longer requires FederationServer - they are hub-provisioned at runtime
         var topology = new Topology { Name = "Test" };
         topology.Containers.Add(new Container
         {
@@ -493,7 +493,7 @@ public class TopologyValidatorTests
     [Fact]
     public void ValidateFull_TierAgnosticPool_NoUnusedTierWarnings()
     {
-        // A ComputePool with no tierProfile is tier-agnostic — all profiles are implicitly referenced
+        // A ComputePool with no tierProfile is tier-agnostic - all profiles are implicitly referenced
         var topology = new Topology { Name = "Test" };
         topology.TierProfiles.Add(new TierProfile { Id = "free", Name = "Free", ImageSpecs = new() });
         topology.TierProfiles.Add(new TierProfile { Id = "pro", Name = "Pro", ImageSpecs = new() });

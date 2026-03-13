@@ -25,7 +25,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
     {
         var activeKeys = TopologyHelpers.CollectActiveProviderKeys(topology);
 
-        // Single provider — delegate to existing path for zero-risk backward compat
+        // Single provider - delegate to existing path for zero-risk backward compat
         if (activeKeys.Count <= 1)
         {
             var provider = registry.Get(topology.Provider);
@@ -34,7 +34,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             return provider.GenerateHcl(topology, poolSelections, infraSelections);
         }
 
-        // Multi-provider — build deployment units and group by provider key
+        // Multi-provider - build deployment units and group by provider key
         var units = DeploymentUnitBuilder.Build(topology, poolSelections);
         var unitsByProvider = units
             .GroupBy(u => u.ProviderKey, StringComparer.OrdinalIgnoreCase);
@@ -51,7 +51,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             var provider = registry.Get(group.Key);
             if (provider == null) continue;
 
-            // Deduplicate containers — multiple units can reference the same container
+            // Deduplicate containers - multiple units can reference the same container
             var containers = group
                 .Select(u => u.Container)
                 .Where(c => c != null)
@@ -286,7 +286,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddiesRecursive(topology.Containers);
         ProviderHclBase.CollectElasticImageVariables(hosts, standaloneCaddies, vars);
 
-        // Pool variables — group by provider for correct plan resolution
+        // Pool variables - group by provider for correct plan resolution
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology, poolSelections);
         var poolsByProvider = pools
             .GroupBy(p => TopologyHelpers.ResolveProviderKey(p.Pool, topology), StringComparer.OrdinalIgnoreCase);
@@ -300,7 +300,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             ProviderHclBase.GeneratePoolVariables(vars, group.ToList(), plans);
         }
 
-        // Data pool variables (deferred — count defaults to 0)
+        // Data pool variables (deferred - count defaults to 0)
         ProviderHclBase.GenerateDataPoolVariables(vars, topology);
 
         // Service key variables (emitted once, not per-provider)
@@ -311,7 +311,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
 
     /// <summary>
     /// Builds a structured resource summary from the same topology data used for HCL generation.
-    /// This is the source of truth for the review tab — computed during generation, not parsed from HCL.
+    /// This is the source of truth for the review tab - computed during generation, not parsed from HCL.
     /// </summary>
     public ResourceSummary BuildResourceSummary(
         Topology topology,
@@ -326,7 +326,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddiesRecursive(topology.Containers);
         var resolver = new WireResolver(topology);
 
-        // Infrastructure hosts (excludes DataPool — those are pools, not infra)
+        // Infrastructure hosts (excludes DataPool - those are pools, not infra)
         foreach (var entry in hosts)
         {
             if (entry.Host.Kind == ContainerKind.DataPool) continue;
@@ -392,7 +392,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             total += lineTotal;
         }
 
-        // Compute pools — one entry per tier
+        // Compute pools - one entry per tier
         foreach (var pool in pools)
         {
             var providerKey = TopologyHelpers.ResolveProviderKey(pool.Pool, topology);
@@ -413,7 +413,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             // Pool cost is 0 initially (count=0), not added to total
         }
 
-        // Data pools — deferred pool instances for shared data services (PG, Redis, MinIO, etc.)
+        // Data pools - deferred pool instances for shared data services (PG, Redis, MinIO, etc.)
         foreach (var entry in hosts)
         {
             if (entry.Host.Kind != ContainerKind.DataPool) continue;

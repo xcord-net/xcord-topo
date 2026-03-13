@@ -353,7 +353,7 @@ export function useTopology() {
             found.container.y += dy;
             continue;
           }
-          // Try as image — search recursively through all containers
+          // Try as image - search recursively through all containers
           const searchImages = (containers: Container[]): boolean => {
             for (const c of containers) {
               const img = c.images.find(i => i.id === id);

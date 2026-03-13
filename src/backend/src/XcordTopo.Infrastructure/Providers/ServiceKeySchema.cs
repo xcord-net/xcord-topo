@@ -353,7 +353,7 @@ public static class ServiceKeySchema
                 Summary = "S3-compatible access key for the cold storage backup bucket",
                 Steps = requireCredentials
                     ? ["Create an application key in your S3-compatible provider dashboard"]
-                    : ["Auto-provisioned by Terraform for your cloud provider — leave blank unless overriding"]
+                    : ["Auto-provisioned by Terraform for your cloud provider - leave blank unless overriding"]
             },
             Validation = requireCredentials
                 ? [new() { Type = "minLength", Value = "1", Message = "Access key is required" }]
@@ -372,7 +372,7 @@ public static class ServiceKeySchema
                 Summary = "S3-compatible secret key for the cold storage backup bucket",
                 Steps = requireCredentials
                     ? ["Use the application key secret from your S3-compatible provider dashboard"]
-                    : ["Auto-provisioned by Terraform for your cloud provider — leave blank unless overriding"]
+                    : ["Auto-provisioned by Terraform for your cloud provider - leave blank unless overriding"]
             },
             Validation = requireCredentials
                 ? [new() { Type = "minLength", Value = "1", Message = "Secret key is required" }]
@@ -395,7 +395,7 @@ public static class ServiceKeySchema
                         "For Wasabi: s3.wasabisys.com (or region-specific, e.g., s3.us-west-1.wasabisys.com)",
                         "For Backblaze B2: s3.us-west-001.backblazeb2.com (check your bucket's endpoint)"
                     ]
-                    : ["Auto-populated from Terraform outputs — leave blank unless overriding"]
+                    : ["Auto-populated from Terraform outputs - leave blank unless overriding"]
             }
         },
         new()
@@ -411,7 +411,7 @@ public static class ServiceKeySchema
                 Summary = "S3 bucket name for storing backups",
                 Steps = requireCredentials
                     ? ["The bucket must already exist in your S3-compatible provider"]
-                    : ["Terraform will create this bucket — enter the desired name"]
+                    : ["Terraform will create this bucket - enter the desired name"]
             },
             Validation = [new() { Type = "minLength", Value = "3", Message = "Bucket name must be at least 3 characters" }]
         }

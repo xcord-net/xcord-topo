@@ -25,7 +25,7 @@ public sealed class StagedDeploymentTests
     }
 
     /// <summary>
-    /// ComputePool host count must default to 0 — pool infra is deferred.
+    /// ComputePool host count must default to 0 - pool infra is deferred.
     /// Hub sets this > 0 when it needs to provision federation servers.
     /// </summary>
     [Fact]
@@ -42,7 +42,7 @@ public sealed class StagedDeploymentTests
     }
 
     /// <summary>
-    /// DataPool must have a count variable defaulting to 0 — tenant data infra is deferred.
+    /// DataPool must have a count variable defaulting to 0 - tenant data infra is deferred.
     /// Hub sets this to 1 when it provisions the first tenant that needs a data pool.
     /// </summary>
     [Fact]
@@ -60,7 +60,7 @@ public sealed class StagedDeploymentTests
 
     /// <summary>
     /// Caddy Caddyfile must NOT have a static reference to compute_pool IP.
-    /// When compute_pool_host_count=0 there are no pool instances — any static
+    /// When compute_pool_host_count=0 there are no pool instances - any static
     /// reference like compute_pool[0].private_ip would be an invalid Terraform ref.
     /// Hub configures wildcard tenant routing via Caddy admin API at runtime.
     /// </summary>
@@ -81,7 +81,7 @@ public sealed class StagedDeploymentTests
         var nextProvisioner = afterCaddy.IndexOf("null_resource");
         var caddySection = nextProvisioner >= 0 ? afterCaddy[..nextProvisioner] : afterCaddy;
 
-        // Caddy must NOT reference compute_pool — it won't exist at initial deploy
+        // Caddy must NOT reference compute_pool - it won't exist at initial deploy
         Assert.DoesNotContain("compute_pool", caddySection);
     }
 
@@ -156,7 +156,7 @@ public sealed class StagedDeploymentTests
     }
 
     // -------------------------------------------------------------------------
-    // Topology factory — production-like with all node types
+    // Topology factory - production-like with all node types
     // -------------------------------------------------------------------------
 
     private static Topology CreateProductionTopology()

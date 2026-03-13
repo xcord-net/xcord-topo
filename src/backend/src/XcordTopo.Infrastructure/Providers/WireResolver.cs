@@ -29,7 +29,7 @@ public sealed class WireResolver
                 _portToNode[port.Id] = container.Id;
             }
 
-            // ComputePool is its own infrastructure boundary — stop host propagation,
+            // ComputePool is its own infrastructure boundary - stop host propagation,
             // start pool tracking. Pool images are deployed on separate pool instances.
             var currentPool = container.Kind == ContainerKind.ComputePool ? container : poolAncestor;
             var currentHost = container.Kind is ContainerKind.Host or ContainerKind.DataPool ? container
@@ -154,7 +154,7 @@ public sealed class WireResolver
 
         foreach (var child in container.Children)
         {
-            // Skip pool children — their infrastructure is deferred (count=0 on initial deploy).
+            // Skip pool children - their infrastructure is deferred (count=0 on initial deploy).
             // Hub configures routing to pools at runtime via Caddy admin API.
             if (child.Kind is ContainerKind.ComputePool or ContainerKind.DataPool)
                 continue;
@@ -172,7 +172,7 @@ public sealed class WireResolver
 
     /// <summary>
     /// For images with IsPublicEndpoint metadata, derive a subdomain from the image name.
-    /// This keeps all public endpoint routing consistent — no special domain config needed.
+    /// This keeps all public endpoint routing consistent - no special domain config needed.
     /// </summary>
     private static string? DeriveSubdomainFromMetadata(Image image)
     {
@@ -193,7 +193,7 @@ public sealed class WireResolver
 
     /// <summary>
     /// Resolve the target image wired to a given port on a source image.
-    /// Checks both directions — wires can be drawn from either end.
+    /// Checks both directions - wires can be drawn from either end.
     /// </summary>
     public Image? ResolveWiredImage(Guid sourceImageId, string portName)
     {

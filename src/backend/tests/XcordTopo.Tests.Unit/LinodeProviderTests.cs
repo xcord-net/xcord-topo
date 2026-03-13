@@ -683,7 +683,7 @@ public class LinodeProviderTests
     [Fact]
     public void GenerateHcl_HostWithLiteralReplicas_NoVariable()
     {
-        // Literal replicas (e.g. "2") should NOT generate a variable — just `count = 2`
+        // Literal replicas (e.g. "2") should NOT generate a variable - just `count = 2`
         var topology = CreateReplicatedHostTopology("media-host", replicas: "2");
 
         var files = _provider.GenerateHcl(topology);

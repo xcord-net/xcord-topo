@@ -378,7 +378,7 @@ public class TopologyMatcherTests
     public void Match_IdenticalTopologies_AllUnchanged()
     {
         var topo = BuildSimpleTopology();
-        // Match against itself — all images should be Unchanged
+        // Match against itself - all images should be Unchanged
         var result = _matcher.Match(topo, topo);
 
         Assert.All(result.ImageMatches, m =>

@@ -8,7 +8,7 @@ namespace XcordTopo.Infrastructure.Terraform;
 
 public sealed class ProcessImagePushExecutor : IImagePushExecutor
 {
-    // Docker CLI config dir — writable regardless of which UID the container runs as
+    // Docker CLI config dir - writable regardless of which UID the container runs as
     private static readonly string DockerConfigDir = Path.Combine(Path.GetTempPath(), ".docker");
 
     private readonly ILogger<ProcessImagePushExecutor> _logger;
@@ -50,7 +50,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
                     return;
                 }
 
-                // Docker login — use --password-stdin to avoid leaking password in process args
+                // Docker login - use --password-stdin to avoid leaking password in process args
                 await WriteLineAsync(channel.Writer, "--- docker login ---");
 
                 var loginExitCode = await RunDockerLoginAsync(registryUrl, registryUsername, registryPassword, channel.Writer, cts.Token);
@@ -68,7 +68,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
                     var fullTag = $"{registryUrl}/{image.RegistryName}:{image.GitRef}";
                     var dotnetVersion = NormalizeVersion(image.GitRef);
 
-                    // Build from git URL via BuildKit — handles git cloning natively
+                    // Build from git URL via BuildKit - handles git cloning natively
                     await WriteLineAsync(channel.Writer, $"--- docker build {image.RegistryName}:{image.GitRef} ---");
 
                     var buildExitCode = await RunDockerCommandAsync(
@@ -111,7 +111,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
             {
                 channel.Writer.Complete();
                 _runningProcesses.TryRemove(topologyId, out _);
-                // Don't remove reader here — the SSE stream handler needs to read buffered output
+                // Don't remove reader here - the SSE stream handler needs to read buffered output
                 // even after the process exits. The reader is cleaned up by ReleaseOutputStream().
             }
         }, CancellationToken.None);
@@ -132,7 +132,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
         if (_runningProcesses.TryGetValue(topologyId, out var cts))
         {
             cts.Cancel();
-            // Don't dispose here — let the finally block in the task handle cleanup
+            // Don't dispose here - let the finally block in the task handle cleanup
         }
     }
 
@@ -154,7 +154,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
 
         using var process = Process.Start(psi)!;
 
-        // Docker/BuildKit write progress to stderr — don't mark as error.
+        // Docker/BuildKit write progress to stderr - don't mark as error.
         // Actual failures are detected via non-zero exit code.
         var outputTask = ReadStreamAsync(process.StandardOutput, false, writer, ct);
         var errorTask = ReadStreamAsync(process.StandardError, false, writer, ct);

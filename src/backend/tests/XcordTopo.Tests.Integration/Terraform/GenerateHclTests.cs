@@ -23,7 +23,7 @@ public sealed class GenerateHclTests : IClassFixture<TopoWebApplicationFactory>
     [Fact]
     public async Task GenerateHcl_ValidTopology_ReturnsFiles()
     {
-        // Create a topology with a Host containing a PostgreSQL image — minimal valid for HCL gen
+        // Create a topology with a Host containing a PostgreSQL image - minimal valid for HCL gen
         var createResponse = await _client.PostAsJsonAsync("/api/v1/topologies", new
         {
             name = "HCL Test"

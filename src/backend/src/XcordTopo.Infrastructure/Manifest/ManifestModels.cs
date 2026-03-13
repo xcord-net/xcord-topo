@@ -1,8 +1,8 @@
 namespace XcordTopo.Infrastructure.Manifest;
 
 /// <summary>
-/// Non-sensitive manifest — safe to commit to git.
-/// Contains pool structure, IPs, tiers, capacity — no passwords.
+/// Non-sensitive manifest - safe to commit to git.
+/// Contains pool structure, IPs, tiers, capacity - no passwords.
 /// </summary>
 public sealed class PublicManifest
 {
@@ -43,7 +43,7 @@ public sealed class ManifestDomain
 }
 
 /// <summary>
-/// Sensitive gateway topology section — injected into gateway.json Docker secret.
+/// Sensitive gateway topology section - injected into gateway.json Docker secret.
 /// Contains per-pool credentials, connection strings, and endpoint URLs.
 /// Mirrors the hub's TopologyOptions schema exactly.
 /// </summary>

@@ -64,7 +64,7 @@ public static class TopologyHelpers
         {
             if (container.Kind == ContainerKind.ComputePool && seen.Add(container))
             {
-                // One entry per tier profile — each tier gets its own host group
+                // One entry per tier profile - each tier gets its own host group
                 foreach (var tier in tierProfiles)
                 {
                     var selection = selections?.FirstOrDefault(s =>
@@ -122,7 +122,7 @@ public static class TopologyHelpers
     /// <summary>
     /// Collect standalone Caddy containers from a flat list of already-partitioned containers.
     /// Used in multi-provider GenerateHclForContainers where PartitionContainers has already flattened.
-    /// Caddies inside a Host are NOT standalone — they're provisioned as part of the Host.
+    /// Caddies inside a Host are NOT standalone - they're provisioned as part of the Host.
     /// </summary>
     public static List<Container> CollectStandaloneCaddies(List<Container> containers)
     {
@@ -232,7 +232,7 @@ public static class TopologyHelpers
         {
             if (c.Kind is ContainerKind.Host or ContainerKind.Caddy)
                 result.Add(c);
-            // Recurse into children — but NOT into ComputePools, whose internal Caddies
+            // Recurse into children - but NOT into ComputePools, whose internal Caddies
             // are Swarm services (not standalone instances) and don't need DNS records
             if (c.Kind != ContainerKind.ComputePool)
                 CollectInfraContainers(c.Children, result);
@@ -284,7 +284,7 @@ public static class TopologyHelpers
     /// </summary>
     public static string? GetHostCountExpression(HostEntry entry)
     {
-        // DataPool instances are deferred — controlled by a count variable defaulting to 0
+        // DataPool instances are deferred - controlled by a count variable defaulting to 0
         if (entry.Host.Kind == ContainerKind.DataPool)
             return $"var.{SanitizeName(entry.Host.Name)}_count";
 
@@ -332,7 +332,7 @@ public static class TopologyHelpers
         foreach (var image in images)
         {
             var (min, max) = ParseReplicaRange(image.Config);
-            if (min > 1 || max > 1) continue; // Elastic — gets its own instance
+            if (min > 1 || max > 1) continue; // Elastic - gets its own instance
 
             if (ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta))
                 totalRam += meta.MinRamMb;
@@ -451,7 +451,7 @@ public static class TopologyHelpers
         Image image, string poolName, WireResolver resolver, bool useSudo,
         IReadOnlyList<Image>? poolImages = null)
     {
-        // Skip PerTenant images — they are hub-provisioned at runtime, not topo-deployed
+        // Skip PerTenant images - they are hub-provisioned at runtime, not topo-deployed
         if (image.Scaling == ImageScaling.PerTenant)
             return null;
 
@@ -640,8 +640,8 @@ public static class TopologyHelpers
                 // Captcha
                 envVars.Add(("Captcha__Enabled", "false"));
 
-                // Service keys — hub gets Stripe + SMTP + Admin + Domain
-                if (topology != null)
+                    // Service keys - hub gets Stripe + SMTP + Admin + Domain
+                    if (topology != null)
                 {
                     AddServiceKeyEnvVar(envVars, topology, "stripe_publishable_key", "Stripe__PublishableKey");
                     AddServiceKeyEnvVar(envVars, topology, "stripe_secret_key", "Stripe__SecretKey");
@@ -721,8 +721,8 @@ public static class TopologyHelpers
                     envVars.Add(("MinIO__SecretKey", secretRef));
                 }
 
-                // Service keys — instances get SMTP + Tenor
-                if (topology != null)
+                    // Service keys - instances get SMTP + Tenor
+                    if (topology != null)
                 {
                     AddServiceKeyEnvVar(envVars, topology, "smtp_host", "Email__SmtpHost");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_port", "Email__SmtpPort");
@@ -766,7 +766,7 @@ public static class TopologyHelpers
         string serviceKey,
         string envVarName)
     {
-        // Always reference the Terraform variable — even keys not in topology.ServiceKeys
+        // Always reference the Terraform variable - even keys not in topology.ServiceKeys
         // (e.g., smtp_password stored in credential store) get declared as variables
         // via group-based emission in GenerateServiceKeyVariables.
         // If no keys from the group are defined at all, skip entirely.
@@ -928,7 +928,7 @@ public static class TopologyHelpers
         if (targetHost != null)
         {
             if (targetHost.Id == sourceHost.Id)
-                return SanitizeName(targetImage.Name); // Same host — Docker DNS
+                return SanitizeName(targetImage.Name); // Same host - Docker DNS
 
             var targetHostName = SanitizeName(targetHost.Name);
             var providerKey = ResolveProviderKey(targetHost, topology);
@@ -936,17 +936,17 @@ public static class TopologyHelpers
             return $"${{{ProviderHclBase.GetPrivateIpReference(targetHostName, providerKey, isReplicated)}}}";
         }
 
-        // Target has no Host ancestor — check for standalone Caddy
+        // Target has no Host ancestor - check for standalone Caddy
         var targetCaddy = resolver.FindCaddyFor(targetImage.Id);
         if (targetCaddy != null && targetCaddy.Id != sourceHost.Id)
         {
-            // Target is on Caddy's instance, source is elsewhere — use Caddy's IP
+            // Target is on Caddy's instance, source is elsewhere - use Caddy's IP
             var caddyName = SanitizeName(targetCaddy.Name);
             var providerKey = ResolveProviderKey(targetCaddy, topology);
             return $"${{{ProviderHclBase.GetPrivateIpReference(caddyName, providerKey, false)}}}";
         }
 
-        // Same container or both standalone — Docker DNS
+        // Same container or both standalone - Docker DNS
         return SanitizeName(targetImage.Name);
     }
 
@@ -958,7 +958,7 @@ public static class TopologyHelpers
     public static string ResolveCaddyUpstreamHost(
         Image targetImage, Container caddyContainer, WireResolver resolver, Topology topology)
     {
-        // Pool images are on separate infrastructure — route to pool's public IP
+        // Pool images are on separate infrastructure - route to pool's public IP
         var targetPool = resolver.FindPoolFor(targetImage.Id);
         if (targetPool != null)
         {
@@ -967,7 +967,7 @@ public static class TopologyHelpers
             return $"${{{ProviderHclBase.GetPrivateIpReference(poolName, providerKey, isReplicated: true)}}}";
         }
 
-        // Elastic images (replicas > 1) get their own instances — route to instance IP
+        // Elastic images (replicas > 1) get their own instances - route to instance IP
         var (min, max) = ParseReplicaRange(targetImage.Config);
         if (min > 1 || max > 1)
         {
@@ -982,11 +982,11 @@ public static class TopologyHelpers
         var caddyHost = resolver.FindHostFor(caddyContainer.Id);
         var targetHost = resolver.FindHostFor(targetImage.Id);
 
-        // Both on the same host, or both standalone (no host ancestor) — use container name
+        // Both on the same host, or both standalone (no host ancestor) - use container name
         if (caddyHost?.Id == targetHost?.Id)
             return SanitizeName(targetImage.Name);
 
-        // Target is on a different host (or Caddy is standalone and target has a host) — use IP reference
+        // Target is on a different host (or Caddy is standalone and target has a host) - use IP reference
         if (targetHost != null)
         {
             var targetHostName = SanitizeName(targetHost.Name);
@@ -995,7 +995,7 @@ public static class TopologyHelpers
             return $"${{{ProviderHclBase.GetPrivateIpReference(targetHostName, providerKey, isReplicated)}}}";
         }
 
-        // Target has no host ancestor (standalone) — use container name
+        // Target has no host ancestor (standalone) - use container name
         return SanitizeName(targetImage.Name);
     }
 
@@ -1023,7 +1023,7 @@ public static class TopologyHelpers
                 if (consumerHost != null && consumerHost.Id != host.Id)
                     return true;
 
-                // Elastic images (replicas > 1) run on their own instances — always cross-host
+                // Elastic images (replicas > 1) run on their own instances - always cross-host
                 if (consumerHost == null && node is Image consumerImage)
                 {
                     var (cMin, cMax) = ParseReplicaRange(consumerImage.Config);
@@ -1053,7 +1053,7 @@ public static class TopologyHelpers
         foreach (var image in coLocatedImages)
         {
             var (imgMin, imgMax) = ParseReplicaRange(image.Config);
-            if (imgMin > 1 || imgMax > 1) continue; // Elastic — gets its own instance
+            if (imgMin > 1 || imgMax > 1) continue; // Elastic - gets its own instance
 
             var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
             if (meta?.Ports == null || meta.Ports.Length == 0) continue;
@@ -1148,7 +1148,7 @@ public static class TopologyHelpers
             "  }"
         };
 
-        // Group upstreams by subdomain — multiple images with the same subdomain
+        // Group upstreams by subdomain - multiple images with the same subdomain
         // (e.g., FederationServer across pools) become load-balanced backends in one block
         var grouped = new Dictionary<string, List<string>>();
         foreach (var (image, subdomain) in upstreams)
@@ -1186,7 +1186,7 @@ public static class TopologyHelpers
             blocks.Add(string.Join("\n", block));
         }
 
-        // Bare domain (apex) route — xcord.net serves the hub.
+        // Bare domain (apex) route - xcord.net serves the hub.
         // Find the HubServer's subdomain to reuse its backends for the apex block.
         var hubUpstream = upstreams.FirstOrDefault(u => u.Image.Kind == ImageKind.HubServer);
         if (hubUpstream != default)
@@ -1233,7 +1233,7 @@ public static class TopologyHelpers
         var resolver = new WireResolver(topology);
         var domain = ResolveDomain(topology);
 
-        // Walk Caddy containers — images routed through Caddy get subdomain-based URLs
+        // Walk Caddy containers - images routed through Caddy get subdomain-based URLs
         void WalkForCaddies(List<Container> containers)
         {
             foreach (var container in containers)
@@ -1265,7 +1265,7 @@ public static class TopologyHelpers
                             endpoints.Add((url, "reverse_proxy", string.Join(" ", backends)));
                     }
 
-                    // Apex domain — find HubServer's subdomain dynamically
+                    // Apex domain - find HubServer's subdomain dynamically
                     var hubUpstream = upstreams.FirstOrDefault(u => u.Image.Kind == ImageKind.HubServer);
                     if (hubUpstream != default)
                     {
@@ -1285,7 +1285,7 @@ public static class TopologyHelpers
 
         WalkForCaddies(topology.Containers);
 
-        // Walk all images — any with IsPublicEndpoint that wasn't already collected via Caddy routing
+        // Walk all images - any with IsPublicEndpoint that wasn't already collected via Caddy routing
         // gets added using name-derived subdomain (same pattern as Caddy upstream routing)
         void WalkForPublicImages(List<Container> containers)
         {

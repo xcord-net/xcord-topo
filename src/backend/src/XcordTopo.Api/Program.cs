@@ -50,7 +50,7 @@ builder.Services.AddSingleton<IMigrationStore, FileMigrationStore>();
 // Request handlers
 builder.Services.AddRequestHandlers(typeof(XcordTopo.Features.Topologies.ListTopologiesHandler).Assembly);
 
-// CORS (permissive — local tool)
+// CORS (permissive - local tool)
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>

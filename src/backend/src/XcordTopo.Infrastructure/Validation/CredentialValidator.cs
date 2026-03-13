@@ -11,7 +11,7 @@ public static class CredentialValidator
     {
         var errors = new Dictionary<string, string>();
 
-        // Only validate fields that are actually being submitted — this is a partial-update API.
+        // Only validate fields that are actually being submitted - this is a partial-update API.
         // Required-field completeness is checked at deploy time, not on each save.
         foreach (var field in schema)
         {

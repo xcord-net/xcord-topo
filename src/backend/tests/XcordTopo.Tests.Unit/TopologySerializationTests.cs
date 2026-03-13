@@ -56,7 +56,7 @@ public class TopologySerializationTests : IDisposable
     {
         var topology = DeserializeFixture("production-robust.json");
 
-        Assert.Equal("Production — Robust", topology.Name);
+        Assert.Equal("Production - Robust", topology.Name);
         Assert.Equal("aws", topology.Provider);
         Assert.Single(topology.Containers); // DNS wrapper
         Assert.Equal(15, topology.Wires.Count);
@@ -68,7 +68,7 @@ public class TopologySerializationTests : IDisposable
     {
         var topology = DeserializeFixture("production-robust.json");
 
-        // Serialize back and deserialize again — should not lose data
+        // Serialize back and deserialize again - should not lose data
         var json = JsonSerializer.Serialize(topology, JsonOptions);
         var roundTripped = JsonSerializer.Deserialize<Topology>(json, JsonOptions)!;
 
@@ -97,7 +97,7 @@ public class TopologySerializationTests : IDisposable
         // Verify it persisted and can be read back
         var loaded = await store.GetAsync(topology.Id);
         Assert.NotNull(loaded);
-        Assert.Equal("Production — Robust", loaded.Name);
+        Assert.Equal("Production - Robust", loaded.Name);
         Assert.Equal(15, loaded.Wires.Count);
         Assert.Equal(4, loaded.TierProfiles.Count);
     }
@@ -120,7 +120,7 @@ public class TopologySerializationTests : IDisposable
         topology.Name = "Modified Name";
         await store.SaveAsync(topology);
 
-        // Read the raw file from disk — not through the store, to prove the file actually changed
+        // Read the raw file from disk - not through the store, to prove the file actually changed
         var filePath = Path.Combine(_tempDir, "topologies", $"{topology.Id}.json");
         var rawJson = await File.ReadAllTextAsync(filePath);
 
@@ -171,7 +171,7 @@ public class TopologySerializationTests : IDisposable
         var registry = new ProviderRegistry([linode, aws]);
         var generator = new MultiProviderHclGenerator(registry);
 
-        // This is the code path the API uses — multi-provider since DNS is on linode
+        // This is the code path the API uses - multi-provider since DNS is on linode
         var files = generator.Generate(topology);
 
         Assert.NotEmpty(files);
@@ -260,9 +260,9 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl();
         var provisioning = files["provisioning_aws.tf"];
 
-        // hub_server is a private-registry image — deployed via deploy_apps phase
+        // hub_server is a private-registry image - deployed via deploy_apps phase
         Assert.Contains("deploy_hub_server", provisioning);
-        // live_kit is a public image — provisioned directly
+        // live_kit is a public image - provisioned directly
         Assert.Contains("provision_live_kit", provisioning);
     }
 
@@ -270,13 +270,13 @@ public class TopologySerializationTests : IDisposable
     public void Hcl_Caddyfile_ElasticUpstreams_UseIpReferences()
     {
         // The Caddy reverse proxy routes to hub_server and live_kit, but these
-        // are elastic images on separate instances — not Docker containers on
+        // are elastic images on separate instances - not Docker containers on
         // the Caddy host. Caddyfile must use Terraform IP references, not bare
         // container names like "hub_server:80".
         var files = GenerateMultiProviderHcl();
         var provisioning = files["provisioning_aws.tf"];
 
-        // Should NOT contain bare "hub_server:80" — that implies Docker DNS
+        // Should NOT contain bare "hub_server:80" - that implies Docker DNS
         Assert.DoesNotContain("hub_server:80", provisioning);
         // Should NOT contain bare "live_kit:7880"
         Assert.DoesNotContain("live_kit:7880", provisioning);
@@ -372,7 +372,7 @@ public class TopologySerializationTests : IDisposable
     public void Hcl_ElasticImages_HaveEnvVars()
     {
         // Elastic images (hub_server, live_kit) get their own EC2 instances.
-        // They must be started with environment variables — hub_server needs
+        // They must be started with environment variables - hub_server needs
         // connection strings, live_kit needs API keys. Without these, the
         // containers start but immediately crash.
         var files = GenerateMultiProviderHcl();
@@ -429,7 +429,7 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl();
         var secrets = files["secrets.tf"];
 
-        // Pool images should NOT have caddy-prefixed secrets — they already have pool-prefixed ones
+        // Pool images should NOT have caddy-prefixed secrets - they already have pool-prefixed ones
         Assert.DoesNotContain("caddy_redis_pro", secrets);
         Assert.DoesNotContain("caddy_pg_pro", secrets);
         Assert.DoesNotContain("caddy_mio_pro", secrets);
@@ -496,7 +496,7 @@ public class TopologySerializationTests : IDisposable
         Assert.True(caddyIdx >= 0, "Expected provision_caddy resource");
         var caddySection = provisioning[caddyIdx..];
 
-        // Count occurrences of "-p 6379:6379" — should be exactly 1, not 2
+        // Count occurrences of "-p 6379:6379" - should be exactly 1, not 2
         var count = 0;
         var searchIdx = 0;
         while ((searchIdx = caddySection.IndexOf("-p 6379:6379", searchIdx)) >= 0)
@@ -535,7 +535,7 @@ public class TopologySerializationTests : IDisposable
     public void ElasticFixture_Deserializes()
     {
         var topology = DeserializeFixture("production-elastic.json");
-        Assert.Equal("Production — Elastic", topology.Name);
+        Assert.Equal("Production - Elastic", topology.Name);
     }
 
     [Fact]
@@ -591,7 +591,7 @@ public class TopologySerializationTests : IDisposable
     public void ElasticFixture_DnsReferencesExistingInstances()
     {
         // DNS records must reference instance resources that actually exist.
-        // Pool Caddy runs as a Swarm service inside compute_pool — the DNS record
+        // Pool Caddy runs as a Swarm service inside compute_pool - the DNS record
         // must reference aws_instance.compute_pool, not a non-existent pool_caddy instance.
         var files = GenerateMultiProviderHcl("production-elastic.json");
         var dns = files["dns_linode.tf"];
@@ -605,7 +605,7 @@ public class TopologySerializationTests : IDisposable
     public void ElasticFixture_CaddyfileNoStaticWildcardRoute()
     {
         // Pool infrastructure is deferred (count=0 on initial deploy).
-        // Caddy must NOT have a static wildcard route — compute_pool[0].private_ip
+        // Caddy must NOT have a static wildcard route - compute_pool[0].private_ip
         // would be an invalid Terraform reference when count=0.
         // Hub configures wildcard tenant routing via Caddy admin API at runtime.
         var files = GenerateMultiProviderHcl("production-elastic.json");
@@ -615,7 +615,7 @@ public class TopologySerializationTests : IDisposable
         Assert.True(caddyIdx >= 0);
         var caddySection = provisioning[caddyIdx..];
 
-        // Must NOT have a wildcard route — pool IPs don't exist at initial deploy
+        // Must NOT have a wildcard route - pool IPs don't exist at initial deploy
         Assert.DoesNotContain("*.${var.domain}", caddySection);
     }
 
@@ -771,12 +771,12 @@ public class TopologySerializationTests : IDisposable
     [Fact]
     public void SimpleFixture_ElasticImagesHaveProvisioning()
     {
-        // hub_server (1-3) and live_kit (1-10) are elastic — they get their own AWS instances
+        // hub_server (1-3) and live_kit (1-10) are elastic - they get their own AWS instances
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
-        // hub_server is a private-registry image — deployed via deploy_apps phase
+        // hub_server is a private-registry image - deployed via deploy_apps phase
         Assert.Contains("deploy_hub_server", provisioning);
-        // live_kit is a public image — provisioned directly
+        // live_kit is a public image - provisioned directly
         Assert.Contains("provision_live_kit", provisioning);
     }
 
@@ -800,7 +800,7 @@ public class TopologySerializationTests : IDisposable
     [Fact]
     public void SimpleFixture_PortConflictsHandled()
     {
-        // redis_hub and redis_livekit both use 6379 — one must get an offset
+        // redis_hub and redis_livekit both use 6379 - one must get an offset
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
 
@@ -842,7 +842,7 @@ public class TopologySerializationTests : IDisposable
     [Fact]
     public void SimpleFixture_DataPoolHasProvisioning()
     {
-        // DataPool is on AWS — its images should be provisioned there
+        // DataPool is on AWS - its images should be provisioned there
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
         Assert.Contains("provision_data_pool", provisioning);
@@ -905,7 +905,7 @@ public class TopologySerializationTests : IDisposable
     [Fact]
     public void SimpleFixture_PoolHasNoHardcodedDataServices()
     {
-        // Data services live on the separate DataPool — the ComputePool's Swarm provisioning
+        // Data services live on the separate DataPool - the ComputePool's Swarm provisioning
         // must NOT deploy them. FederationServer connection strings are hub-provisioned at runtime.
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
@@ -1017,7 +1017,7 @@ public class TopologySerializationTests : IDisposable
     public void SimpleFixture_HubServerProvisioning_IncludesSmtpPassword()
     {
         // smtp_password is not in topology.ServiceKeys (stored in credential store)
-        // but the variable IS declared in variables.tf — provisioning must reference it
+        // but the variable IS declared in variables.tf - provisioning must reference it
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
         Assert.Contains("Email__SmtpPassword=${nonsensitive(var.smtp_password)}", provisioning);
@@ -1026,7 +1026,7 @@ public class TopologySerializationTests : IDisposable
     [Fact]
     public void SimpleFixture_HubServerProvisioning_SmtpPortUsesVariable()
     {
-        // smtp_port is not in topology.ServiceKeys but variable IS declared —
+        // smtp_port is not in topology.ServiceKeys but variable IS declared -
         // provisioning must use ${var.smtp_port}, not hardcode 587
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
@@ -1047,7 +1047,7 @@ public class TopologySerializationTests : IDisposable
     [Fact]
     public void SimpleFixture_HubServerImage_UsesRegistryVariable()
     {
-        // HubServer is an xcord image — it must pull from the configurable registry,
+        // HubServer is an xcord image - it must pull from the configurable registry,
         // not a hardcoded ghcr.io URL. Deployed via deploy_apps phase (post-push).
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
@@ -1064,7 +1064,7 @@ public class TopologySerializationTests : IDisposable
     [Fact]
     public void RobustFixture_PoolFedServer_UsesRegistryVariable()
     {
-        // FederationServer is an xcord image — pool provisioning must use ${var.registry_url}
+        // FederationServer is an xcord image - pool provisioning must use ${var.registry_url}
         var files = GenerateMultiProviderHcl("production-robust.json");
         var provisioning = files["provisioning_aws.tf"];
         Assert.DoesNotContain("ghcr.io", provisioning);
@@ -1093,7 +1093,7 @@ public class TopologySerializationTests : IDisposable
     [Fact]
     public void SimpleFixture_PoolCaddyHasAdminApi()
     {
-        // Pool Caddy starts empty — the hub updates it at runtime when tenants are provisioned.
+        // Pool Caddy starts empty - the hub updates it at runtime when tenants are provisioned.
         // It must have the admin API enabled so the hub can reload config via API.
         // Without admin API, there's no way to update routing without container restart.
         var files = GenerateMultiProviderHcl("production-simple.json");
@@ -1152,7 +1152,7 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl("production-simple.json");
         var provisioning = files["provisioning_aws.tf"];
 
-        // 100/min is too restrictive for normal browsing — a page with 50 assets hits it in 2 requests
+        // 100/min is too restrictive for normal browsing - a page with 50 assets hits it in 2 requests
         Assert.DoesNotContain("100/min", provisioning);
     }
 
@@ -1172,7 +1172,7 @@ public class TopologySerializationTests : IDisposable
         var dataPoolSection = nextResourceIdx >= 0 ? afterDataPool[..nextResourceIdx] : afterDataPool;
 
         // Ports should NOT be bound to all interfaces (0.0.0.0)
-        // -p 5432:5432 means bind to all interfaces — should be -p $PRIVATE_IP:5432:5432 instead
+        // -p 5432:5432 means bind to all interfaces - should be -p $PRIVATE_IP:5432:5432 instead
         Assert.DoesNotContain("-p 5432:5432", dataPoolSection);
         Assert.DoesNotContain("-p 6379:6379", dataPoolSection);
         Assert.DoesNotContain("-p 9000:9000", dataPoolSection);

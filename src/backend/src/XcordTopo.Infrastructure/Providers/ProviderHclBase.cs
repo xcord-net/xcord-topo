@@ -157,7 +157,7 @@ public abstract class ProviderHclBase : ICloudProvider
                 EmitSecret(secret);
         }
 
-        // Pool shared service secrets — data-driven from actual pool images
+        // Pool shared service secrets - data-driven from actual pool images
         // Deduplicate by container since multiple tier entries share the same infra
         if (pools != null)
         {
@@ -399,7 +399,7 @@ public abstract class ProviderHclBase : ICloudProvider
 
         foreach (var group in groups)
         {
-            // Registry variables are hardcoded per-provider with ResolveRegistry() defaults — skip here
+            // Registry variables are hardcoded per-provider with ResolveRegistry() defaults - skip here
             if (string.Equals(group.Key, "registry", StringComparison.OrdinalIgnoreCase)) continue;
 
             var anyPresent = group.Any(f => topology.ServiceKeys.ContainsKey(f.Key));

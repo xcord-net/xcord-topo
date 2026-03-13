@@ -4,7 +4,20 @@ namespace XcordTopo.Infrastructure.Providers;
 
 public static class ServiceKeySchema
 {
-    public static List<CredentialField> GetSchema() =>
+    public static List<CredentialField> GetSchema(Topology? topology = null)
+    {
+        var fields = GetBaseSchema();
+
+        if (topology?.BackupTarget != null)
+        {
+            var needsManualCreds = topology.BackupTarget.Kind == BackupTargetKind.S3Compatible;
+            fields.AddRange(GetColdStoreSchema(needsManualCreds));
+        }
+
+        return fields;
+    }
+
+    private static List<CredentialField> GetBaseSchema() =>
     [
         // --- Docker Registry ---
         new()
@@ -266,26 +279,28 @@ public static class ServiceKeySchema
             Validation = [new() { Type = "minLength", Value = "10", Message = "API key must be at least 10 characters" }]
         },
 
-        // --- Cold Storage ---
+    ];
+
+    private static List<CredentialField> GetColdStoreSchema(bool requireCredentials) =>
+    [
         new()
         {
             Key = "coldstore_access_key",
             Label = "Cold Storage Access Key",
             Type = "text",
             Sensitive = true,
-            Required = true,
+            Required = requireCredentials,
             Placeholder = "AKIAIOSFODNN7EXAMPLE",
             Help = new()
             {
                 Summary = "S3-compatible access key for the cold storage backup bucket",
-                Steps =
-                [
-                    "For Linode Object Storage: created automatically by Terraform — leave blank",
-                    "For AWS S3: use an IAM user access key with S3 permissions — leave blank if using the same credentials as EC2",
-                    "For Wasabi/Backblaze B2: create an application key in your provider dashboard"
-                ]
+                Steps = requireCredentials
+                    ? ["Create an application key in your S3-compatible provider dashboard"]
+                    : ["Auto-provisioned by Terraform for your cloud provider — leave blank unless overriding"]
             },
-            Validation = [new() { Type = "minLength", Value = "1", Message = "Access key is required" }]
+            Validation = requireCredentials
+                ? [new() { Type = "minLength", Value = "1", Message = "Access key is required" }]
+                : []
         },
         new()
         {
@@ -293,19 +308,18 @@ public static class ServiceKeySchema
             Label = "Cold Storage Secret Key",
             Type = "password",
             Sensitive = true,
-            Required = true,
+            Required = requireCredentials,
             Placeholder = "Enter S3-compatible secret key",
             Help = new()
             {
                 Summary = "S3-compatible secret key for the cold storage backup bucket",
-                Steps =
-                [
-                    "For Linode Object Storage: created automatically by Terraform — leave blank",
-                    "For AWS S3: use the corresponding IAM user secret key — leave blank if using the same credentials as EC2",
-                    "For Wasabi/Backblaze B2: use the application key secret from your provider dashboard"
-                ]
+                Steps = requireCredentials
+                    ? ["Use the application key secret from your S3-compatible provider dashboard"]
+                    : ["Auto-provisioned by Terraform for your cloud provider — leave blank unless overriding"]
             },
-            Validation = [new() { Type = "minLength", Value = "1", Message = "Secret key is required" }]
+            Validation = requireCredentials
+                ? [new() { Type = "minLength", Value = "1", Message = "Secret key is required" }]
+                : []
         },
         new()
         {
@@ -313,18 +327,18 @@ public static class ServiceKeySchema
             Label = "Cold Storage Endpoint",
             Type = "text",
             Sensitive = false,
-            Required = false,
+            Required = requireCredentials,
             Placeholder = "s3.wasabisys.com",
             Help = new()
             {
-                Summary = "S3-compatible endpoint URL for cold storage (required for non-AWS/Linode providers)",
-                Steps =
-                [
-                    "For Linode Object Storage: auto-populated from Terraform outputs",
-                    "For AWS S3: leave blank (uses default AWS endpoints)",
-                    "For Wasabi: s3.wasabisys.com (or region-specific, e.g., s3.us-west-1.wasabisys.com)",
-                    "For Backblaze B2: s3.us-west-001.backblazeb2.com (check your bucket's endpoint)"
-                ]
+                Summary = "S3-compatible endpoint URL for cold storage",
+                Steps = requireCredentials
+                    ?
+                    [
+                        "For Wasabi: s3.wasabisys.com (or region-specific, e.g., s3.us-west-1.wasabisys.com)",
+                        "For Backblaze B2: s3.us-west-001.backblazeb2.com (check your bucket's endpoint)"
+                    ]
+                    : ["Auto-populated from Terraform outputs — leave blank unless overriding"]
             }
         },
         new()
@@ -338,11 +352,9 @@ public static class ServiceKeySchema
             Help = new()
             {
                 Summary = "S3 bucket name for storing backups",
-                Steps =
-                [
-                    "For Linode/AWS: created automatically by Terraform — enter the desired bucket name",
-                    "For S3-compatible providers: the bucket must already exist"
-                ]
+                Steps = requireCredentials
+                    ? ["The bucket must already exist in your S3-compatible provider"]
+                    : ["Terraform will create this bucket — enter the desired name"]
             },
             Validation = [new() { Type = "minLength", Value = "3", Message = "Bucket name must be at least 3 characters" }]
         }

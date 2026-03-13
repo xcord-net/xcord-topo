@@ -17,6 +17,8 @@ export interface DeployWizardState {
   infraSelections: Record<string, InfraSelection>;
   /** Non-sensitive service key values */
   serviceKeyValues: Record<string, string>;
+  /** Selected version per application image kind (e.g. { "HubServer": "v0.1.5" }) */
+  imageVersions: Record<string, string>;
   /** ID of the topology this wizard state belongs to */
   topologyId: string;
 }
@@ -33,6 +35,7 @@ function createEmptyState(): DeployWizardState {
     poolSelections: {},
     infraSelections: {},
     serviceKeyValues: {},
+    imageVersions: {},
     topologyId: '',
   };
 }
@@ -47,6 +50,7 @@ function loadFromStorage(): DeployWizardState {
       if (!parsed.poolSelections) parsed.poolSelections = {};
       if (!parsed.infraSelections) parsed.infraSelections = {};
       if (!parsed.serviceKeyValues) parsed.serviceKeyValues = {};
+      if (!parsed.imageVersions) parsed.imageVersions = {};
       return parsed;
     }
   } catch { /* ignore corrupt data */ }
@@ -116,6 +120,12 @@ export function useDeployWizardStore() {
     setServiceKeyValues(values: Record<string, string>): void {
       store.setState(produce(s => {
         s.serviceKeyValues = { ...values };
+      }));
+    },
+
+    setImageVersions(versions: Record<string, string>): void {
+      store.setState(produce(s => {
+        s.imageVersions = { ...versions };
       }));
     },
 

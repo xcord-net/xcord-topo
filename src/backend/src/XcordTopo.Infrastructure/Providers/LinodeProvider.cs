@@ -405,11 +405,18 @@ public sealed class LinodeProvider : ProviderHclBase
             b.Attribute("description", "Docker registry URL for pulling xcord images");
         });
         vars.Line();
-        vars.Block("variable \"app_version\"", b =>
+        vars.Block("variable \"hub_version\"", b =>
         {
             b.RawAttribute("type", "string");
             b.Attribute("default", "latest");
-            b.Attribute("description", "Version tag for xcord application images (hub, fed)");
+            b.Attribute("description", "Version tag for hub server image");
+        });
+        vars.Line();
+        vars.Block("variable \"fed_version\"", b =>
+        {
+            b.RawAttribute("type", "string");
+            b.Attribute("default", "latest");
+            b.Attribute("description", "Version tag for federation server image");
         });
         vars.Line();
         vars.Block("variable \"deploy_apps\"", b =>
@@ -1185,7 +1192,14 @@ public sealed class LinodeProvider : ProviderHclBase
                     ? $"[null_resource.provision_{resourceName}]"
                     : $"[linode_instance.{resourceName}]");
                 b.Line();
-                b.MapBlock("triggers", tb => tb.RawAttribute("app_version", "var.app_version"));
+                b.MapBlock("triggers", tb =>
+                {
+                    foreach (var img in privateImages)
+                    {
+                        var vv = TopologyHelpers.GetVersionVariableName(img.Kind);
+                        tb.RawAttribute(vv, $"var.{vv}");
+                    }
+                });
                 b.Line();
 
                 b.Block("connection", cb =>
@@ -1227,27 +1241,13 @@ public sealed class LinodeProvider : ProviderHclBase
                         var publishPorts = meta?.Ports.Length > 0 &&
                             (TopologyHelpers.HasCrossHostConsumers(image, entry.Host, resolver));
 
-                        b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
+                        // Pull new image while old container still serves
                         b.Line($"  \"docker pull {dockerImage}\",");
 
                         if (useSwarm)
                         {
-                            var replicas = TopologyHelpers.GetImageReplicaExpression(image);
-                            var flags = new List<string>
-                            {
-                                $"--name {containerName}",
-                                $"--replicas {replicas}",
-                                "--network xcord-bridge",
-                                "--restart-condition any"
-                            };
-
-                            foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
-                            if (meta?.MountPath != null) flags.Add($"--mount type=volume,source={containerName}_data,target={meta.MountPath}");
-                            if (publishPorts && meta != null)
-                                foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");
-
-                            b.Line($"  \"docker service rm {containerName} 2>/dev/null || true\",");
-                            b.Line($"  \"docker service create {string.Join(" ", flags)} {dockerImage}{cmd}\",");
+                            // Rolling update — zero downtime
+                            b.Line($"  \"docker service update --image {dockerImage} {containerName} 2>/dev/null || docker service create --name {containerName} --replicas {TopologyHelpers.GetImageReplicaExpression(image)} --network xcord-bridge --restart-condition any {string.Join(" ", envVars.Select(e => $"-e '{e.Key}={e.Value}'"))}{(meta?.MountPath != null ? $" --mount type=volume,source={containerName}_data,target={meta.MountPath}" : "")}{(publishPorts && meta != null ? string.Concat(meta.Ports.Select(p => $" -p {p}:{p}")) : "")} {dockerImage}{cmd}\",");
                         }
                         else
                         {
@@ -1257,6 +1257,8 @@ public sealed class LinodeProvider : ProviderHclBase
                             if (publishPorts && meta != null)
                                 foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");
 
+                            // Pull-then-swap: remove old container and start new one (image already cached)
+                            b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
                             b.Line($"  \"docker run {string.Join(" ", flags)} {dockerImage}{cmd}\",");
                         }
                     }
@@ -1289,7 +1291,14 @@ public sealed class LinodeProvider : ProviderHclBase
                 b.RawAttribute("count", "var.deploy_apps ? 1 : 0");
                 b.RawAttribute("depends_on", $"[null_resource.provision_{resourceName}]");
                 b.Line();
-                b.MapBlock("triggers", tb => tb.RawAttribute("app_version", "var.app_version"));
+                b.MapBlock("triggers", tb =>
+                {
+                    foreach (var img in privateImages)
+                    {
+                        var vv = TopologyHelpers.GetVersionVariableName(img.Kind);
+                        tb.RawAttribute(vv, $"var.{vv}");
+                    }
+                });
                 b.Line();
                 b.Block("connection", cb =>
                 {
@@ -1315,8 +1324,9 @@ public sealed class LinodeProvider : ProviderHclBase
                         var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver);
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
-                        b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
+                        // Pull new image while old container still serves
                         b.Line($"  \"docker pull {dockerImage}\",");
+                        b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
 
                         var flags = new List<string> { "-d", $"--name {containerName}", "--network xcord-bridge", "--restart unless-stopped" };
                         foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
@@ -1353,7 +1363,8 @@ public sealed class LinodeProvider : ProviderHclBase
                 b.RawAttribute("count", $"var.deploy_apps ? var.{varName} : 0");
                 b.RawAttribute("depends_on", $"[linode_instance.{resourceName}]");
                 b.Line();
-                b.MapBlock("triggers", tb => tb.RawAttribute("app_version", "var.app_version"));
+                var versionVar = TopologyHelpers.GetVersionVariableName(image.Kind);
+                b.MapBlock("triggers", tb => tb.RawAttribute(versionVar, $"var.{versionVar}"));
                 b.Line();
                 b.Block("connection", cb =>
                 {

@@ -716,7 +716,7 @@ public static class TopologyHelpers
         // via group-based emission in GenerateServiceKeyVariables.
         // If no keys from the group are defined at all, skip entirely.
         var prefix = serviceKey.Split('_')[0];
-        var schema = ServiceKeySchema.GetSchema();
+        var schema = ServiceKeySchema.GetSchema(topology);
         var field = schema.FirstOrDefault(f => f.Key.Equals(serviceKey, StringComparison.OrdinalIgnoreCase));
         var groupHasAnyKey = schema
             .Where(f => f.Key.StartsWith(prefix + "_", StringComparison.OrdinalIgnoreCase) || f.Key == prefix)
@@ -1325,14 +1325,21 @@ public static class TopologyHelpers
         }
 
         // Private registry images use Terraform variables for both registry URL and version.
-        var shortName = image.Kind switch
+        var (shortName, versionVar) = image.Kind switch
         {
-            ImageKind.HubServer => "hub",
-            ImageKind.FederationServer => "fed",
+            ImageKind.HubServer => ("hub", "hub_version"),
+            ImageKind.FederationServer => ("fed", "fed_version"),
             _ => throw new ArgumentException($"Unexpected private registry image kind: {image.Kind}")
         };
-        return $"${{var.registry_url}}/{shortName}:${{var.app_version}}";
+        return $"${{var.registry_url}}/{shortName}:${{var.{versionVar}}}";
     }
+
+    public static string GetVersionVariableName(ImageKind kind) => kind switch
+    {
+        ImageKind.HubServer => "hub_version",
+        ImageKind.FederationServer => "fed_version",
+        _ => throw new ArgumentException($"No version variable for image kind: {kind}")
+    };
 
     /// <summary>
     /// Generates the docker login command for use in provisioning scripts.

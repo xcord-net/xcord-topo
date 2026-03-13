@@ -35,6 +35,27 @@ function collectActiveProviders(topology: Topology): string[] {
   return Array.from(keys);
 }
 
+/** Map image kinds that are built from source to their GitHub repo name. */
+const APP_IMAGE_REPOS: Record<string, string> = {
+  HubServer: 'xcord-hub',
+  FederationServer: 'xcord-fed',
+};
+
+/** Collect all application image kinds present in the topology. */
+function collectAppImageKinds(topology: Topology): string[] {
+  const kinds = new Set<string>();
+  function walk(containers: Container[]) {
+    for (const c of containers) {
+      for (const img of c.images) {
+        if (img.kind in APP_IMAGE_REPOS) kinds.add(img.kind);
+      }
+      if (c.children) walk(c.children);
+    }
+  }
+  walk(topology.containers);
+  return Array.from(kinds);
+}
+
 const STEPS: { key: DeployStep; label: string }[] = [
   { key: 'provider', label: 'Provider' },
   { key: 'configure', label: 'Configure' },
@@ -208,6 +229,18 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       _setInfraSelections(v); wizardStore.setInfraSelections(v);
     }
   };
+  // Application image version selections (e.g. { "HubServer": "v0.1.5" })
+  const [imageVersions, _setImageVersions] = createSignal<Record<string, string>>(saved.imageVersions ?? {});
+  const setImageVersions = (v: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => {
+    if (typeof v === 'function') {
+      _setImageVersions(prev => { const next = v(prev); wizardStore.setImageVersions(next); return next; });
+    } else {
+      _setImageVersions(v); wizardStore.setImageVersions(v);
+    }
+  };
+  // Available tags fetched from GitHub for each repo
+  const [availableTags, setAvailableTags] = createSignal<Record<string, deployApi.ImageTagInfo[]>>({});
+
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
   const [fieldErrors, setFieldErrors] = createSignal<Record<string, string>>({});
@@ -411,7 +444,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
 
       // Fetch service key schema and status in parallel
       const [skSchema, skStatus] = await Promise.all([
-        deployApi.getServiceKeySchema(),
+        deployApi.getServiceKeySchema(topo.topology.id),
         deployApi.getServiceKeyStatus(topo.topology.id),
       ]);
       setServiceKeySchema(skSchema);
@@ -638,6 +671,30 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         }
         setInfraSelections(infraDefaults);
 
+        // Fetch available tags for application images (hub/fed) and set defaults
+        const appKinds = collectAppImageKinds(topo.topology);
+        if (appKinds.length > 0) {
+          const tagResults: Record<string, deployApi.ImageTagInfo[]> = {};
+          await Promise.all(appKinds.map(async (kind) => {
+            const repoName = APP_IMAGE_REPOS[kind];
+            try {
+              tagResults[kind] = await deployApi.getImageTags(repoName);
+            } catch {
+              tagResults[kind] = [];
+            }
+          }));
+          setAvailableTags(tagResults);
+
+          // Default to the latest tag (first in list) or "latest" if no tags exist
+          const savedVersions = imageVersions();
+          const versionDefaults: Record<string, string> = {};
+          for (const kind of appKinds) {
+            const tags = tagResults[kind] ?? [];
+            versionDefaults[kind] = savedVersions[kind] || (tags.length > 0 ? tags[0].name : 'latest');
+          }
+          setImageVersions(versionDefaults);
+        }
+
         setStep('hosting');
       } else {
         await generateAndEstimate();
@@ -777,10 +834,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   };
 
   // --- Step 5: Execute ---
-  const runTerraformCommand = (command: string, deployApps?: boolean): Promise<boolean> => {
+  const runTerraformCommand = (command: string, options?: { deployApps?: boolean; imageVersions?: Record<string, string> }): Promise<boolean> => {
     return new Promise(async (resolve) => {
       try {
-        await deployApi.executeTerraform(topo.topology.id, command, deployApps);
+        await deployApi.executeTerraform(topo.topology.id, command, options);
         // Small delay to let the server set up the stream
         await new Promise(r => setTimeout(r, 200));
 
@@ -805,10 +862,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     });
   };
 
-  const runImagePush = (imageTag: string): Promise<boolean> => {
+  const runImagePush = (images: deployApi.ImageVersionSpec[]): Promise<boolean> => {
     return new Promise(async (resolve) => {
       try {
-        await deployApi.executeImagePush(topo.topology.id, imageTag);
+        await deployApi.executeImagePush(topo.topology.id, images);
         // Small delay to let the server set up the stream
         await new Promise(r => setTimeout(r, 200));
 
@@ -893,13 +950,19 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     // Push images to registry
     setExecutePhase('push-images');
     setOutputLines(prev => [...prev, { text: '\n=== Push Images ===', isError: false }]);
-    ok = await runImagePush('latest');
+    const versions = imageVersions();
+    const appImages = collectAppImageKinds(topo.topology);
+    const imagePushSpecs: deployApi.ImageVersionSpec[] = appImages.map(kind => ({
+      kind,
+      version: versions[kind] || 'latest',
+    }));
+    ok = await runImagePush(imagePushSpecs);
     if (!ok) { await persistFailure(); return; }
 
     // Deploy application containers (second apply with deploy_apps=true)
     setExecutePhase('deploy-apps');
     setOutputLines(prev => [...prev, { text: '\n=== Deploy Applications ===', isError: false }]);
-    ok = await runTerraformCommand('apply', true);
+    ok = await runTerraformCommand('apply', { deployApps: true, imageVersions: versions });
     setExecuteResult(ok ? 'success' : 'failure');
 
     // Persist deploy status
@@ -978,11 +1041,34 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         } catch { _setStep('validate'); return; }
       }
 
-      // For steps beyond validate, reload hosting options
+      // For steps beyond validate, reload hosting options and image tags
       if (restoredIdx >= stepOrder.indexOf('hosting')) {
         try {
           const hosting = await deployApi.getHostingOptions(topo.topology.id);
           setHostingOptions(hosting);
+
+          // Fetch available tags for application images (same as handleValidateNext)
+          const appKinds = collectAppImageKinds(topo.topology);
+          if (appKinds.length > 0) {
+            const tagResults: Record<string, deployApi.ImageTagInfo[]> = {};
+            await Promise.all(appKinds.map(async (kind) => {
+              const repoName = APP_IMAGE_REPOS[kind];
+              try {
+                tagResults[kind] = await deployApi.getImageTags(repoName);
+              } catch {
+                tagResults[kind] = [];
+              }
+            }));
+            setAvailableTags(tagResults);
+
+            const savedVersions = saved.imageVersions ?? {};
+            const versionDefaults: Record<string, string> = {};
+            for (const kind of appKinds) {
+              const tags = tagResults[kind] ?? [];
+              versionDefaults[kind] = savedVersions[kind] || (tags.length > 0 ? tags[0].name : 'latest');
+            }
+            setImageVersions(versionDefaults);
+          }
         } catch {
           _setStep('validate');
           return;
@@ -1103,7 +1189,13 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         {field.type === 'select' && field.key.endsWith('_region') ? (
           <select
             class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand`}
-            value={credentialValues()[field.key] ?? ''}
+            ref={(el) => {
+              createEffect(() => {
+                const r = regions();
+                const v = credentialValues()[field.key] ?? '';
+                if (r.length > 0) el.value = v;
+              });
+            }}
             onChange={(e) => setCredVal(field.key, e.currentTarget.value)}
             onBlur={() => handleFieldBlur(field)}
           >
@@ -1263,7 +1355,13 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         {field.type === 'select' && field.key.endsWith('_region') ? (
           <select
             class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand`}
-            value={vals()[field.key] ?? ''}
+            ref={(el) => {
+              createEffect(() => {
+                const r = providerRegions()[providerKey] ?? [];
+                const v = vals()[field.key] ?? '';
+                if (r.length > 0) el.value = v;
+              });
+            }}
             onChange={(e) => setValue(field.key, e.currentTarget.value)}
             onBlur={handleBlur}
           >
@@ -1519,6 +1617,34 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                         </div>
                       </div>
                     </Show>
+
+                    {/* Cold Storage */}
+                    <Show when={serviceKeySchema().some(f => f.key.startsWith('coldstore_'))}>
+                      <div class="mb-3">
+                        <h4 class="text-xs font-medium text-topo-text-secondary mb-2">Cold Storage (Backups)</h4>
+                        <div class="space-y-2">
+                          <For each={serviceKeySchema().filter(f => f.key.startsWith('coldstore_'))}>
+                            {(field) => renderServiceKeyField(field)}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+
+                    {/* Catch-all for any fields not in a known group */}
+                    {(() => {
+                      const knownPrefixes = ['registry_', 'stripe_', 'smtp_', 'tenor_', 'coldstore_'];
+                      const ungrouped = serviceKeySchema().filter(f => !knownPrefixes.some(p => f.key.startsWith(p)));
+                      return ungrouped.length > 0 ? (
+                        <div class="mb-3">
+                          <h4 class="text-xs font-medium text-topo-text-secondary mb-2">Other</h4>
+                          <div class="space-y-2">
+                            <For each={ungrouped}>
+                              {(field) => renderServiceKeyField(field)}
+                            </For>
+                          </div>
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
                 </Show>
 
@@ -1785,7 +1911,50 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                 </div>
               </Show>
 
-              {/* Section 2: Pools */}
+              {/* Section 2: Application Images (version selection) */}
+              <Show when={Object.keys(availableTags()).length > 0}>
+                <div class="space-y-2">
+                  <h3 class="text-xs font-semibold text-topo-text-primary uppercase tracking-wide">Application Images</h3>
+                  <p class="text-[11px] text-topo-text-muted">
+                    Select the version to build and deploy for each application image.
+                  </p>
+                  <div class="bg-topo-bg-secondary rounded-lg border border-topo-border divide-y divide-topo-border/50">
+                    <For each={Object.entries(availableTags())}>
+                      {([kind, tags]) => {
+                        const repoName = APP_IMAGE_REPOS[kind];
+                        const selectedVersion = () => imageVersions()[kind] ?? (tags.length > 0 ? tags[0].name : 'latest');
+                        return (
+                          <div class="flex items-center gap-3 px-3 py-2">
+                            <div class="flex-1 min-w-0">
+                              <span class="text-xs text-topo-text-primary font-medium">{repoName}</span>
+                              <span class="text-topo-text-muted ml-1.5 text-[10px]">{kind}</span>
+                            </div>
+                            <Show when={tags.length > 0} fallback={
+                              <span class="text-[10px] text-topo-text-muted italic">No tags available</span>
+                            }>
+                              <select
+                                class="bg-topo-bg-tertiary text-topo-text-primary text-xs rounded border border-topo-border px-2 py-1"
+                                value={selectedVersion()}
+                                onChange={(e) => {
+                                  setImageVersions(prev => ({ ...prev, [kind]: e.currentTarget.value }));
+                                }}
+                              >
+                                <For each={tags}>
+                                  {(tag) => (
+                                    <option value={tag.name}>{tag.name}</option>
+                                  )}
+                                </For>
+                              </select>
+                            </Show>
+                          </div>
+                        );
+                      }}
+                    </For>
+                  </div>
+                </div>
+              </Show>
+
+              {/* Section 3: Pools */}
               <Show when={(hostingOptions()?.pools?.length ?? 0) > 0}>
                 <div class="space-y-2">
                   <h3 class="text-xs font-semibold text-topo-text-primary uppercase tracking-wide">Pools</h3>

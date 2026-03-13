@@ -9,9 +9,17 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Features.Terraform;
 
-public sealed record ExecuteTerraformRequest(Guid TopologyId, string Command, bool DeployApps = false);
+public sealed record ExecuteTerraformRequest(
+    Guid TopologyId,
+    string Command,
+    bool DeployApps = false,
+    Dictionary<string, string>? ImageVersions = null);
 
 public sealed record ExecuteTerraformResponse(string Status);
+
+public sealed record ExecuteTerraformBody(
+    bool? DeployApps = null,
+    Dictionary<string, string>? ImageVersions = null);
 
 public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopologyStore topologyStore, ICredentialStore credentialStore)
     : IRequestHandler<ExecuteTerraformRequest, Result<ExecuteTerraformResponse>>, IValidatable<ExecuteTerraformRequest>
@@ -19,6 +27,12 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
     private static readonly HashSet<string> ValidCommands = new(StringComparer.OrdinalIgnoreCase)
     {
         "init", "plan", "apply", "destroy"
+    };
+
+    private static readonly Dictionary<string, string> ImageKindToVersionVar = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["HubServer"] = "hub_version",
+        ["FederationServer"] = "fed_version",
     };
 
     public Error? Validate(ExecuteTerraformRequest request)
@@ -44,9 +58,23 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
             await credentialStore.GetRawVariablesAsync(request.TopologyId, key, ct);
 
         var command = Enum.Parse<TerraformCommand>(request.Command, ignoreCase: true);
-        Dictionary<string, string>? extraVars = request.DeployApps
-            ? new() { ["deploy_apps"] = "true" }
-            : null;
+        Dictionary<string, string>? extraVars = null;
+
+        if (request.DeployApps)
+        {
+            extraVars = new() { ["deploy_apps"] = "true" };
+
+            // Map image kind names to Terraform version variable names
+            if (request.ImageVersions != null)
+            {
+                foreach (var (kind, version) in request.ImageVersions)
+                {
+                    if (ImageKindToVersionVar.TryGetValue(kind, out var varName))
+                        extraVars[varName] = version;
+                }
+            }
+        }
+
         await executor.ExecuteAsync(request.TopologyId, command, providerKeys, extraVars, ct);
 
         return new ExecuteTerraformResponse("started");
@@ -55,9 +83,10 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)
     {
         return app.MapPost("/api/v1/topologies/{topologyId:guid}/terraform/{command}", async (
-            Guid topologyId, string command, bool? deployApps, ExecuteTerraformHandler handler, CancellationToken ct) =>
+            Guid topologyId, string command, ExecuteTerraformBody? body, ExecuteTerraformHandler handler, CancellationToken ct) =>
         {
-            return await handler.ExecuteAsync(new ExecuteTerraformRequest(topologyId, command, deployApps ?? false), ct);
+            return await handler.ExecuteAsync(
+                new ExecuteTerraformRequest(topologyId, command, body?.DeployApps ?? false, body?.ImageVersions), ct);
         })
         .WithName("ExecuteTerraform")
         .WithTags("Terraform");

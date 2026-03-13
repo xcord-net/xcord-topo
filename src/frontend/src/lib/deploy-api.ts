@@ -32,8 +32,9 @@ export async function getCredentialSchema(providerKey: string): Promise<Credenti
 
 // --- Service keys ---
 
-export async function getServiceKeySchema(): Promise<CredentialField[]> {
-  const res = await fetch(`${API_BASE}/service-keys/schema`);
+export async function getServiceKeySchema(topologyId?: string): Promise<CredentialField[]> {
+  const params = topologyId ? `?topologyId=${topologyId}` : '';
+  const res = await fetch(`${API_BASE}/service-keys/schema${params}`);
   if (!res.ok) throw new Error(`Failed to get service key schema: ${res.statusText}`);
   const data = await res.json();
   return data.fields;
@@ -91,13 +92,32 @@ export async function getHostingOptions(topologyId: string): Promise<HostingOpti
   return res.json();
 }
 
+// --- Image tags ---
+
+export interface ImageTagInfo {
+  name: string;
+  sha: string;
+}
+
+export async function getImageTags(repoName: string): Promise<ImageTagInfo[]> {
+  const res = await fetch(`${API_BASE}/images/${repoName}/tags`);
+  if (!res.ok) throw new Error(`Failed to fetch image tags: ${res.statusText}`);
+  const data = await res.json();
+  return data.tags;
+}
+
 // --- Image push ---
 
-export async function executeImagePush(topologyId: string, imageTag: string): Promise<void> {
+export interface ImageVersionSpec {
+  kind: string;
+  version: string;
+}
+
+export async function executeImagePush(topologyId: string, images: ImageVersionSpec[]): Promise<void> {
   const res = await fetch(`${API_BASE}/topologies/${topologyId}/images/push`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageTag }),
+    body: JSON.stringify({ images }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);

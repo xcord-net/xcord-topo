@@ -61,9 +61,19 @@ export async function generateHcl(
   return res.json();
 }
 
-export async function executeTerraform(topologyId: string, command: string, deployApps?: boolean): Promise<void> {
-  const params = deployApps ? '?deployApps=true' : '';
-  const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/${command}${params}`, { method: 'POST' });
+export async function executeTerraform(
+  topologyId: string,
+  command: string,
+  options?: { deployApps?: boolean; imageVersions?: Record<string, string> },
+): Promise<void> {
+  const body = options ? {
+    ...(options.deployApps ? { deployApps: true } : {}),
+    ...(options.imageVersions ? { imageVersions: options.imageVersions } : {}),
+  } : undefined;
+  const res = await fetch(`${API_BASE}/topologies/${topologyId}/terraform/${command}`, {
+    method: 'POST',
+    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  });
   if (!res.ok) throw new Error(`Failed to execute terraform ${command}: ${res.statusText}`);
 }
 

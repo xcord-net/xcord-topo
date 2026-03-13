@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using XcordTopo.Infrastructure.Credentials;
 using XcordTopo.Infrastructure.Providers;
+using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Validation;
 using XcordTopo.Models;
 
@@ -12,7 +13,7 @@ public sealed record SaveServiceKeysRequest(Guid TopologyId, Dictionary<string, 
 
 public sealed record SaveServiceKeysResponse(string Status, CredentialStatus UpdatedStatus);
 
-public sealed class SaveServiceKeysHandler(ICredentialStore credentialStore)
+public sealed class SaveServiceKeysHandler(ICredentialStore credentialStore, ITopologyStore topologyStore)
     : IRequestHandler<SaveServiceKeysRequest, Result<SaveServiceKeysResponse>>, IValidatable<SaveServiceKeysRequest>
 {
     public Error? Validate(SaveServiceKeysRequest request)
@@ -24,7 +25,8 @@ public sealed class SaveServiceKeysHandler(ICredentialStore credentialStore)
 
     public async Task<Result<SaveServiceKeysResponse>> Handle(SaveServiceKeysRequest request, CancellationToken ct)
     {
-        var schema = ServiceKeySchema.GetSchema();
+        var topology = await topologyStore.GetAsync(request.TopologyId, ct);
+        var schema = ServiceKeySchema.GetSchema(topology);
         var errors = CredentialValidator.Validate(schema, request.Variables);
         if (errors.Count > 0)
         {

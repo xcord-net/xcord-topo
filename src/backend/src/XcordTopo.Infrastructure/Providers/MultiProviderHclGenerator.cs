@@ -244,11 +244,18 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             b.Attribute("description", "Docker registry URL for pulling xcord images");
         });
         vars.Line();
-        vars.Block("variable \"app_version\"", b =>
+        vars.Block("variable \"hub_version\"", b =>
         {
             b.RawAttribute("type", "string");
             b.Attribute("default", "latest");
-            b.Attribute("description", "Version tag for xcord application images (hub, fed)");
+            b.Attribute("description", "Version tag for hub server image");
+        });
+        vars.Line();
+        vars.Block("variable \"fed_version\"", b =>
+        {
+            b.RawAttribute("type", "string");
+            b.Attribute("default", "latest");
+            b.Attribute("description", "Version tag for federation server image");
         });
         vars.Line();
         vars.Block("variable \"deploy_apps\"", b =>

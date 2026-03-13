@@ -25,11 +25,11 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
         string registryUrl,
         string registryUsername,
         string registryPassword,
-        string imageTag,
+        IReadOnlyList<ImageBuildSpec> images,
         CancellationToken ct = default)
     {
         if (_runningProcesses.ContainsKey(topologyId))
-            throw new InvalidOperationException($"Image push is already running for topology {topologyId}");
+            throw new InvalidOperationException($"Image build/push is already running for topology {topologyId}");
 
         var channel = Channel.CreateUnbounded<TerraformOutputLine>();
         var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -41,118 +41,70 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
             try
             {
                 // Wait for registry to be reachable (DNS propagation + TLS cert provisioning)
-                await channel.Writer.WriteAsync(new TerraformOutputLine
-                {
-                    Text = "--- waiting for registry to be reachable ---",
-                    IsError = false
-                }, CancellationToken.None);
+                await WriteLineAsync(channel.Writer, "--- waiting for registry to be reachable ---");
 
                 var registryReady = await WaitForRegistryAsync(registryUrl, channel.Writer, cts.Token);
                 if (!registryReady)
                 {
-                    await channel.Writer.WriteAsync(new TerraformOutputLine
-                    {
-                        Text = $"\n--- Image push exited with code 1 ---",
-                        IsError = true
-                    }, CancellationToken.None);
+                    await WriteLineAsync(channel.Writer, "\n--- Build & push exited with code 1 ---", isError: true);
                     return;
                 }
 
                 // Docker login — use --password-stdin to avoid leaking password in process args
-                await channel.Writer.WriteAsync(new TerraformOutputLine
-                {
-                    Text = "--- docker login ---",
-                    IsError = false
-                }, CancellationToken.None);
+                await WriteLineAsync(channel.Writer, "--- docker login ---");
 
                 var loginExitCode = await RunDockerLoginAsync(registryUrl, registryUsername, registryPassword, channel.Writer, cts.Token);
                 if (loginExitCode != 0)
                 {
-                    await channel.Writer.WriteAsync(new TerraformOutputLine
-                    {
-                        Text = $"\n--- Image push exited with code {loginExitCode} ---",
-                        IsError = true
-                    }, CancellationToken.None);
+                    await WriteLineAsync(channel.Writer, $"\n--- Build & push exited with code {loginExitCode} ---", isError: true);
                     return;
                 }
 
-                var steps = new[]
-                {
-                    ($"tag xcord-hub:latest {registryUrl}/hub:{imageTag}", $"docker tag hub:{imageTag}"),
-                    ($"push {registryUrl}/hub:{imageTag}", $"docker push hub:{imageTag}"),
-                    ($"tag xcord-fed:latest {registryUrl}/fed:{imageTag}", $"docker tag fed:{imageTag}"),
-                    ($"push {registryUrl}/fed:{imageTag}", $"docker push fed:{imageTag}"),
-                };
-
-                int lastExitCode = 0;
-                foreach (var (arguments, stepName) in steps)
+                // Build and push each image
+                foreach (var image in images)
                 {
                     if (cts.Token.IsCancellationRequested) break;
 
-                    await channel.Writer.WriteAsync(new TerraformOutputLine
+                    var fullTag = $"{registryUrl}/{image.RegistryName}:{image.GitRef}";
+
+                    // Build from git URL — Docker daemon clones the repo at the specified ref
+                    await WriteLineAsync(channel.Writer, $"--- docker build {image.RegistryName}:{image.GitRef} ---");
+
+                    var buildExitCode = await RunDockerCommandAsync(
+                        $"build --build-arg VERSION={image.GitRef} -t {fullTag} {image.RepoUrl}#{image.GitRef}",
+                        channel.Writer, cts.Token);
+
+                    if (buildExitCode != 0)
                     {
-                        Text = $"--- {stepName} ---",
-                        IsError = false
-                    }, CancellationToken.None);
+                        await WriteLineAsync(channel.Writer, $"\n--- Build & push exited with code {buildExitCode} ---", isError: true);
+                        return;
+                    }
 
-                    var psi = new ProcessStartInfo
+                    // Push to registry
+                    await WriteLineAsync(channel.Writer, $"--- docker push {image.RegistryName}:{image.GitRef} ---");
+
+                    var pushExitCode = await RunDockerCommandAsync(
+                        $"push {fullTag}",
+                        channel.Writer, cts.Token);
+
+                    if (pushExitCode != 0)
                     {
-                        FileName = "docker",
-                        Arguments = arguments,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    psi.Environment["DOCKER_CONFIG"] = DockerConfigDir;
-
-                    using var process = Process.Start(psi)!;
-
-                    var outputTask = ReadStreamAsync(process.StandardOutput, false, channel.Writer, cts.Token);
-                    var errorTask = ReadStreamAsync(process.StandardError, true, channel.Writer, cts.Token);
-
-                    await Task.WhenAll(outputTask, errorTask);
-                    await process.WaitForExitAsync(cts.Token);
-
-                    lastExitCode = process.ExitCode;
-                    if (process.ExitCode != 0)
-                    {
-                        await channel.Writer.WriteAsync(new TerraformOutputLine
-                        {
-                            Text = $"\n--- Image push exited with code {process.ExitCode} ---",
-                            IsError = true
-                        }, CancellationToken.None);
+                        await WriteLineAsync(channel.Writer, $"\n--- Build & push exited with code {pushExitCode} ---", isError: true);
                         return;
                     }
                 }
 
-                await channel.Writer.WriteAsync(new TerraformOutputLine
-                {
-                    Text = $"\n--- Image push exited with code {lastExitCode} ---",
-                    IsError = false
-                }, CancellationToken.None);
+                await WriteLineAsync(channel.Writer, "\n--- Build & push exited with code 0 ---");
             }
             catch (OperationCanceledException)
             {
-                await channel.Writer.WriteAsync(new TerraformOutputLine
-                {
-                    Text = "\n--- Image push was cancelled ---",
-                    IsError = true
-                }, CancellationToken.None);
+                await WriteLineAsync(channel.Writer, "\n--- Build & push was cancelled ---", isError: true);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Image push failed for topology {Id}", topologyId);
-                await channel.Writer.WriteAsync(new TerraformOutputLine
-                {
-                    Text = $"Error: {ex.Message}",
-                    IsError = true
-                }, CancellationToken.None);
-                await channel.Writer.WriteAsync(new TerraformOutputLine
-                {
-                    Text = "\n--- Image push exited with code 1 ---",
-                    IsError = true
-                }, CancellationToken.None);
+                _logger.LogError(ex, "Image build/push failed for topology {Id}", topologyId);
+                await WriteLineAsync(channel.Writer, $"Error: {ex.Message}", isError: true);
+                await WriteLineAsync(channel.Writer, "\n--- Build & push exited with code 1 ---", isError: true);
             }
             finally
             {
@@ -183,6 +135,33 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
         }
     }
 
+    private async Task<int> RunDockerCommandAsync(
+        string arguments,
+        ChannelWriter<TerraformOutputLine> writer,
+        CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "docker",
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.Environment["DOCKER_CONFIG"] = DockerConfigDir;
+
+        using var process = Process.Start(psi)!;
+
+        var outputTask = ReadStreamAsync(process.StandardOutput, false, writer, ct);
+        var errorTask = ReadStreamAsync(process.StandardError, true, writer, ct);
+
+        await Task.WhenAll(outputTask, errorTask);
+        await process.WaitForExitAsync(ct);
+
+        return process.ExitCode;
+    }
+
     private static async Task<bool> WaitForRegistryAsync(
         string registryUrl,
         ChannelWriter<TerraformOutputLine> writer,
@@ -210,37 +189,21 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
                 // 200 or 401 (auth required) both mean registry is up
                 if ((int)response.StatusCode is 200 or 401)
                 {
-                    await writer.WriteAsync(new TerraformOutputLine
-                    {
-                        Text = $"Registry reachable (HTTP {(int)response.StatusCode})",
-                        IsError = false
-                    }, ct);
+                    await WriteLineAsync(writer, $"Registry reachable (HTTP {(int)response.StatusCode})");
                     return true;
                 }
 
-                await writer.WriteAsync(new TerraformOutputLine
-                {
-                    Text = $"Attempt {i}/{maxAttempts}: HTTP {(int)response.StatusCode}, retrying in {delaySeconds}s...",
-                    IsError = false
-                }, ct);
+                await WriteLineAsync(writer, $"Attempt {i}/{maxAttempts}: HTTP {(int)response.StatusCode}, retrying in {delaySeconds}s...");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await writer.WriteAsync(new TerraformOutputLine
-                {
-                    Text = $"Attempt {i}/{maxAttempts}: {ex.GetType().Name}: {ex.Message}, retrying in {delaySeconds}s...",
-                    IsError = false
-                }, ct);
+                await WriteLineAsync(writer, $"Attempt {i}/{maxAttempts}: {ex.GetType().Name}: {ex.Message}, retrying in {delaySeconds}s...");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(delaySeconds), ct);
         }
 
-        await writer.WriteAsync(new TerraformOutputLine
-        {
-            Text = $"Registry not reachable after {maxAttempts * delaySeconds}s",
-            IsError = true
-        }, ct);
+        await WriteLineAsync(writer, $"Registry not reachable after {maxAttempts * delaySeconds}s", isError: true);
         return false;
     }
 
@@ -296,4 +259,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
             }, ct);
         }
     }
+
+    private static Task WriteLineAsync(ChannelWriter<TerraformOutputLine> writer, string text, bool isError = false) =>
+        writer.WriteAsync(new TerraformOutputLine { Text = text, IsError = isError }, CancellationToken.None).AsTask();
 }

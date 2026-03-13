@@ -388,7 +388,7 @@ public abstract class ProviderHclBase : ICloudProvider
         // If ANY key in a group is present in topology.ServiceKeys, emit ALL keys in that group.
         // This ensures sensitive keys stored in the credential store (not in ServiceKeys)
         // still get Terraform variables emitted.
-        var schema = ServiceKeySchema.GetSchema();
+        var schema = ServiceKeySchema.GetSchema(topology);
         var groups = schema.GroupBy(f => f.Key.Split('_')[0]).ToList();
 
         foreach (var group in groups)

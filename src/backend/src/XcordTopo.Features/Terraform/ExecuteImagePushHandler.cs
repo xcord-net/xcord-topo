@@ -7,19 +7,43 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Features.Terraform;
 
-public sealed record ExecuteImagePushRequest(Guid TopologyId, string ImageTag);
+public sealed record ImageVersionSpec(string Kind, string Version);
+
+public sealed record ExecuteImagePushRequest(Guid TopologyId, IReadOnlyList<ImageVersionSpec> Images);
 
 public sealed record ExecuteImagePushResponse(string Status);
 
-public sealed record ExecuteImagePushBody(string ImageTag);
+public sealed record ExecuteImagePushBody(List<ImageVersionSpec> Images);
 
 public sealed class ExecuteImagePushHandler(IImagePushExecutor executor, ICredentialStore credentialStore)
     : IRequestHandler<ExecuteImagePushRequest, Result<ExecuteImagePushResponse>>
 {
+    private static readonly Dictionary<string, (string RepoUrl, string RegistryName)> ImageKindMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["HubServer"] = ("https://github.com/xcord-net/xcord-hub.git", "hub"),
+        ["FederationServer"] = ("https://github.com/xcord-net/xcord-fed.git", "fed"),
+    };
+
     public async Task<Result<ExecuteImagePushResponse>> Handle(ExecuteImagePushRequest request, CancellationToken ct)
     {
         if (executor.IsRunning(request.TopologyId))
-            return Error.Conflict("ALREADY_RUNNING", "Image push is already running for this topology");
+            return Error.Conflict("ALREADY_RUNNING", "Image build/push is already running for this topology");
+
+        if (request.Images.Count == 0)
+            return Error.Validation("NO_IMAGES", "At least one image must be specified");
+
+        // Validate all image kinds are recognized
+        var buildSpecs = new List<ImageBuildSpec>();
+        foreach (var image in request.Images)
+        {
+            if (!ImageKindMap.TryGetValue(image.Kind, out var mapping))
+                return Error.Validation("UNKNOWN_IMAGE_KIND", $"Unknown image kind: {image.Kind}");
+
+            if (string.IsNullOrWhiteSpace(image.Version))
+                return Error.Validation("MISSING_VERSION", $"Version is required for {image.Kind}");
+
+            buildSpecs.Add(new ImageBuildSpec(mapping.RepoUrl, image.Version, mapping.RegistryName));
+        }
 
         // Load registry credentials from the service-keys store server-side (sensitive values never sent from client)
         var variables = await credentialStore.GetRawVariablesAsync(request.TopologyId, "service-keys", ct);
@@ -33,7 +57,7 @@ public sealed class ExecuteImagePushHandler(IImagePushExecutor executor, ICreden
         if (!variables.TryGetValue("registry_password", out var registryPassword) || string.IsNullOrWhiteSpace(registryPassword))
             return Error.Validation("MISSING_REGISTRY_PASSWORD", "registry_password is not set in service keys");
 
-        await executor.ExecuteAsync(request.TopologyId, registryUrl, registryUsername, registryPassword, request.ImageTag, ct);
+        await executor.ExecuteAsync(request.TopologyId, registryUrl, registryUsername, registryPassword, buildSpecs, ct);
 
         return new ExecuteImagePushResponse("started");
     }
@@ -46,7 +70,7 @@ public sealed class ExecuteImagePushHandler(IImagePushExecutor executor, ICreden
             ExecuteImagePushHandler handler,
             CancellationToken ct) =>
         {
-            return await handler.ExecuteAsync(new ExecuteImagePushRequest(topologyId, body.ImageTag), ct);
+            return await handler.ExecuteAsync(new ExecuteImagePushRequest(topologyId, body.Images), ct);
         })
         .WithName("ExecuteImagePush")
         .WithTags("Images");

@@ -3,6 +3,8 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Terraform;
 
+public sealed record ImageBuildSpec(string RepoUrl, string GitRef, string RegistryName);
+
 public interface IImagePushExecutor
 {
     Task<ChannelReader<TerraformOutputLine>> ExecuteAsync(
@@ -10,7 +12,7 @@ public interface IImagePushExecutor
         string registryUrl,
         string registryUsername,
         string registryPassword,
-        string imageTag,
+        IReadOnlyList<ImageBuildSpec> images,
         CancellationToken ct = default);
 
     ChannelReader<TerraformOutputLine>? GetOutputStream(Guid topologyId);

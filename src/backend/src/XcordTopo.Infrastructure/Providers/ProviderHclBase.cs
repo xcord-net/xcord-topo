@@ -126,29 +126,35 @@ public abstract class ProviderHclBase : ICloudProvider
         List<Container>? standaloneCaddies = null)
     {
         var secrets = new HclBuilder();
-        foreach (var secret in hosts.SelectMany(entry => TopologyHelpers.CollectSecrets(entry, resolver)))
+        var emitted = new HashSet<string>();
+
+        void EmitSecret(TopologyHelpers.SecretEntry secret)
         {
+            if (!emitted.Add(secret.ResourceName)) return;
+            var length = secret.ResourceName switch
+            {
+                "hub_jwt_secret" => 64,
+                "hub_admin_password" => 24,
+                _ => 32
+            };
+            var special = secret.ResourceName == "hub_admin_password";
             secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
             {
-                b.Attribute("length", 32);
-                b.RawAttribute("special", "false");
+                b.Attribute("length", length);
+                b.RawAttribute("special", special ? "true" : "false");
             });
             secrets.Line();
         }
+
+        foreach (var secret in hosts.SelectMany(entry => TopologyHelpers.CollectSecrets(entry, resolver)))
+            EmitSecret(secret);
 
         // Standalone Caddy images (pg_hub, redis_hub, etc.) need secrets too
         if (standaloneCaddies != null)
         {
             foreach (var secret in standaloneCaddies.SelectMany(caddy =>
                 TopologyHelpers.CollectSecrets(new TopologyHelpers.HostEntry(caddy), resolver, excludePools: true)))
-            {
-                secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
-                {
-                    b.Attribute("length", 32);
-                    b.RawAttribute("special", "false");
-                });
-                secrets.Line();
-            }
+                EmitSecret(secret);
         }
 
         // Pool shared service secrets — data-driven from actual pool images
@@ -408,7 +414,10 @@ public abstract class ProviderHclBase : ICloudProvider
                     if (field.Sensitive)
                         b.RawAttribute("sensitive", "true");
                     b.Attribute("description", field.Label);
-                    b.Attribute("default", "");
+                    // Optional fields get empty default; required fields have no default
+                    // so Terraform errors if the tfvars file is missing them
+                    if (!field.Required)
+                        b.Attribute("default", "");
                 });
             }
         }

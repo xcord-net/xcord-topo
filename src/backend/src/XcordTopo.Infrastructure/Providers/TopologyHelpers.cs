@@ -402,6 +402,11 @@ public static class TopologyHelpers
                     secrets.Add(new($"{hostName}_{imgName}_api_key", $"LiveKit API key for {image.Name}"));
                     secrets.Add(new($"{hostName}_{imgName}_api_secret", $"LiveKit API secret for {image.Name}"));
                     break;
+                case ImageKind.HubServer:
+                    secrets.Add(new("hub_jwt_secret", "JWT signing key for hub server"));
+                    secrets.Add(new("hub_encryption_key", "Encryption key for hub server"));
+                    secrets.Add(new("hub_admin_password", "Admin password for hub server"));
+                    break;
             }
         }
         return secrets;
@@ -583,7 +588,7 @@ public static class TopologyHelpers
                         ? ResolveServiceHost(pgTarget, sourceHost, resolver, topology)
                         : pgContainer;
                     var pgPort = ResolveServicePort(pgTarget, sourceHost, 5432, resolver, portAssignments);
-                    envVars.Add(("ConnectionStrings__DefaultConnection",
+                    envVars.Add(("Database__ConnectionString",
                         $"Host={pgAddress};Port={pgPort};Database={dbName};Username=postgres;Password={pgSecretRef}"));
                 }
 
@@ -598,11 +603,44 @@ public static class TopologyHelpers
                         ? ResolveServiceHost(redisTarget, sourceHost, resolver, topology)
                         : redisContainer;
                     var redisPort = ResolveServicePort(redisTarget, sourceHost, 6379, resolver, portAssignments);
-                    envVars.Add(("ConnectionStrings__Redis",
+                    envVars.Add(("Redis__ConnectionString",
                         $"{redisAddress}:{redisPort},password={redisSecretRef}"));
                 }
 
-                // Service keys — hub gets Stripe + SMTP
+                // MinIO/Storage (wired)
+                var minioTarget = resolver.ResolveWiredImage(image.Id, "minio");
+                if (minioTarget != null)
+                {
+                    var minioContainer = SanitizeName(minioTarget.Name);
+                    var minioHost = resolver.FindHostFor(minioTarget.Id);
+                    var minioHostName = minioHost != null ? SanitizeName(minioHost.Name) : hostName;
+                    var accessRef = $"${{nonsensitive(random_password.{minioHostName}_{minioContainer}_access_key.result)}}";
+                    var secretRef = $"${{nonsensitive(random_password.{minioHostName}_{minioContainer}_secret_key.result)}}";
+                    var minioAddress = topology != null
+                        ? ResolveServiceHost(minioTarget, sourceHost, resolver, topology)
+                        : minioContainer;
+                    var minioPort = ResolveServicePort(minioTarget, sourceHost, 9000, resolver, portAssignments);
+                    envVars.Add(("Storage__Endpoint", $"{minioAddress}:{minioPort}"));
+                    envVars.Add(("Storage__AccessKey", accessRef));
+                    envVars.Add(("Storage__SecretKey", secretRef));
+                    envVars.Add(("Storage__BucketName", "xcord-hub"));
+                    envVars.Add(("Storage__UseSsl", "false"));
+                }
+
+                // JWT (auto-generated secret)
+                envVars.Add(("Jwt__SecretKey", "${nonsensitive(random_password.hub_jwt_secret.result)}"));
+                envVars.Add(("Jwt__Audience", "xcord-hub"));
+
+                // Encryption (auto-generated secret)
+                envVars.Add(("Encryption__Key", "${nonsensitive(random_password.hub_encryption_key.result)}"));
+
+                // Admin (auto-generated password)
+                envVars.Add(("Admin__Password", "${nonsensitive(random_password.hub_admin_password.result)}"));
+
+                // Captcha
+                envVars.Add(("Captcha__Enabled", "false"));
+
+                // Service keys — hub gets Stripe + SMTP + Admin + Domain
                 if (topology != null)
                 {
                     AddServiceKeyEnvVar(envVars, topology, "stripe_publishable_key", "Stripe__PublishableKey");
@@ -613,6 +651,23 @@ public static class TopologyHelpers
                     AddServiceKeyEnvVar(envVars, topology, "smtp_password", "Email__SmtpPassword");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_from_address", "Email__FromAddress");
                     AddServiceKeyEnvVar(envVars, topology, "smtp_from_name", "Email__FromName");
+                    AddServiceKeyEnvVar(envVars, topology, "hub_admin_username", "Admin__Username");
+                    AddServiceKeyEnvVar(envVars, topology, "hub_admin_email", "Admin__Email");
+
+                    // Derive JWT issuer and CORS from hub_base_domain
+                    if (topology.ServiceKeys.ContainsKey("hub_base_domain"))
+                    {
+                        envVars.Add(("Jwt__Issuer", "https://${var.hub_base_domain}"));
+                        envVars.Add(("Cors__AllowedOrigins__0", "https://${var.hub_base_domain}"));
+                        envVars.Add(("Cors__AllowedOrigins__1", "https://www.${var.hub_base_domain}"));
+                        envVars.Add(("Email__HubBaseUrl", "https://${var.hub_base_domain}"));
+                    }
+
+                    // Email extras
+                    envVars.Add(("Email__UseSsl", "true"));
+                    envVars.Add(("Email__DevMode", "false"));
+
+                    AddServiceKeyEnvVar(envVars, topology, "tenor_api_key", "Tenor__ApiKey");
                 }
                 break;
             }
@@ -630,7 +685,7 @@ public static class TopologyHelpers
                         ? ResolveServiceHost(pgTarget, sourceHost, resolver, topology)
                         : pgContainer;
                     var pgPort = ResolveServicePort(pgTarget, sourceHost, 5432, resolver, portAssignments);
-                    envVars.Add(("ConnectionStrings__DefaultConnection",
+                    envVars.Add(("Database__ConnectionString",
                         $"Host={pgAddress};Port={pgPort};Database={dbName};Username=postgres;Password={pgSecretRef}"));
                 }
 
@@ -645,7 +700,7 @@ public static class TopologyHelpers
                         ? ResolveServiceHost(redisTarget, sourceHost, resolver, topology)
                         : redisContainer;
                     var redisPort = ResolveServicePort(redisTarget, sourceHost, 6379, resolver, portAssignments);
-                    envVars.Add(("ConnectionStrings__Redis",
+                    envVars.Add(("Redis__ConnectionString",
                         $"{redisAddress}:{redisPort},password={redisSecretRef}"));
                 }
 

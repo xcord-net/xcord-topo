@@ -252,6 +252,63 @@ public static class ServiceKeySchema
             }
         },
 
+        // --- Hub Admin & Domain ---
+        new()
+        {
+            Key = "hub_admin_username",
+            Label = "Admin Username",
+            Type = "text",
+            Sensitive = false,
+            Required = true,
+            Placeholder = "admin",
+            Help = new()
+            {
+                Summary = "Username for the hub admin account created on first boot",
+                Steps =
+                [
+                    "Choose a username for the hub administrator",
+                    "This account has full control over the hub and instance provisioning"
+                ]
+            }
+        },
+        new()
+        {
+            Key = "hub_admin_email",
+            Label = "Admin Email",
+            Type = "text",
+            Sensitive = false,
+            Required = true,
+            Placeholder = "admin@example.com",
+            Help = new()
+            {
+                Summary = "Email address for the hub admin account",
+                Steps =
+                [
+                    "Enter the email address for the hub administrator",
+                    "Used for login and password recovery"
+                ]
+            },
+            Validation = [new() { Type = "pattern", Value = "^[^@]+@[^@]+\\.[^@]+$", Message = "Must be a valid email address" }]
+        },
+        new()
+        {
+            Key = "hub_base_domain",
+            Label = "Hub Base Domain",
+            Type = "text",
+            Sensitive = false,
+            Required = true,
+            Placeholder = "xcord.net",
+            Help = new()
+            {
+                Summary = "The public domain where the hub is accessible (e.g. xcord.net)",
+                Steps =
+                [
+                    "Enter the domain name pointed at your deployment",
+                    "This is used for JWT issuer, CORS origins, and email links"
+                ]
+            }
+        },
+
         // --- Tenor ---
         new()
         {

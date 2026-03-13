@@ -53,6 +53,10 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
             ? TopologyHelpers.CollectActiveProviderKeys(topology)
             : new List<string> { "linode" };
 
+        // Service keys are stored separately from cloud provider credentials
+        if (!providerKeys.Contains("service-keys", StringComparer.OrdinalIgnoreCase))
+            providerKeys.Add("service-keys");
+
         // Ensure credential files have migrated keys before Terraform reads them
         foreach (var key in providerKeys)
             await credentialStore.GetRawVariablesAsync(request.TopologyId, key, ct);
@@ -60,19 +64,21 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
         var command = Enum.Parse<TerraformCommand>(request.Command, ignoreCase: true);
         Dictionary<string, string>? extraVars = null;
 
+        // Always pass image versions when available — Terraform variables exist in all phases
+        if (request.ImageVersions != null)
+        {
+            extraVars = new();
+            foreach (var (kind, version) in request.ImageVersions)
+            {
+                if (ImageKindToVersionVar.TryGetValue(kind, out var varName))
+                    extraVars[varName] = version;
+            }
+        }
+
         if (request.DeployApps)
         {
-            extraVars = new() { ["deploy_apps"] = "true" };
-
-            // Map image kind names to Terraform version variable names
-            if (request.ImageVersions != null)
-            {
-                foreach (var (kind, version) in request.ImageVersions)
-                {
-                    if (ImageKindToVersionVar.TryGetValue(kind, out var varName))
-                        extraVars[varName] = version;
-                }
-            }
+            extraVars ??= new();
+            extraVars["deploy_apps"] = "true";
         }
 
         await executor.ExecuteAsync(request.TopologyId, command, providerKeys, extraVars, ct);

@@ -3,7 +3,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
 WORKDIR /app
 
 # Install Terraform, SSH client, and Docker CLI
-RUN apk add --no-cache wget unzip openssh-client docker-cli && \
+RUN apk add --no-cache wget unzip openssh-client docker-cli docker-cli-buildx git && \
     wget -q https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -O /tmp/terraform.zip && \
     unzip /tmp/terraform.zip -d /usr/local/bin/ && \
     rm /tmp/terraform.zip && \

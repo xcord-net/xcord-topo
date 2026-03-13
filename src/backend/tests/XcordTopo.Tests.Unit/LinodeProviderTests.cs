@@ -257,8 +257,8 @@ public class LinodeProviderTests
 
         var provisioning = files["provisioning.tf"];
         // Hub Server should have connection strings
-        Assert.Contains("ConnectionStrings__DefaultConnection", provisioning);
-        Assert.Contains("ConnectionStrings__Redis", provisioning);
+        Assert.Contains("Database__ConnectionString", provisioning);
+        Assert.Contains("Redis__ConnectionString", provisioning);
         // PG should have env vars
         Assert.Contains("POSTGRES_PASSWORD", provisioning);
         Assert.Contains("POSTGRES_DB", provisioning);

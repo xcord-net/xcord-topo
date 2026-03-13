@@ -379,7 +379,7 @@ public class TopologySerializationTests : IDisposable
         var provisioning = files["provisioning_aws.tf"];
 
         // hub_server provisioning must include connection string env vars
-        Assert.Contains("ConnectionStrings__DefaultConnection", provisioning);
+        Assert.Contains("Database__ConnectionString", provisioning);
         // live_kit provisioning must include LiveKit API key env vars
         Assert.Contains("LIVEKIT_KEYS", provisioning);
     }
@@ -458,7 +458,7 @@ public class TopologySerializationTests : IDisposable
         // Redis connection must use the correct mapped host port (redis_hub may be
         // offset due to port conflicts with redis_livekit on the same Caddy host)
         // The connection string must match the actual published port, not the default 6379
-        var redisConnIdx = hubSection.IndexOf("ConnectionStrings__Redis=");
+        var redisConnIdx = hubSection.IndexOf("Redis__ConnectionString=");
         Assert.True(redisConnIdx >= 0, "Expected Redis connection string");
         var redisConn = hubSection[redisConnIdx..hubSection.IndexOf(' ', redisConnIdx)];
         // Must contain the Caddy private IP (not a container name)
@@ -1068,7 +1068,7 @@ public class TopologySerializationTests : IDisposable
         var files = GenerateMultiProviderHcl("production-robust.json");
         var provisioning = files["provisioning_aws.tf"];
         Assert.DoesNotContain("ghcr.io", provisioning);
-        Assert.Contains("${var.registry_url}/fed:${var.app_version}", provisioning);
+        Assert.Contains("${var.registry_url}/fed:${var.fed_version}", provisioning);
     }
 
     [Fact]

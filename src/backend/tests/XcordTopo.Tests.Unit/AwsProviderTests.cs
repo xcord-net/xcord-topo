@@ -358,7 +358,7 @@ public class AwsProviderTests
 
         var hubBlock = ExtractResourceBlock(provisioning, "deploy_hub_server");
         Assert.NotNull(hubBlock);
-        Assert.Contains("${var.registry_url}/hub:${var.app_version}", hubBlock);
+        Assert.Contains("${var.registry_url}/hub:${var.hub_version}", hubBlock);
 
         var liveKitBlock = ExtractResourceBlock(provisioning, "provision_live_kit");
         Assert.NotNull(liveKitBlock);
@@ -948,18 +948,22 @@ public class AwsProviderTests
         Assert.Contains("60000", sg);
     }
 
-    // --- Issue 9: app_version defaults to "latest" ---
+    // --- Issue 9: version variables don't default to "latest" ---
 
     [Fact]
-    public void GenerateHcl_AppVersionVariable_NoLatestDefault()
+    public void GenerateHcl_VersionVariables_NoLatestDefault()
     {
         var topology = CreateProductionRobustTopology();
         var files = _provider.GenerateHcl(topology);
         var vars = files["variables.tf"];
 
-        var appVersionBlock = ExtractVariableBlock(vars, "app_version");
-        Assert.NotNull(appVersionBlock);
-        Assert.DoesNotContain("\"latest\"", appVersionBlock);
+        var hubVersionBlock = ExtractVariableBlock(vars, "hub_version");
+        Assert.NotNull(hubVersionBlock);
+        Assert.DoesNotContain("\"latest\"", hubVersionBlock);
+
+        var fedVersionBlock = ExtractVariableBlock(vars, "fed_version");
+        Assert.NotNull(fedVersionBlock);
+        Assert.DoesNotContain("\"latest\"", fedVersionBlock);
     }
 
     // --- Issue 10: X-Frame-Options DENY blocks iframes ---
@@ -1103,6 +1107,173 @@ public class AwsProviderTests
             Name = "Latest Tag Test",
             Provider = "aws",
             Containers = [host]
+        };
+    }
+
+    // --- HubServer deploy resource has complete env vars ---
+
+    [Fact]
+    public void GenerateHcl_DeployHubServer_HasCompleteEnvVars()
+    {
+        var topology = CreateHubServerTopology();
+        var files = _provider.GenerateHcl(topology);
+        var provisioning = files["provisioning.tf"];
+
+        var deployBlock = ExtractResourceBlock(provisioning, "deploy_hub_server");
+        Assert.NotNull(deployBlock);
+
+        // Database + Redis
+        Assert.Contains("Database__ConnectionString", deployBlock);
+        Assert.Contains("Redis__ConnectionString", deployBlock);
+
+        // JWT (auto-generated secrets)
+        Assert.Contains("Jwt__SecretKey", deployBlock);
+        Assert.Contains("Jwt__Issuer", deployBlock);
+        Assert.Contains("Jwt__Audience", deployBlock);
+
+        // Encryption (auto-generated secret)
+        Assert.Contains("Encryption__Key", deployBlock);
+
+        // Storage/MinIO (wired)
+        Assert.Contains("Storage__Endpoint", deployBlock);
+        Assert.Contains("Storage__AccessKey", deployBlock);
+        Assert.Contains("Storage__SecretKey", deployBlock);
+        Assert.Contains("Storage__BucketName", deployBlock);
+        Assert.Contains("Storage__UseSsl", deployBlock);
+
+        // Admin (service key + auto-generated password)
+        Assert.Contains("Admin__Username", deployBlock);
+        Assert.Contains("Admin__Email", deployBlock);
+        Assert.Contains("Admin__Password", deployBlock);
+
+        // CORS (derived from hub_base_domain)
+        Assert.Contains("Cors__AllowedOrigins", deployBlock);
+
+        // Email extras
+        Assert.Contains("Email__UseSsl", deployBlock);
+        Assert.Contains("Email__DevMode", deployBlock);
+        Assert.Contains("Email__HubBaseUrl", deployBlock);
+
+        // Captcha
+        Assert.Contains("Captcha__Enabled", deployBlock);
+    }
+
+    [Fact]
+    public void GenerateHcl_Secrets_HasHubSpecificSecrets()
+    {
+        var topology = CreateHubServerTopology();
+        var files = _provider.GenerateHcl(topology);
+        var secrets = files["secrets.tf"];
+
+        // Hub needs auto-generated secrets for JWT, encryption, admin password
+        Assert.Contains("hub_jwt_secret", secrets);
+        Assert.Contains("hub_encryption_key", secrets);
+        Assert.Contains("hub_admin_password", secrets);
+    }
+
+    [Fact]
+    public void GenerateHcl_DeployHubServer_PullBeforeRemove()
+    {
+        // Deploy should pull new image before removing old container to minimize downtime
+        var topology = CreateHubServerTopology();
+        var files = _provider.GenerateHcl(topology);
+        var provisioning = files["provisioning.tf"];
+
+        var deployBlock = ExtractResourceBlock(provisioning, "deploy_hub_server");
+        Assert.NotNull(deployBlock);
+
+        var pullIdx = deployBlock.IndexOf("docker pull");
+        var rmIdx = deployBlock.IndexOf("docker rm -f hub_server");
+        Assert.True(pullIdx >= 0, "Expected docker pull command");
+        Assert.True(rmIdx >= 0, "Expected docker rm command");
+        Assert.True(pullIdx < rmIdx, "docker pull must come before docker rm for zero-downtime deploy");
+    }
+
+    private static Topology CreateHubServerTopology()
+    {
+        // Hub server with pg, redis, and minio wires
+        var hubPgPort = new Port { Id = Guid.NewGuid(), Name = "pg", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubRedisPort = new Port { Id = Guid.NewGuid(), Name = "redis", Type = PortType.Database, Direction = PortDirection.Out };
+        var hubMinioPort = new Port { Id = Guid.NewGuid(), Name = "minio", Type = PortType.Storage, Direction = PortDirection.Out };
+        var hubHttpPort = new Port { Id = Guid.NewGuid(), Name = "http", Type = PortType.Network, Direction = PortDirection.In };
+
+        var hubServer = new Image
+        {
+            Id = Guid.NewGuid(), Name = "hub_server", Kind = ImageKind.HubServer,
+            Width = 140, Height = 60,
+            Ports = [hubHttpPort, hubPgPort, hubRedisPort, hubMinioPort],
+            Config = new() { ["replicas"] = "1-3" },
+            Scaling = ImageScaling.Shared
+        };
+
+        var pgPort = new Port { Id = Guid.NewGuid(), Name = "postgres", Type = PortType.Database, Direction = PortDirection.In };
+        var pgHub = new Image
+        {
+            Id = Guid.NewGuid(), Name = "pg_hub", Kind = ImageKind.PostgreSQL,
+            Width = 120, Height = 50, Ports = [pgPort], Scaling = ImageScaling.Shared
+        };
+
+        var redisPort = new Port { Id = Guid.NewGuid(), Name = "redis", Type = PortType.Database, Direction = PortDirection.In };
+        var redisHub = new Image
+        {
+            Id = Guid.NewGuid(), Name = "redis_hub", Kind = ImageKind.Redis,
+            Width = 120, Height = 50, Ports = [redisPort], Scaling = ImageScaling.Shared
+        };
+
+        var minioPort = new Port { Id = Guid.NewGuid(), Name = "s3", Type = PortType.Storage, Direction = PortDirection.In };
+        var minioHub = new Image
+        {
+            Id = Guid.NewGuid(), Name = "mio_hub", Kind = ImageKind.MinIO,
+            Width = 120, Height = 50, Ports = [minioPort], Scaling = ImageScaling.Shared
+        };
+
+        var caddy = new Container
+        {
+            Id = Guid.NewGuid(), Name = "Caddy", Kind = ContainerKind.Caddy,
+            Width = 600, Height = 400,
+            Images = [hubServer, pgHub, redisHub, minioHub],
+            Config = new() { ["domain"] = "xcord.net" },
+            Ports =
+            [
+                new() { Id = Guid.NewGuid(), Name = "http_in", Type = PortType.Network, Direction = PortDirection.In, Side = PortSide.Top },
+                new() { Id = Guid.NewGuid(), Name = "https_in", Type = PortType.Network, Direction = PortDirection.In, Side = PortSide.Top },
+            ]
+        };
+
+        var dns = new Container
+        {
+            Id = Guid.NewGuid(), Name = "XCord Net", Kind = ContainerKind.Dns,
+            Width = 700, Height = 500,
+            Children = [caddy],
+            Config = new() { ["domain"] = "xcord.net", ["provider"] = "linode" },
+            Ports = [new() { Id = Guid.NewGuid(), Name = "records", Type = PortType.Network, Direction = PortDirection.In }]
+        };
+
+        var wires = new List<Wire>
+        {
+            new() { FromNodeId = hubServer.Id, FromPortId = hubPgPort.Id, ToNodeId = pgHub.Id, ToPortId = pgPort.Id },
+            new() { FromNodeId = hubServer.Id, FromPortId = hubRedisPort.Id, ToNodeId = redisHub.Id, ToPortId = redisPort.Id },
+            new() { FromNodeId = hubServer.Id, FromPortId = hubMinioPort.Id, ToNodeId = minioHub.Id, ToPortId = minioPort.Id },
+        };
+
+        return new Topology
+        {
+            Name = "Hub Server Test",
+            Provider = "aws",
+            Containers = [dns],
+            Wires = wires,
+            Registry = "docker.xcord.net",
+            ServiceKeys = new()
+            {
+                ["registry_url"] = "docker.xcord.net",
+                ["registry_username"] = "admin",
+                ["smtp_host"] = "smtp.sendgrid.net",
+                ["smtp_username"] = "apikey",
+                ["smtp_from_address"] = "noreply@xcord.net",
+                ["hub_admin_username"] = "admin",
+                ["hub_admin_email"] = "admin@xcord.net",
+                ["hub_base_domain"] = "xcord.net",
+            }
         };
     }
 

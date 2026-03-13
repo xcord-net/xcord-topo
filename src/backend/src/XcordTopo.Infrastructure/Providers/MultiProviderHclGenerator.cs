@@ -247,15 +247,13 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         vars.Block("variable \"hub_version\"", b =>
         {
             b.RawAttribute("type", "string");
-            b.Attribute("default", "latest");
-            b.Attribute("description", "Version tag for hub server image");
+            b.Attribute("description", "Version tag for hub server image (e.g. v0.1.5)");
         });
         vars.Line();
         vars.Block("variable \"fed_version\"", b =>
         {
             b.RawAttribute("type", "string");
-            b.Attribute("default", "latest");
-            b.Attribute("description", "Version tag for federation server image");
+            b.Attribute("description", "Version tag for federation server image (e.g. v0.1.5)");
         });
         vars.Line();
         vars.Block("variable \"deploy_apps\"", b =>

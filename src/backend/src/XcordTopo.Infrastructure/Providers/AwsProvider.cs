@@ -436,15 +436,13 @@ public sealed class AwsProvider : ProviderHclBase
         vars.Block("variable \"hub_version\"", b =>
         {
             b.RawAttribute("type", "string");
-            b.Attribute("default", "latest");
-            b.Attribute("description", "Version tag for hub server image");
+            b.Attribute("description", "Version tag for hub server image (e.g. v0.1.5)");
         });
         vars.Line();
         vars.Block("variable \"fed_version\"", b =>
         {
             b.RawAttribute("type", "string");
-            b.Attribute("default", "latest");
-            b.Attribute("description", "Version tag for federation server image");
+            b.Attribute("description", "Version tag for federation server image (e.g. v0.1.5)");
         });
         vars.Line();
         vars.Block("variable \"deploy_apps\"", b =>
@@ -1638,8 +1636,9 @@ public sealed class AwsProvider : ProviderHclBase
                     // Docker login for private registry
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
 
-                    b.Line($"  \"sudo docker rm -f {resourceName} 2>/dev/null || true\",");
+                    // Pull new image while old container still serves
                     b.Line($"  \"sudo docker pull {dockerImage}\",");
+                    b.Line($"  \"sudo docker rm -f {resourceName} 2>/dev/null || true\",");
 
                     var flags = new List<string> { "-d", $"--name {resourceName}", "--network xcord-bridge", "--restart unless-stopped" };
                     foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");

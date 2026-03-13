@@ -897,9 +897,10 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     const mode = deployMode();
 
     if (mode === 'destroy') {
+      const destroyVersions = imageVersions();
       setExecutePhase('init');
       setOutputLines(prev => [...prev, { text: '=== Terraform Init ===', isError: false }]);
-      let ok = await runTerraformCommand('init');
+      let ok = await runTerraformCommand('init', { imageVersions: destroyVersions });
       if (!ok) {
         setExecuteResult('failure');
         topo.updateDeployStatus('Failed', topo.topology.deployedResourceCount);
@@ -910,7 +911,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
 
       setExecutePhase('destroy');
       setOutputLines(prev => [...prev, { text: '\n=== Terraform Destroy ===', isError: false }]);
-      ok = await runTerraformCommand('destroy');
+      ok = await runTerraformCommand('destroy', { imageVersions: destroyVersions });
       setExecuteResult(ok ? 'success' : 'failure');
       if (ok) {
         topo.updateDeployStatus(undefined, 0);
@@ -929,28 +930,29 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       setExecuting(false);
     };
 
+    const versions = imageVersions();
+
     // Init
     setExecutePhase('init');
     setOutputLines(prev => [...prev, { text: '=== Terraform Init ===', isError: false }]);
-    let ok = await runTerraformCommand('init');
+    let ok = await runTerraformCommand('init', { imageVersions: versions });
     if (!ok) { await persistFailure(); return; }
 
     // Plan
     setExecutePhase('plan');
     setOutputLines(prev => [...prev, { text: '\n=== Terraform Plan ===', isError: false }]);
-    ok = await runTerraformCommand('plan');
+    ok = await runTerraformCommand('plan', { imageVersions: versions });
     if (!ok) { await persistFailure(); return; }
 
     // Apply
     setExecutePhase('apply');
     setOutputLines(prev => [...prev, { text: '\n=== Terraform Apply ===', isError: false }]);
-    ok = await runTerraformCommand('apply');
+    ok = await runTerraformCommand('apply', { imageVersions: versions });
     if (!ok) { await persistFailure(); return; }
 
     // Push images to registry
     setExecutePhase('push-images');
     setOutputLines(prev => [...prev, { text: '\n=== Push Images ===', isError: false }]);
-    const versions = imageVersions();
     const appImages = collectAppImageKinds(topo.topology);
     const imagePushSpecs: deployApi.ImageVersionSpec[] = appImages.map(kind => ({
       kind,

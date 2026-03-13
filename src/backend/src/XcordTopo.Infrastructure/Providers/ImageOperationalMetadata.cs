@@ -68,8 +68,8 @@ public static class ImageOperationalMetadata
             CommandOverride: null,
             EnvVarTemplates: new()
             {
-                ["ConnectionStrings__DefaultConnection"] = "{pg}",
-                ["ConnectionStrings__Redis"] = "{redis}"
+                ["Database__ConnectionString"] = "{pg}",
+                ["Redis__ConnectionString"] = "{redis}"
             },
             IsPublicEndpoint: true
         ),
@@ -81,8 +81,8 @@ public static class ImageOperationalMetadata
             CommandOverride: null,
             EnvVarTemplates: new()
             {
-                ["ConnectionStrings__DefaultConnection"] = "{pg}",
-                ["ConnectionStrings__Redis"] = "{redis}",
+                ["Database__ConnectionString"] = "{pg}",
+                ["Redis__ConnectionString"] = "{redis}",
                 ["MinIO__Endpoint"] = "{minio_endpoint}",
                 ["MinIO__AccessKey"] = "{minio_accessKey}",
                 ["MinIO__SecretKey"] = "{minio_secretKey}"

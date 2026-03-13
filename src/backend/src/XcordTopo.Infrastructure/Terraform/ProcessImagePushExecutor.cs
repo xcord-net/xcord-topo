@@ -66,12 +66,13 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
                     if (cts.Token.IsCancellationRequested) break;
 
                     var fullTag = $"{registryUrl}/{image.RegistryName}:{image.GitRef}";
+                    var dotnetVersion = NormalizeVersion(image.GitRef);
 
-                    // Build from git URL — Docker daemon clones the repo at the specified ref
+                    // Build from git URL via BuildKit — handles git cloning natively
                     await WriteLineAsync(channel.Writer, $"--- docker build {image.RegistryName}:{image.GitRef} ---");
 
                     var buildExitCode = await RunDockerCommandAsync(
-                        $"buildx build --build-arg VERSION={image.GitRef} -t {fullTag} --load {image.RepoUrl}#{image.GitRef}",
+                        $"buildx build --build-arg VERSION={dotnetVersion} -t {fullTag} --load {image.RepoUrl}#{image.GitRef}",
                         channel.Writer, cts.Token);
 
                     if (buildExitCode != 0)
@@ -153,8 +154,10 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
 
         using var process = Process.Start(psi)!;
 
+        // Docker/BuildKit write progress to stderr — don't mark as error.
+        // Actual failures are detected via non-zero exit code.
         var outputTask = ReadStreamAsync(process.StandardOutput, false, writer, ct);
-        var errorTask = ReadStreamAsync(process.StandardError, true, writer, ct);
+        var errorTask = ReadStreamAsync(process.StandardError, false, writer, ct);
 
         await Task.WhenAll(outputTask, errorTask);
         await process.WaitForExitAsync(ct);
@@ -233,7 +236,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
         process.StandardInput.Close();
 
         var outputTask = ReadStreamAsync(process.StandardOutput, false, writer, ct);
-        var errorTask = ReadStreamAsync(process.StandardError, true, writer, ct);
+        var errorTask = ReadStreamAsync(process.StandardError, false, writer, ct);
 
         await Task.WhenAll(outputTask, errorTask);
         await process.WaitForExitAsync(ct);
@@ -258,6 +261,22 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
                 IsError = isError
             }, ct);
         }
+    }
+
+    /// <summary>
+    /// Converts a git ref (e.g. "v0.1", "v0.1.5") into a valid NuGet/SemVer version for dotnet publish.
+    /// Strips the "v" prefix and ensures at least three version parts (major.minor.patch).
+    /// </summary>
+    private static string NormalizeVersion(string gitRef)
+    {
+        var ver = gitRef.StartsWith('v') ? gitRef[1..] : gitRef;
+        var parts = ver.Split('.');
+        return parts.Length switch
+        {
+            1 => $"{parts[0]}.0.0",
+            2 => $"{parts[0]}.{parts[1]}.0",
+            _ => ver
+        };
     }
 
     private static Task WriteLineAsync(ChannelWriter<TerraformOutputLine> writer, string text, bool isError = false) =>

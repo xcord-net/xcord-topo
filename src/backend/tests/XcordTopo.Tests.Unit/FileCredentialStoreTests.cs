@@ -41,7 +41,7 @@ public sealed class FileCredentialStoreTests : IDisposable
         var variables = new Dictionary<string, string>
         {
             ["linode_token"] = "abc123secret",
-            ["region"] = "us-east",
+            ["linode_region"] = "us-east",
             ["domain"] = "example.com"
         };
 
@@ -51,14 +51,14 @@ public sealed class FileCredentialStoreTests : IDisposable
         Assert.True(status.HasCredentials);
         Assert.Equal(3, status.SetVariables.Count);
         Assert.Contains("linode_token", status.SetVariables);
-        Assert.Contains("region", status.SetVariables);
+        Assert.Contains("linode_region", status.SetVariables);
         Assert.Contains("domain", status.SetVariables);
 
         // Token is sensitive — should NOT appear in non-sensitive values
         Assert.DoesNotContain("linode_token", status.NonSensitiveValues.Keys);
 
         // Region and domain are NOT sensitive — should appear
-        Assert.Equal("us-east", status.NonSensitiveValues["region"]);
+        Assert.Equal("us-east", status.NonSensitiveValues["linode_region"]);
         Assert.Equal("example.com", status.NonSensitiveValues["domain"]);
     }
 
@@ -67,7 +67,7 @@ public sealed class FileCredentialStoreTests : IDisposable
     {
         await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
         {
-            ["region"] = "us-east",
+            ["linode_region"] = "us-east",
             ["domain"] = "old.com"
         });
 
@@ -75,13 +75,13 @@ public sealed class FileCredentialStoreTests : IDisposable
         await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
         {
             ["domain"] = "new.com",
-            ["ssh_public_key"] = "ssh-rsa AAAA"
+            ["instance_count"] = "3"
         });
 
         var status = await _store.GetStatusAsync(TestTopologyId, "linode");
         Assert.Equal(3, status.SetVariables.Count);
         Assert.Equal("new.com", status.NonSensitiveValues["domain"]);
-        Assert.Equal("us-east", status.NonSensitiveValues["region"]);
+        Assert.Equal("us-east", status.NonSensitiveValues["linode_region"]);
     }
 
     [Fact]
@@ -89,13 +89,13 @@ public sealed class FileCredentialStoreTests : IDisposable
     {
         await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
         {
-            ["region"] = "us-east",
+            ["linode_region"] = "us-east",
             ["domain"] = "example.com"
         });
 
         await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
         {
-            ["region"] = ""
+            ["linode_region"] = ""
         });
 
         var status = await _store.GetStatusAsync(TestTopologyId, "linode");
@@ -137,6 +137,70 @@ public sealed class FileCredentialStoreTests : IDisposable
         var status = await _store.GetStatusAsync(TestTopologyId, "linode");
         Assert.True(status.HasCredentials);
         Assert.Equal(2, status.SetVariables.Count);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_MigratesLegacyRegionKey_Linode()
+    {
+        // Simulate old tfvars with bare "region" key
+        await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
+        {
+            ["linode_token"] = "tok_123",
+            ["region"] = "us-lax"
+        });
+
+        var status = await _store.GetStatusAsync(TestTopologyId, "linode");
+
+        // Old "region" should be migrated to "linode_region"
+        Assert.Contains("linode_region", status.SetVariables);
+        Assert.DoesNotContain("region", status.SetVariables);
+        Assert.Equal("us-lax", status.NonSensitiveValues["linode_region"]);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_MigratesLegacyRegionKey_Aws()
+    {
+        await _store.SaveAsync(TestTopologyId, "aws", new Dictionary<string, string>
+        {
+            ["aws_access_key_id"] = "AKIA...",
+            ["region"] = "us-west-1"
+        });
+
+        var status = await _store.GetStatusAsync(TestTopologyId, "aws");
+
+        Assert.Contains("aws_region", status.SetVariables);
+        Assert.DoesNotContain("region", status.SetVariables);
+        Assert.Equal("us-west-1", status.NonSensitiveValues["aws_region"]);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_DoesNotOverwriteNewKey_WhenBothExist()
+    {
+        // If someone already has both old and new keys, keep the new one
+        var filePath = Path.Combine(_tempDir, "deployments", TestTopologyId.ToString(), "credentials", "linode.tfvars");
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        await File.WriteAllTextAsync(filePath, "region = \"us-east\"\nlinode_region = \"us-lax\"\n");
+
+        var status = await _store.GetStatusAsync(TestTopologyId, "linode");
+
+        Assert.Equal("us-lax", status.NonSensitiveValues["linode_region"]);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_RemovesObsoleteSshKeys()
+    {
+        await _store.SaveAsync(TestTopologyId, "linode", new Dictionary<string, string>
+        {
+            ["linode_token"] = "tok_123",
+            ["ssh_public_key"] = "ssh-rsa AAAA",
+            ["ssh_private_key"] = "-----BEGIN-----"
+        });
+
+        var status = await _store.GetStatusAsync(TestTopologyId, "linode");
+
+        Assert.DoesNotContain("ssh_public_key", status.SetVariables);
+        Assert.DoesNotContain("ssh_private_key", status.SetVariables);
+        Assert.Single(status.SetVariables); // only linode_token remains
     }
 
     [Theory]

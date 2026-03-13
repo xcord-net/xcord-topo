@@ -310,6 +310,48 @@ function checkBackupFrequency(topology: Topology, items: ValidationItem[]): void
   });
 }
 
+function checkBackupTarget(topology: Topology, items: ValidationItem[]): void {
+  const bt = topology.backupTarget;
+  if (!bt) return;
+
+  if (!bt.bucketName?.trim()) {
+    items.push({
+      severity: 'Error',
+      message: 'Backup target: bucket name is required.',
+      field: 'backupTarget.bucketName',
+    });
+  }
+  if (!bt.region?.trim()) {
+    items.push({
+      severity: 'Error',
+      message: 'Backup target: region is required.',
+      field: 'backupTarget.region',
+    });
+  }
+  if (bt.kind === 'S3Compatible' && !bt.endpoint?.trim()) {
+    items.push({
+      severity: 'Error',
+      message: 'Backup target: endpoint is required for S3 Compatible storage.',
+      field: 'backupTarget.endpoint',
+    });
+  }
+  if (bt.glacierTransitionDays !== undefined) {
+    if (bt.kind !== 'AwsS3') {
+      items.push({
+        severity: 'Warning',
+        message: 'Backup target: glacierTransitionDays is only applicable for AWS S3.',
+        field: 'backupTarget.glacierTransitionDays',
+      });
+    } else if (bt.glacierTransitionDays <= 0) {
+      items.push({
+        severity: 'Error',
+        message: 'Backup target: glacierTransitionDays must be greater than 0.',
+        field: 'backupTarget.glacierTransitionDays',
+      });
+    }
+  }
+}
+
 // --- Public API ---
 
 export function validateTopology(topology: Topology): ValidationItem[] {
@@ -329,6 +371,9 @@ export function validateTopology(topology: Topology): ValidationItem[] {
   // Warnings
   checkOrphanedImages(topology, items);
   checkBackupFrequency(topology, items);
+
+  // Topology-level
+  checkBackupTarget(topology, items);
 
   return items;
 }

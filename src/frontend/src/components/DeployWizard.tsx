@@ -784,18 +784,18 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         // Small delay to let the server set up the stream
         await new Promise(r => setTimeout(r, 200));
 
+        // Track exit code outside SolidJS signal to avoid stale reads in onDone
+        let sawExitCodeZero = false;
+
         streamHandle = deployApi.connectTerraformStream(
           topo.topology.id,
           (line) => {
             setOutputLines(prev => [...prev, line]);
+            if (line.text.includes("exited with code 0")) sawExitCodeZero = true;
           },
           () => {
             streamHandle = null;
-            // Require explicit "exited with code 0" to count as success.
-            // Missing terraform, spawn failures, or non-zero exits all fail.
-            const lines = outputLines();
-            const succeeded = lines.some(l => l.text.includes("exited with code 0"));
-            resolve(succeeded);
+            resolve(sawExitCodeZero);
           },
         );
       } catch (e: any) {
@@ -812,16 +812,17 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         // Small delay to let the server set up the stream
         await new Promise(r => setTimeout(r, 200));
 
+        let sawExitCodeZero = false;
+
         streamHandle = deployApi.connectImagePushStream(
           topo.topology.id,
           (line) => {
             setOutputLines(prev => [...prev, line]);
+            if (line.text.includes("exited with code 0")) sawExitCodeZero = true;
           },
           () => {
             streamHandle = null;
-            const lines = outputLines();
-            const succeeded = lines.some(l => l.text.includes("exited with code 0"));
-            resolve(succeeded);
+            resolve(sawExitCodeZero);
           },
         );
       } catch (e: any) {
@@ -839,9 +840,20 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     const mode = deployMode();
 
     if (mode === 'destroy') {
+      setExecutePhase('init');
+      setOutputLines(prev => [...prev, { text: '=== Terraform Init ===', isError: false }]);
+      let ok = await runTerraformCommand('init');
+      if (!ok) {
+        setExecuteResult('failure');
+        topo.updateDeployStatus('Failed', topo.topology.deployedResourceCount);
+        await saveTopology(topo.topology);
+        setExecuting(false);
+        return;
+      }
+
       setExecutePhase('destroy');
-      setOutputLines(prev => [...prev, { text: '=== Terraform Destroy ===', isError: false }]);
-      const ok = await runTerraformCommand('destroy');
+      setOutputLines(prev => [...prev, { text: '\n=== Terraform Destroy ===', isError: false }]);
+      ok = await runTerraformCommand('destroy');
       setExecuteResult(ok ? 'success' : 'failure');
       if (ok) {
         topo.updateDeployStatus(undefined, 0);
@@ -853,29 +865,36 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
       return;
     }
 
+    const persistFailure = async () => {
+      setExecuteResult('failure');
+      topo.updateDeployStatus('Failed', topo.topology.deployedResourceCount);
+      await saveTopology(topo.topology);
+      setExecuting(false);
+    };
+
     // Init
     setExecutePhase('init');
     setOutputLines(prev => [...prev, { text: '=== Terraform Init ===', isError: false }]);
     let ok = await runTerraformCommand('init');
-    if (!ok) { setExecuteResult('failure'); setExecuting(false); return; }
+    if (!ok) { await persistFailure(); return; }
 
     // Plan
     setExecutePhase('plan');
     setOutputLines(prev => [...prev, { text: '\n=== Terraform Plan ===', isError: false }]);
     ok = await runTerraformCommand('plan');
-    if (!ok) { setExecuteResult('failure'); setExecuting(false); return; }
+    if (!ok) { await persistFailure(); return; }
 
     // Apply
     setExecutePhase('apply');
     setOutputLines(prev => [...prev, { text: '\n=== Terraform Apply ===', isError: false }]);
     ok = await runTerraformCommand('apply');
-    if (!ok) { setExecuteResult('failure'); setExecuting(false); return; }
+    if (!ok) { await persistFailure(); return; }
 
     // Push images to registry
     setExecutePhase('push-images');
     setOutputLines(prev => [...prev, { text: '\n=== Push Images ===', isError: false }]);
     ok = await runImagePush('latest');
-    if (!ok) { setExecuteResult('failure'); setExecuting(false); return; }
+    if (!ok) { await persistFailure(); return; }
 
     // Deploy application containers (second apply with deploy_apps=true)
     setExecutePhase('deploy-apps');
@@ -925,6 +944,8 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
     // Don't restore to execute or migrate steps — fall back to review
     if (restoredStep === 'execute' || restoredStep === 'migrate') {
       restoredStep = 'review';
+      // Reset deploy mode — it will be recalculated at the review step
+      setDeployMode('fresh');
     }
     if (restoredStep === 'provider' || !saved.provider) {
       // Start fresh from provider step
@@ -1079,7 +1100,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
             </button>
           </Show>
         </label>
-        {field.type === 'select' && field.key === 'region' ? (
+        {field.type === 'select' && field.key.endsWith('_region') ? (
           <select
             class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand`}
             value={credentialValues()[field.key] ?? ''}
@@ -1239,7 +1260,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
             <FieldHelp help={field.help!} />
           </Show>
         </label>
-        {field.type === 'select' && field.key === 'region' ? (
+        {field.type === 'select' && field.key.endsWith('_region') ? (
           <select
             class={`w-full bg-topo-bg-primary border ${borderClass()} rounded px-2 py-1.5 text-sm text-topo-text-primary focus:outline-none focus:border-topo-brand`}
             value={vals()[field.key] ?? ''}

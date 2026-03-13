@@ -264,6 +264,87 @@ public static class ServiceKeySchema
                 Url = "https://console.cloud.google.com/apis/library/tenor.googleapis.com"
             },
             Validation = [new() { Type = "minLength", Value = "10", Message = "API key must be at least 10 characters" }]
+        },
+
+        // --- Cold Storage ---
+        new()
+        {
+            Key = "coldstore_access_key",
+            Label = "Cold Storage Access Key",
+            Type = "text",
+            Sensitive = true,
+            Required = true,
+            Placeholder = "AKIAIOSFODNN7EXAMPLE",
+            Help = new()
+            {
+                Summary = "S3-compatible access key for the cold storage backup bucket",
+                Steps =
+                [
+                    "For Linode Object Storage: created automatically by Terraform — leave blank",
+                    "For AWS S3: use an IAM user access key with S3 permissions — leave blank if using the same credentials as EC2",
+                    "For Wasabi/Backblaze B2: create an application key in your provider dashboard"
+                ]
+            },
+            Validation = [new() { Type = "minLength", Value = "1", Message = "Access key is required" }]
+        },
+        new()
+        {
+            Key = "coldstore_secret_key",
+            Label = "Cold Storage Secret Key",
+            Type = "password",
+            Sensitive = true,
+            Required = true,
+            Placeholder = "Enter S3-compatible secret key",
+            Help = new()
+            {
+                Summary = "S3-compatible secret key for the cold storage backup bucket",
+                Steps =
+                [
+                    "For Linode Object Storage: created automatically by Terraform — leave blank",
+                    "For AWS S3: use the corresponding IAM user secret key — leave blank if using the same credentials as EC2",
+                    "For Wasabi/Backblaze B2: use the application key secret from your provider dashboard"
+                ]
+            },
+            Validation = [new() { Type = "minLength", Value = "1", Message = "Secret key is required" }]
+        },
+        new()
+        {
+            Key = "coldstore_endpoint",
+            Label = "Cold Storage Endpoint",
+            Type = "text",
+            Sensitive = false,
+            Required = false,
+            Placeholder = "s3.wasabisys.com",
+            Help = new()
+            {
+                Summary = "S3-compatible endpoint URL for cold storage (required for non-AWS/Linode providers)",
+                Steps =
+                [
+                    "For Linode Object Storage: auto-populated from Terraform outputs",
+                    "For AWS S3: leave blank (uses default AWS endpoints)",
+                    "For Wasabi: s3.wasabisys.com (or region-specific, e.g., s3.us-west-1.wasabisys.com)",
+                    "For Backblaze B2: s3.us-west-001.backblazeb2.com (check your bucket's endpoint)"
+                ]
+            }
+        },
+        new()
+        {
+            Key = "coldstore_bucket",
+            Label = "Cold Storage Bucket",
+            Type = "text",
+            Sensitive = false,
+            Required = true,
+            Placeholder = "xcord-backups",
+            Help = new()
+            {
+                Summary = "S3 bucket name for storing backups",
+                Steps =
+                [
+                    "For Linode/AWS: created automatically by Terraform — enter the desired bucket name",
+                    "For S3-compatible providers: the bucket must already exist"
+                ]
+            },
+            Validation = [new() { Type = "minLength", Value = "3", Message = "Bucket name must be at least 3 characters" }]
         }
     ];
 }

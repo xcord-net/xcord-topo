@@ -44,7 +44,7 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
         var workDir = _hclFileManager.GetTerraformDirectory(topologyId);
         var args = command switch
         {
-            TerraformCommand.Init => "init -no-color",
+            TerraformCommand.Init => "init -no-color -upgrade",
             TerraformCommand.Plan => "plan -no-color -input=false",
             TerraformCommand.Apply => "apply -no-color -input=false -auto-approve",
             TerraformCommand.Destroy => "destroy -no-color -input=false -auto-approve",

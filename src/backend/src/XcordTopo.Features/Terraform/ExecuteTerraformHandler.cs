@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using XcordTopo.Infrastructure.Credentials;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Terraform;
@@ -12,7 +13,7 @@ public sealed record ExecuteTerraformRequest(Guid TopologyId, string Command, bo
 
 public sealed record ExecuteTerraformResponse(string Status);
 
-public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopologyStore topologyStore)
+public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopologyStore topologyStore, ICredentialStore credentialStore)
     : IRequestHandler<ExecuteTerraformRequest, Result<ExecuteTerraformResponse>>, IValidatable<ExecuteTerraformRequest>
 {
     private static readonly HashSet<string> ValidCommands = new(StringComparer.OrdinalIgnoreCase)
@@ -37,6 +38,10 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
         var providerKeys = topology != null
             ? TopologyHelpers.CollectActiveProviderKeys(topology)
             : new List<string> { "linode" };
+
+        // Ensure credential files have migrated keys before Terraform reads them
+        foreach (var key in providerKeys)
+            await credentialStore.GetRawVariablesAsync(request.TopologyId, key, ct);
 
         var command = Enum.Parse<TerraformCommand>(request.Command, ignoreCase: true);
         Dictionary<string, string>? extraVars = request.DeployApps

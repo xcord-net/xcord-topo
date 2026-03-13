@@ -8,6 +8,9 @@ namespace XcordTopo.Infrastructure.Terraform;
 
 public sealed class ProcessImagePushExecutor : IImagePushExecutor
 {
+    // Docker CLI config dir — writable regardless of which UID the container runs as
+    private static readonly string DockerConfigDir = Path.Combine(Path.GetTempPath(), ".docker");
+
     private readonly ILogger<ProcessImagePushExecutor> _logger;
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _runningProcesses = new();
     private readonly ConcurrentDictionary<Guid, ChannelReader<TerraformOutputLine>> _activeReaders = new();
@@ -37,6 +40,24 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
         {
             try
             {
+                // Wait for registry to be reachable (DNS propagation + TLS cert provisioning)
+                await channel.Writer.WriteAsync(new TerraformOutputLine
+                {
+                    Text = "--- waiting for registry to be reachable ---",
+                    IsError = false
+                }, CancellationToken.None);
+
+                var registryReady = await WaitForRegistryAsync(registryUrl, channel.Writer, cts.Token);
+                if (!registryReady)
+                {
+                    await channel.Writer.WriteAsync(new TerraformOutputLine
+                    {
+                        Text = $"\n--- Image push exited with code 1 ---",
+                        IsError = true
+                    }, CancellationToken.None);
+                    return;
+                }
+
                 // Docker login — use --password-stdin to avoid leaking password in process args
                 await channel.Writer.WriteAsync(new TerraformOutputLine
                 {
@@ -57,10 +78,10 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
 
                 var steps = new[]
                 {
-                    ($"tag xcord-hub:latest {registryUrl}/xcord-hub:{imageTag}", $"docker tag xcord-hub:{imageTag}"),
-                    ($"push {registryUrl}/xcord-hub:{imageTag}", $"docker push xcord-hub:{imageTag}"),
-                    ($"tag xcord-fed:latest {registryUrl}/xcord-fed:{imageTag}", $"docker tag xcord-fed:{imageTag}"),
-                    ($"push {registryUrl}/xcord-fed:{imageTag}", $"docker push xcord-fed:{imageTag}"),
+                    ($"tag xcord-hub:latest {registryUrl}/hub:{imageTag}", $"docker tag hub:{imageTag}"),
+                    ($"push {registryUrl}/hub:{imageTag}", $"docker push hub:{imageTag}"),
+                    ($"tag xcord-fed:latest {registryUrl}/fed:{imageTag}", $"docker tag fed:{imageTag}"),
+                    ($"push {registryUrl}/fed:{imageTag}", $"docker push fed:{imageTag}"),
                 };
 
                 int lastExitCode = 0;
@@ -83,6 +104,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
                         UseShellExecute = false,
                         CreateNoWindow = true
                     };
+                    psi.Environment["DOCKER_CONFIG"] = DockerConfigDir;
 
                     using var process = Process.Start(psi)!;
 
@@ -161,6 +183,67 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
         }
     }
 
+    private static async Task<bool> WaitForRegistryAsync(
+        string registryUrl,
+        ChannelWriter<TerraformOutputLine> writer,
+        CancellationToken ct)
+    {
+        // Registry may need time for DNS propagation + Caddy TLS cert provisioning
+        const int maxAttempts = 30;
+        const int delaySeconds = 10;
+        var url = registryUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+            ? $"{registryUrl}/v2/"
+            : $"https://{registryUrl}/v2/";
+
+        // Accept self-signed or Let's Encrypt staging certs during initial provisioning
+        var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (_, _, _, _) => true
+        };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+
+        for (var i = 1; i <= maxAttempts; i++)
+        {
+            try
+            {
+                var response = await client.GetAsync(url, ct);
+                // 200 or 401 (auth required) both mean registry is up
+                if ((int)response.StatusCode is 200 or 401)
+                {
+                    await writer.WriteAsync(new TerraformOutputLine
+                    {
+                        Text = $"Registry reachable (HTTP {(int)response.StatusCode})",
+                        IsError = false
+                    }, ct);
+                    return true;
+                }
+
+                await writer.WriteAsync(new TerraformOutputLine
+                {
+                    Text = $"Attempt {i}/{maxAttempts}: HTTP {(int)response.StatusCode}, retrying in {delaySeconds}s...",
+                    IsError = false
+                }, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await writer.WriteAsync(new TerraformOutputLine
+                {
+                    Text = $"Attempt {i}/{maxAttempts}: {ex.GetType().Name}: {ex.Message}, retrying in {delaySeconds}s...",
+                    IsError = false
+                }, ct);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), ct);
+        }
+
+        await writer.WriteAsync(new TerraformOutputLine
+        {
+            Text = $"Registry not reachable after {maxAttempts * delaySeconds}s",
+            IsError = true
+        }, ct);
+        return false;
+    }
+
     private static async Task<int> RunDockerLoginAsync(
         string registryUrl,
         string username,
@@ -178,6 +261,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        psi.Environment["DOCKER_CONFIG"] = DockerConfigDir;
 
         using var process = Process.Start(psi)!;
 

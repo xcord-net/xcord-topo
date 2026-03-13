@@ -488,15 +488,15 @@ public static class TopologyHelpers
         {
             var value = template switch
             {
-                "{password}" => $"${{random_password.{poolName}_{imgName}_password.result}}",
-                "{accessKey}" => $"${{random_password.{poolName}_{imgName}_access_key.result}}",
-                "{secretKey}" => $"${{random_password.{poolName}_{imgName}_secret_key.result}}",
+                "{password}" => $"${{nonsensitive(random_password.{poolName}_{imgName}_password.result)}}",
+                "{accessKey}" => $"${{nonsensitive(random_password.{poolName}_{imgName}_access_key.result)}}",
+                "{secretKey}" => $"${{nonsensitive(random_password.{poolName}_{imgName}_secret_key.result)}}",
                 "{dbName}" => dbName,
-                "{pg}" => $"Host=shared-{pgName};Port=5432;Database={dbName};Username=postgres;Password=${{random_password.{poolName}_{pgName}_password.result}}",
-                "{redis}" => $"shared-{redisName}:6379,password=${{random_password.{poolName}_{redisName}_password.result}}",
+                "{pg}" => $"Host=shared-{pgName};Port=5432;Database={dbName};Username=postgres;Password=${{nonsensitive(random_password.{poolName}_{pgName}_password.result)}}",
+                "{redis}" => $"shared-{redisName}:6379,password=${{nonsensitive(random_password.{poolName}_{redisName}_password.result)}}",
                 "{minio_endpoint}" => $"shared-{minioName}:9000",
-                "{minio_accessKey}" => $"${{random_password.{poolName}_{minioName}_access_key.result}}",
-                "{minio_secretKey}" => $"${{random_password.{poolName}_{minioName}_secret_key.result}}",
+                "{minio_accessKey}" => $"${{nonsensitive(random_password.{poolName}_{minioName}_access_key.result)}}",
+                "{minio_secretKey}" => $"${{nonsensitive(random_password.{poolName}_{minioName}_secret_key.result)}}",
                 _ => template
             };
             parts.Add($"-e {envKey}={value}");
@@ -508,7 +508,7 @@ public static class TopologyHelpers
         if (meta.CommandOverride != null)
         {
             var cmd = meta.CommandOverride;
-            cmd = cmd.Replace("{password}", $"${{random_password.{poolName}_{imgName}_password.result}}");
+            cmd = cmd.Replace("{password}", $"${{nonsensitive(random_password.{poolName}_{imgName}_password.result)}}");
             parts.Add(cmd);
         }
 
@@ -552,7 +552,7 @@ public static class TopologyHelpers
         {
             case ImageKind.PostgreSQL:
             {
-                var secretRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_password.result}}";
+                var secretRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_password.result)}}";
                 var dbName = DeriveDbName(image, resolver);
                 envVars.Add(("POSTGRES_PASSWORD", secretRef));
                 envVars.Add(("POSTGRES_DB", dbName));
@@ -563,8 +563,8 @@ public static class TopologyHelpers
                 break;
             case ImageKind.MinIO:
             {
-                var accessKeyRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_access_key.result}}";
-                var secretKeyRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_secret_key.result}}";
+                var accessKeyRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_access_key.result)}}";
+                var secretKeyRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_secret_key.result)}}";
                 envVars.Add(("MINIO_ROOT_USER", accessKeyRef));
                 envVars.Add(("MINIO_ROOT_PASSWORD", secretKeyRef));
                 break;
@@ -578,7 +578,7 @@ public static class TopologyHelpers
                     var pgHost = resolver.FindHostFor(pgTarget.Id);
                     var pgHostName = pgHost != null ? SanitizeName(pgHost.Name) : hostName;
                     var dbName = DeriveDbName(pgTarget, resolver);
-                    var pgSecretRef = $"${{random_password.{pgHostName}_{pgContainer}_password.result}}";
+                    var pgSecretRef = $"${{nonsensitive(random_password.{pgHostName}_{pgContainer}_password.result)}}";
                     var pgAddress = topology != null
                         ? ResolveServiceHost(pgTarget, sourceHost, resolver, topology)
                         : pgContainer;
@@ -593,7 +593,7 @@ public static class TopologyHelpers
                     var redisContainer = SanitizeName(redisTarget.Name);
                     var redisHost = resolver.FindHostFor(redisTarget.Id);
                     var redisHostName = redisHost != null ? SanitizeName(redisHost.Name) : hostName;
-                    var redisSecretRef = $"${{random_password.{redisHostName}_{redisContainer}_password.result}}";
+                    var redisSecretRef = $"${{nonsensitive(random_password.{redisHostName}_{redisContainer}_password.result)}}";
                     var redisAddress = topology != null
                         ? ResolveServiceHost(redisTarget, sourceHost, resolver, topology)
                         : redisContainer;
@@ -625,7 +625,7 @@ public static class TopologyHelpers
                     var pgHost = resolver.FindHostFor(pgTarget.Id);
                     var pgHostName = pgHost != null ? SanitizeName(pgHost.Name) : hostName;
                     var dbName = DeriveDbName(pgTarget, resolver);
-                    var pgSecretRef = $"${{random_password.{pgHostName}_{pgContainer}_password.result}}";
+                    var pgSecretRef = $"${{nonsensitive(random_password.{pgHostName}_{pgContainer}_password.result)}}";
                     var pgAddress = topology != null
                         ? ResolveServiceHost(pgTarget, sourceHost, resolver, topology)
                         : pgContainer;
@@ -640,7 +640,7 @@ public static class TopologyHelpers
                     var redisContainer = SanitizeName(redisTarget.Name);
                     var redisHost = resolver.FindHostFor(redisTarget.Id);
                     var redisHostName = redisHost != null ? SanitizeName(redisHost.Name) : hostName;
-                    var redisSecretRef = $"${{random_password.{redisHostName}_{redisContainer}_password.result}}";
+                    var redisSecretRef = $"${{nonsensitive(random_password.{redisHostName}_{redisContainer}_password.result)}}";
                     var redisAddress = topology != null
                         ? ResolveServiceHost(redisTarget, sourceHost, resolver, topology)
                         : redisContainer;
@@ -655,8 +655,8 @@ public static class TopologyHelpers
                     var minioContainer = SanitizeName(minioTarget.Name);
                     var minioHost = resolver.FindHostFor(minioTarget.Id);
                     var minioHostName = minioHost != null ? SanitizeName(minioHost.Name) : hostName;
-                    var accessRef = $"${{random_password.{minioHostName}_{minioContainer}_access_key.result}}";
-                    var secretRef = $"${{random_password.{minioHostName}_{minioContainer}_secret_key.result}}";
+                    var accessRef = $"${{nonsensitive(random_password.{minioHostName}_{minioContainer}_access_key.result)}}";
+                    var secretRef = $"${{nonsensitive(random_password.{minioHostName}_{minioContainer}_secret_key.result)}}";
                     var minioAddress = topology != null
                         ? ResolveServiceHost(minioTarget, sourceHost, resolver, topology)
                         : minioContainer;
@@ -681,8 +681,8 @@ public static class TopologyHelpers
             }
             case ImageKind.LiveKit:
             {
-                var apiKeyRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_api_key.result}}";
-                var apiSecretRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_api_secret.result}}";
+                var apiKeyRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_api_key.result)}}";
+                var apiSecretRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_api_secret.result)}}";
                 envVars.Add(("LIVEKIT_KEYS", $"{apiKeyRef}:{apiSecretRef}"));
 
                 var redisTarget = resolver.ResolveWiredImage(image.Id, "redis");
@@ -691,7 +691,7 @@ public static class TopologyHelpers
                     var redisContainer = SanitizeName(redisTarget.Name);
                     var redisHost = resolver.FindHostFor(redisTarget.Id);
                     var redisHostName = redisHost != null ? SanitizeName(redisHost.Name) : hostName;
-                    var redisSecretRef = $"${{random_password.{redisHostName}_{redisContainer}_password.result}}";
+                    var redisSecretRef = $"${{nonsensitive(random_password.{redisHostName}_{redisContainer}_password.result)}}";
                     var redisAddress = topology != null
                         ? ResolveServiceHost(redisTarget, sourceHost, resolver, topology)
                         : redisContainer;
@@ -717,12 +717,20 @@ public static class TopologyHelpers
         // If no keys from the group are defined at all, skip entirely.
         var prefix = serviceKey.Split('_')[0];
         var schema = ServiceKeySchema.GetSchema();
+        var field = schema.FirstOrDefault(f => f.Key.Equals(serviceKey, StringComparison.OrdinalIgnoreCase));
         var groupHasAnyKey = schema
             .Where(f => f.Key.StartsWith(prefix + "_", StringComparison.OrdinalIgnoreCase) || f.Key == prefix)
             .Any(f => topology.ServiceKeys.ContainsKey(f.Key));
 
         if (groupHasAnyKey)
-            envVars.Add((envVarName, $"${{var.{serviceKey}}}"));
+        {
+            // Wrap sensitive vars with nonsensitive() to prevent Terraform from
+            // suppressing all provisioner output when these appear in inline commands.
+            var varRef = field?.Sensitive == true
+                ? $"${{nonsensitive(var.{serviceKey})}}"
+                : $"${{var.{serviceKey}}}";
+            envVars.Add((envVarName, varRef));
+        }
     }
 
     public static string? ResolveCommandOverride(Image image, HostEntry entry, WireResolver resolver)
@@ -730,7 +738,7 @@ public static class TopologyHelpers
         if (image.Kind == ImageKind.Redis)
         {
             var hostName = SanitizeName(entry.Host.Name);
-            var secretRef = $"${{random_password.{hostName}_{SanitizeName(image.Name)}_password.result}}";
+            var secretRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_password.result)}}";
             return $"redis-server --requirepass {secretRef}";
         }
 
@@ -742,7 +750,7 @@ public static class TopologyHelpers
 
     // --- Backup ---
 
-    public static List<string> GenerateBackupCommands(List<Image> images, Container host)
+    public static List<string> GenerateBackupCommands(List<Image> images, Container host, BackupTarget? backupTarget = null)
     {
         var commands = new List<string>();
         var scheduleMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -785,7 +793,22 @@ public static class TopologyHelpers
 
             if (backupCmd == null) continue;
 
-            var scriptContent = $"#!/bin/bash\\n{backupCmd}\\nfind {backupDir} -type f -mtime +{retention} -delete\\nfind {backupDir} -type d -empty -delete";
+            var hostName = SanitizeName(host.Name);
+            var scriptLines = new List<string> { "#!/bin/bash", backupCmd };
+
+            if (backupTarget != null)
+            {
+                scriptLines.Add("source /opt/backups/.coldstore.env");
+                scriptLines.Add($"BACKUP_FILE=$(ls -t {backupDir}/{containerName}_* 2>/dev/null | head -1)");
+                scriptLines.Add("if [ -n \"$BACKUP_FILE\" ]; then");
+                scriptLines.Add($"  aws s3 cp \"$BACKUP_FILE\" \"s3://${{COLDSTORE_BUCKET}}/host-backups/{hostName}/{containerName}/\" --endpoint-url \"https://${{COLDSTORE_ENDPOINT}}\"");
+                scriptLines.Add("fi");
+            }
+
+            scriptLines.Add($"find {backupDir} -type f -mtime +{retention} -delete");
+            scriptLines.Add($"find {backupDir} -type d -empty -delete");
+
+            var scriptContent = string.Join("\\n", scriptLines);
 
             commands.Add($"mkdir -p {backupDir}");
             commands.Add($"printf '{scriptContent}\\n' > {backupDir}/backup.sh");
@@ -794,6 +817,19 @@ public static class TopologyHelpers
         }
 
         return commands;
+    }
+
+    public static List<string> GenerateColdStoreEnvSetup()
+    {
+        return
+        [
+            "apt-get install -y -qq awscli > /dev/null 2>&1",
+            "mkdir -p /opt/backups",
+            $"printf 'export COLDSTORE_BUCKET=%s\\nexport COLDSTORE_ENDPOINT=%s\\nexport AWS_ACCESS_KEY_ID=%s\\nexport AWS_SECRET_ACCESS_KEY=%s\\n' " +
+                $"'${{var.coldstore_bucket}}' '${{var.coldstore_endpoint}}' " +
+                $"'${{nonsensitive(var.coldstore_access_key)}}' '${{nonsensitive(var.coldstore_secret_key)}}' > /opt/backups/.coldstore.env",
+            "chmod 600 /opt/backups/.coldstore.env"
+        ];
     }
 
     /// <summary>
@@ -1029,10 +1065,11 @@ public static class TopologyHelpers
 
         return
         [
-            $"iptables -A INPUT -p tcp --dport 80 -m hashlimit --hashlimit-above {rateConfig} --hashlimit-burst {burst} --hashlimit-mode srcip --hashlimit-name {caddyName}_http -j DROP",
-            $"iptables -A INPUT -p tcp --dport 443 -m hashlimit --hashlimit-above {rateConfig} --hashlimit-burst {burst} --hashlimit-mode srcip --hashlimit-name {caddyName}_https -j DROP",
+            "modprobe xt_hashlimit 2>/dev/null || true",
+            $"iptables -A INPUT -p tcp --dport 80 -m hashlimit --hashlimit-above {rateConfig} --hashlimit-burst {burst} --hashlimit-mode srcip --hashlimit-name {caddyName}_http -j DROP || true",
+            $"iptables -A INPUT -p tcp --dport 443 -m hashlimit --hashlimit-above {rateConfig} --hashlimit-burst {burst} --hashlimit-mode srcip --hashlimit-name {caddyName}_https -j DROP || true",
             "mkdir -p /etc/iptables",
-            "iptables-save > /etc/iptables/rules.v4"
+            "sh -c 'iptables-save > /etc/iptables/rules.v4'"
         ];
     }
 
@@ -1305,7 +1342,7 @@ public static class TopologyHelpers
     public static string GenerateDockerLoginCommand(bool useSudo)
     {
         var sudo = useSudo ? "sudo " : "";
-        return $"{sudo}bash -c 'if [ -n \\\"${{var.registry_username}}\\\" ]; then echo \\\"${{var.registry_password}}\\\" | docker login ${{var.registry_url}} -u \\\"${{var.registry_username}}\\\" --password-stdin; fi'";
+        return $"{sudo}bash -c 'if [ -n \\\"${{var.registry_username}}\\\" ]; then echo \\\"${{nonsensitive(var.registry_password)}}\\\" | docker login ${{var.registry_url}} -u \\\"${{var.registry_username}}\\\" --password-stdin; fi'";
     }
 
     /// <summary>

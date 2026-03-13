@@ -6,7 +6,7 @@ import { useHistory } from '../stores/history.store';
 import { useValidation } from '../stores/validation.store';
 import { containerDefinitions } from '../catalog/containers';
 import { imageDefinitions } from '../catalog/images';
-import type { Container, ContainerKind, Image } from '../types/topology';
+import type { Container, ContainerKind, Image, BackupTarget, BackupTargetKind } from '../types/topology';
 
 function findContainerDeep(containers: Container[], id: string): Container | null {
   for (const c of containers) {
@@ -342,7 +342,120 @@ const PropertiesPanel: Component = () => {
       </Show>
 
       <Show when={!selectedContainer() && !selectedImage()}>
-        <p class="text-sm text-topo-text-muted italic">Select a node to view properties</p>
+        <div class="space-y-4">
+          <p class="text-sm text-topo-text-muted italic">Select a node to view properties</p>
+
+          {/* Backup Target section */}
+          <div class="border-t border-topo-border pt-3 mt-3">
+            <h4 class="text-xs font-semibold text-topo-text-muted uppercase tracking-wider mb-3">Cold Storage Backups</h4>
+            <div class="flex items-center gap-2 mb-3">
+              <input
+                id="backup-target-enabled"
+                type="checkbox"
+                class="w-3.5 h-3.5 accent-topo-brand"
+                checked={!!topo.topology.backupTarget}
+                onChange={(e) => {
+                  history.push(topo.getSnapshot());
+                  if (e.currentTarget.checked) {
+                    topo.updateBackupTarget({
+                      label: 'Primary Backup',
+                      kind: 'LinodeObjectStorage',
+                      region: '',
+                      bucketName: '',
+                    });
+                  } else {
+                    topo.updateBackupTarget(null);
+                  }
+                }}
+              />
+              <label for="backup-target-enabled" class="text-xs text-topo-text-secondary cursor-pointer">
+                Enable cold storage backups
+              </label>
+            </div>
+
+            <Show when={topo.topology.backupTarget}>
+              {(bt) => {
+                const updateField = <K extends keyof BackupTarget>(key: K, value: BackupTarget[K]) => {
+                  history.push(topo.getSnapshot());
+                  topo.updateBackupTarget({ ...bt(), [key]: value });
+                };
+
+                return (
+                  <div class="space-y-2">
+                    <div>
+                      <label class="text-xs text-topo-text-muted">Kind</label>
+                      <select
+                        class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                        value={bt().kind}
+                        onChange={(e) => {
+                          const kind = e.currentTarget.value as BackupTargetKind;
+                          history.push(topo.getSnapshot());
+                          const updated: BackupTarget = { ...bt(), kind };
+                          if (kind !== 'S3Compatible') delete updated.endpoint;
+                          if (kind !== 'AwsS3') delete updated.glacierTransitionDays;
+                          topo.updateBackupTarget(updated);
+                        }}
+                      >
+                        <option value="LinodeObjectStorage">Linode Object Storage</option>
+                        <option value="AwsS3">AWS S3</option>
+                        <option value="S3Compatible">S3 Compatible</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label class="text-xs text-topo-text-muted">Region</label>
+                      <input
+                        class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                        value={bt().region}
+                        placeholder="e.g. us-east-1"
+                        onInput={(e) => updateField('region', e.currentTarget.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label class="text-xs text-topo-text-muted">Bucket Name</label>
+                      <input
+                        class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                        value={bt().bucketName}
+                        placeholder="my-backup-bucket"
+                        onInput={(e) => updateField('bucketName', e.currentTarget.value)}
+                      />
+                    </div>
+
+                    <Show when={bt().kind === 'S3Compatible'}>
+                      <div>
+                        <label class="text-xs text-topo-text-muted">Endpoint</label>
+                        <input
+                          class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                          value={bt().endpoint ?? ''}
+                          placeholder="https://s3.example.com"
+                          onInput={(e) => updateField('endpoint', e.currentTarget.value)}
+                        />
+                      </div>
+                    </Show>
+
+                    <Show when={bt().kind === 'AwsS3'}>
+                      <div>
+                        <label class="text-xs text-topo-text-muted">Glacier Transition Days</label>
+                        <input
+                          type="number"
+                          class="w-full bg-topo-bg-tertiary border border-topo-border rounded px-2 py-1 text-sm text-topo-text-primary mt-1"
+                          value={bt().glacierTransitionDays ?? ''}
+                          placeholder="e.g. 90"
+                          min="1"
+                          onInput={(e) => {
+                            const v = e.currentTarget.value;
+                            updateField('glacierTransitionDays', v === '' ? undefined : parseInt(v, 10));
+                          }}
+                        />
+                      </div>
+                    </Show>
+                  </div>
+                );
+              }}
+            </Show>
+          </div>
+        </div>
       </Show>
     </div>
   );

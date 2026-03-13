@@ -124,7 +124,7 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
             name = "Round Trip Test",
             description = "Exercises every model field",
             provider = "aws",
-            providerConfig = new Dictionary<string, string> { ["region"] = "us-east-1" },
+            providerConfig = new Dictionary<string, string> { ["aws_region"] = "us-east-1" },
             serviceKeys = new Dictionary<string, string>
             {
                 ["smtp_host"] = "mail.test.net",
@@ -338,7 +338,7 @@ public sealed class TopologySaveTests : IClassFixture<TopoWebApplicationFactory>
         Assert.Equal("Succeeded", loaded.GetProperty("lastDeployStatus").GetString());
 
         // --- Dictionaries ---
-        Assert.Equal("us-east-1", loaded.GetProperty("providerConfig").GetProperty("region").GetString());
+        Assert.Equal("us-east-1", loaded.GetProperty("providerConfig").GetProperty("aws_region").GetString());
         var keys = loaded.GetProperty("serviceKeys");
         Assert.Equal("mail.test.net", keys.GetProperty("smtp_host").GetString());
         Assert.Equal("admin@test.net", keys.GetProperty("smtp_username").GetString());

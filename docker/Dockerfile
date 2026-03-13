@@ -2,17 +2,19 @@
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
 WORKDIR /app
 
-# Install Terraform and SSH client
-RUN apk add --no-cache wget unzip openssh-client && \
+# Install Terraform, SSH client, and Docker CLI
+RUN apk add --no-cache wget unzip openssh-client docker-cli && \
     wget -q https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -O /tmp/terraform.zip && \
     unzip /tmp/terraform.zip -d /usr/local/bin/ && \
     rm /tmp/terraform.zip && \
     chmod +x /usr/local/bin/terraform && \
     apk del wget unzip
 
-# Create non-root user
+# Create non-root user with home directory
 RUN addgroup -g 1001 xcord-topo && \
     adduser -u 1001 -G xcord-topo -s /bin/sh -D xcord-topo
+
+ENV HOME=/home/xcord-topo
 
 # Create data directories
 RUN mkdir -p /data/topologies /data/deployments
@@ -27,7 +29,7 @@ COPY .build/wwwroot/ ./wwwroot/
 COPY docker/data/topologies/ /data/topologies/
 
 # Set ownership
-RUN chown -R xcord-topo:xcord-topo /data /app
+RUN chown -R xcord-topo:xcord-topo /data /app /home/xcord-topo
 
 USER xcord-topo
 

@@ -28,6 +28,7 @@ public sealed class FileCredentialStore : ICredentialStore
         if (!File.Exists(filePath))
             return new CredentialStatus { HasCredentials = false };
 
+        await MigrateKeysAsync(filePath, providerKey, ct);
         var variables = await ParseTfVarsAsync(filePath, ct);
 
         var status = new CredentialStatus
@@ -83,7 +84,60 @@ public sealed class FileCredentialStore : ICredentialStore
         var filePath = GetFilePath(topologyId, providerKey);
         if (!File.Exists(filePath))
             return new Dictionary<string, string>();
+        await MigrateKeysAsync(filePath, providerKey, ct);
         return await ParseTfVarsAsync(filePath, ct);
+    }
+
+    /// <summary>
+    /// Renames legacy tfvars keys to their current namespaced equivalents.
+    /// Rewrites the file in-place so migration only happens once per topology.
+    /// </summary>
+    private static readonly Dictionary<string, Dictionary<string, string>> KeyMigrations = new()
+    {
+        ["aws"] = new() { ["region"] = "aws_region" },
+        ["linode"] = new() { ["region"] = "linode_region" },
+    };
+
+    /// <summary>Keys that are no longer user-provided (e.g., Terraform now auto-generates SSH keys).</summary>
+    private static readonly HashSet<string> ObsoleteKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ssh_public_key", "ssh_private_key"
+    };
+
+    private async Task MigrateKeysAsync(string filePath, string providerKey, CancellationToken ct)
+    {
+        if (!File.Exists(filePath)) return;
+
+        var variables = await ParseTfVarsAsync(filePath, ct);
+        var changed = false;
+
+        // Rename legacy keys
+        if (KeyMigrations.TryGetValue(providerKey, out var renames))
+        {
+            foreach (var (oldKey, newKey) in renames)
+            {
+                if (variables.ContainsKey(oldKey))
+                {
+                    if (!variables.ContainsKey(newKey))
+                        variables[newKey] = variables[oldKey];
+                    variables.Remove(oldKey);
+                    changed = true;
+                }
+            }
+        }
+
+        // Remove obsolete keys
+        foreach (var key in ObsoleteKeys)
+        {
+            if (variables.Remove(key))
+                changed = true;
+        }
+
+        if (changed)
+        {
+            var lines = variables.Select(kv => $"{kv.Key} = \"{EscapeTfValue(kv.Value)}\"");
+            await File.WriteAllTextAsync(filePath, string.Join('\n', lines) + '\n', ct);
+        }
     }
 
     private string GetFilePath(Guid topologyId, string providerKey) =>

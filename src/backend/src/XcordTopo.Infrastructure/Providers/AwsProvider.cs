@@ -65,7 +65,7 @@ public sealed class AwsProvider : ProviderHclBase
                     "Select \"Third-party service\" use case",
                     "Copy both the Access Key ID and Secret Access Key"
                 ],
-                Permissions = "EC2 full access, VPC full access, Route53 full access (or AmazonEC2FullAccess + AmazonRoute53FullAccess managed policies)",
+                Permissions = "EC2: RunInstances, TerminateInstances, DescribeInstances, DescribeImages, DescribeInstanceTypes, CreateTags, CreateKeyPair, DeleteKeyPair, DescribeKeyPairs | VPC: CreateVpc, DeleteVpc, DescribeVpcs, ModifyVpcAttribute, CreateSubnet, DeleteSubnet, DescribeSubnets, CreateInternetGateway, DeleteInternetGateway, AttachInternetGateway, DetachInternetGateway, DescribeInternetGateways, CreateRouteTable, DeleteRouteTable, CreateRoute, DescribeRouteTables, AssociateRouteTable, DisassociateRouteTable | Security Groups: CreateSecurityGroup, DeleteSecurityGroup, DescribeSecurityGroups, AuthorizeSecurityGroupIngress, AuthorizeSecurityGroupEgress, RevokeSecurityGroupIngress, RevokeSecurityGroupEgress (or use the AmazonEC2FullAccess managed policy)",
                 Note = "AWS will recommend using IAM roles instead — this is expected. IAM roles are for workloads running on AWS infrastructure; static access keys are the correct choice for external management tools.",
                 Url = "https://console.aws.amazon.com/iam/home#/users"
             },
@@ -95,7 +95,7 @@ public sealed class AwsProvider : ProviderHclBase
         },
         new()
         {
-            Key = "region",
+            Key = "aws_region",
             Label = "Region",
             Type = "select",
             Sensitive = false,
@@ -135,28 +135,6 @@ public sealed class AwsProvider : ProviderHclBase
             },
             Validation = [new() { Type = "pattern", Value = @"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$", Message = "Enter a valid domain name (e.g. example.com)" }]
         },
-        new()
-        {
-            Key = "ssh_public_key",
-            Label = "SSH Public Key",
-            Type = "textarea",
-            Sensitive = false,
-            Required = false,
-            Placeholder = "ssh-rsa AAAA...",
-            Help = new()
-            {
-                Summary = "SSH public key for EC2 instance access",
-                Steps =
-                [
-                    "Generate a key pair: ssh-keygen -t ed25519",
-                    "Copy the public key: cat ~/.ssh/id_ed25519.pub",
-                    "Paste the full public key here",
-                    "The key will be imported as an AWS key pair"
-                ],
-                Url = "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html"
-            },
-            Validation = [new() { Type = "pattern", Value = @"^ssh-(rsa|ed25519|ecdsa)\s+[A-Za-z0-9+/=]+", Message = "Must be a valid SSH public key (ssh-rsa, ssh-ed25519, or ssh-ecdsa)" }]
-        }
     ];
 
     public override Dictionary<string, string> GenerateHcl(
@@ -182,6 +160,10 @@ public sealed class AwsProvider : ProviderHclBase
 
         if (dnsContainers.Count > 0)
             files["dns.tf"] = GenerateDnsRecords(dnsContainers, resolver, topology);
+
+        var coldStorage = GenerateColdStorage(topology);
+        if (coldStorage != null)
+            files["coldstorage.tf"] = coldStorage;
 
         return files;
     }
@@ -221,7 +203,72 @@ public sealed class AwsProvider : ProviderHclBase
         if (dnsContainers.Count > 0)
             files["dns_aws.tf"] = GenerateDnsRecords(dnsContainers, resolver, topology);
 
+        var coldStorage = GenerateColdStorage(topology);
+        if (coldStorage != null)
+            files["coldstorage_aws.tf"] = coldStorage;
+
         return files;
+    }
+
+    // --- Cold storage (S3) generation ---
+
+    private string? GenerateColdStorage(Topology topology)
+    {
+        if (topology.BackupTarget is null || topology.BackupTarget.Kind != BackupTargetKind.AwsS3)
+            return null;
+
+        var glacierDays = topology.BackupTarget.GlacierTransitionDays ?? 30;
+        var hcl = new HclBuilder();
+
+        hcl.Block("resource \"aws_s3_bucket\" \"backups\"", b =>
+        {
+            b.RawAttribute("bucket", "var.coldstore_bucket");
+        });
+        hcl.Line();
+
+        hcl.Block("resource \"aws_s3_bucket_versioning\" \"backups\"", b =>
+        {
+            b.RawAttribute("bucket", "aws_s3_bucket.backups.id");
+            b.Line();
+            b.Block("versioning_configuration", inner =>
+            {
+                inner.Attribute("status", "Enabled");
+            });
+        });
+        hcl.Line();
+
+        hcl.Block("resource \"aws_s3_bucket_lifecycle_configuration\" \"backups\"", b =>
+        {
+            b.RawAttribute("bucket", "aws_s3_bucket.backups.id");
+            b.Line();
+            b.Block("rule", rule =>
+            {
+                rule.Attribute("id", "glacier-transition");
+                rule.Attribute("status", "Enabled");
+                rule.Line();
+                rule.Block("transition", t =>
+                {
+                    t.Attribute("days", glacierDays);
+                    t.Attribute("storage_class", "GLACIER");
+                });
+            });
+        });
+        hcl.Line();
+
+        hcl.Block("output \"coldstore_endpoint\"", b =>
+        {
+            b.RawAttribute("value", "\"s3.${var.aws_region}.amazonaws.com\"");
+            b.Attribute("description", "Cold storage endpoint for backups");
+        });
+        hcl.Line();
+
+        hcl.Block("output \"coldstore_bucket\"", b =>
+        {
+            b.RawAttribute("value", "aws_s3_bucket.backups.id");
+            b.Attribute("description", "Cold storage bucket name");
+        });
+
+        return hcl.ToString();
     }
 
     // --- DNS record generation ---
@@ -320,6 +367,11 @@ public sealed class AwsProvider : ProviderHclBase
                     rp.Attribute("source", "hashicorp/random");
                     rp.Attribute("version", "~> 3.0");
                 });
+                p.MapBlock("tls", tp =>
+                {
+                    tp.Attribute("source", "hashicorp/tls");
+                    tp.Attribute("version", "~> 4.0");
+                });
             });
         });
         main.Line();
@@ -327,7 +379,12 @@ public sealed class AwsProvider : ProviderHclBase
         {
             b.RawAttribute("access_key", "var.aws_access_key_id");
             b.RawAttribute("secret_key", "var.aws_secret_access_key");
-            b.RawAttribute("region", "var.region");
+            b.RawAttribute("region", "var.aws_region");
+        });
+        main.Line();
+        main.Block("resource \"tls_private_key\" \"deploy\"", b =>
+        {
+            b.Attribute("algorithm", "ED25519");
         });
         return main.ToString();
     }
@@ -349,10 +406,10 @@ public sealed class AwsProvider : ProviderHclBase
             b.RawAttribute("sensitive", "true");
         });
         vars.Line();
-        vars.Block("variable \"region\"", b =>
+        vars.Block("variable \"aws_region\"", b =>
         {
             b.RawAttribute("type", "string");
-            b.Attribute("default", topology.ProviderConfig.GetValueOrDefault("region", "us-east-1"));
+            b.Attribute("default", topology.ProviderConfig.GetValueOrDefault("aws_region", "us-east-1"));
             b.Attribute("description", "AWS region");
         });
         vars.Line();
@@ -362,19 +419,11 @@ public sealed class AwsProvider : ProviderHclBase
             b.Attribute("description", "Primary domain name");
         });
         vars.Line();
-        vars.Block("variable \"ssh_public_key\"", b =>
+        vars.Block("variable \"ssh_cidr_blocks\"", b =>
         {
-            b.RawAttribute("type", "string");
-            b.Attribute("default", "");
-            b.Attribute("description", "SSH public key for instance access");
-        });
-        vars.Line();
-        vars.Block("variable \"ssh_private_key\"", b =>
-        {
-            b.RawAttribute("type", "string");
-            b.Attribute("default", "");
-            b.Attribute("description", "SSH private key for provisioner authentication");
-            b.RawAttribute("sensitive", "true");
+            b.RawAttribute("type", "list(string)");
+            b.RawAttribute("default", "[]");
+            b.Attribute("description", "CIDR blocks allowed for SSH access (empty = allow all, required for provisioners)");
         });
         vars.Line();
         vars.Block("variable \"registry_url\"", b =>
@@ -416,7 +465,7 @@ public sealed class AwsProvider : ProviderHclBase
         {
             b.RawAttribute("type", "list(string)");
             b.RawAttribute("default", "[]");
-            b.Attribute("description", "CIDR blocks allowed for SSH access (empty = no SSH)");
+            b.Attribute("description", "CIDR blocks allowed for SSH access (empty = allow all, required for provisioners)");
         });
 
         // Host replica variables
@@ -523,17 +572,15 @@ public sealed class AwsProvider : ProviderHclBase
             b.RawAttribute("vpc_id", $"aws_vpc.{name}.id");
             b.Line();
 
-            b.Block("dynamic \"ingress\"", db =>
+            // SSH is required for Terraform provisioners to connect.
+            // ssh_cidr_blocks narrows access; default allows all since topo's IP may not be known.
+            b.Block("ingress", ib =>
             {
-                db.RawAttribute("for_each", "length(var.ssh_cidr_blocks) > 0 ? [1] : []");
-                db.Block("content", cb =>
-                {
-                    cb.Attribute("description", "SSH");
-                    cb.Attribute("from_port", 22);
-                    cb.Attribute("to_port", 22);
-                    cb.Attribute("protocol", "tcp");
-                    cb.RawAttribute("cidr_blocks", "var.ssh_cidr_blocks");
-                });
+                ib.Attribute("description", "SSH");
+                ib.Attribute("from_port", 22);
+                ib.Attribute("to_port", 22);
+                ib.Attribute("protocol", "tcp");
+                ib.RawAttribute("cidr_blocks", "length(var.ssh_cidr_blocks) > 0 ? var.ssh_cidr_blocks : [\"0.0.0.0/0\"]");
             });
 
             b.Block("ingress", ib =>
@@ -619,9 +666,8 @@ public sealed class AwsProvider : ProviderHclBase
 
         instances.Block($"resource \"aws_key_pair\" \"{topoName}\"", b =>
         {
-            b.RawAttribute("count", "var.ssh_public_key != \"\" ? 1 : 0");
             b.Attribute("key_name", $"{topology.Name}-key");
-            b.RawAttribute("public_key", "var.ssh_public_key");
+            b.RawAttribute("public_key", "tls_private_key.deploy.public_key_openssh");
         });
         instances.Line();
 
@@ -661,7 +707,7 @@ public sealed class AwsProvider : ProviderHclBase
                 b.Attribute("instance_type", instanceType);
                 b.RawAttribute("subnet_id", $"aws_subnet.{topoName}.id");
                 b.RawAttribute("vpc_security_group_ids", $"[aws_security_group.{topoName}.id]");
-                b.RawAttribute("key_name", $"var.ssh_public_key != \"\" ? aws_key_pair.{topoName}[0].key_name : null");
+                b.RawAttribute("key_name", $"aws_key_pair.{topoName}.key_name");
                 b.Line();
 
                 b.Block("root_block_device", rb =>
@@ -705,7 +751,7 @@ public sealed class AwsProvider : ProviderHclBase
                 b.Attribute("instance_type", selectedPlan.Id);
                 b.RawAttribute("subnet_id", $"aws_subnet.{topoName}.id");
                 b.RawAttribute("vpc_security_group_ids", $"[aws_security_group.{topoName}.id]");
-                b.RawAttribute("key_name", $"var.ssh_public_key != \"\" ? aws_key_pair.{topoName}[0].key_name : null");
+                b.RawAttribute("key_name", $"aws_key_pair.{topoName}.key_name");
                 b.Line();
                 b.Block("root_block_device", rb =>
                 {
@@ -746,7 +792,7 @@ public sealed class AwsProvider : ProviderHclBase
                 b.Attribute("instance_type", instanceType);
                 b.RawAttribute("subnet_id", $"aws_subnet.{topoName}.id");
                 b.RawAttribute("vpc_security_group_ids", $"[aws_security_group.{topoName}.id]");
-                b.RawAttribute("key_name", $"var.ssh_public_key != \"\" ? aws_key_pair.{topoName}[0].key_name : null");
+                b.RawAttribute("key_name", $"aws_key_pair.{topoName}.key_name");
                 b.Line();
                 b.Block("root_block_device", rb =>
                 {
@@ -784,7 +830,7 @@ public sealed class AwsProvider : ProviderHclBase
                 b.Attribute("instance_type", instanceType);
                 b.RawAttribute("subnet_id", $"aws_subnet.{topoName}.id");
                 b.RawAttribute("vpc_security_group_ids", $"[aws_security_group.{topoName}.id]");
-                b.RawAttribute("key_name", $"var.ssh_public_key != \"\" ? aws_key_pair.{topoName}[0].key_name : null");
+                b.RawAttribute("key_name", $"aws_key_pair.{topoName}.key_name");
                 b.Line();
                 b.Block("root_block_device", rb =>
                 {
@@ -847,7 +893,7 @@ public sealed class AwsProvider : ProviderHclBase
                         ? $"aws_instance.{resourceName}[count.index].public_ip"
                         : $"aws_instance.{resourceName}.public_ip");
                     cb.Attribute("user", "ubuntu");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
 
@@ -864,11 +910,11 @@ public sealed class AwsProvider : ProviderHclBase
                     {
                         // Swarm mode — enables replicated services with built-in DNS load balancing
                         b.Line("  \"sudo docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')\",");
-                        b.Line("  \"sudo docker network create --driver overlay --attachable xcord-bridge\",");
+                        b.Line("  \"sudo docker network create --driver overlay --attachable xcord-bridge 2>/dev/null || true\",");
                     }
                     else
                     {
-                        b.Line("  \"sudo docker network create xcord-bridge\",");
+                        b.Line("  \"sudo docker network create xcord-bridge 2>/dev/null || true\",");
                     }
 
                     // Docker login for private registry images
@@ -911,7 +957,7 @@ public sealed class AwsProvider : ProviderHclBase
                             };
 
                             foreach (var (key, value) in envVars)
-                                flags.Add($"-e {key}={value}");
+                                flags.Add($"-e '{key}={value}'");
 
                             if (meta?.MountPath != null)
                                 flags.Add($"--mount type=volume,source={containerName}_data,target={meta.MountPath}");
@@ -929,6 +975,7 @@ public sealed class AwsProvider : ProviderHclBase
                                 flags.Add("-p 5000:5000");
 
                             var flagStr = string.Join(" ", flags);
+                            b.Line($"  \"sudo docker service rm {containerName} 2>/dev/null || true\",");
                             b.Line($"  \"sudo docker service create {flagStr} {dockerImage}{cmd}\",");
                         }
                         else
@@ -942,7 +989,7 @@ public sealed class AwsProvider : ProviderHclBase
                             };
 
                             foreach (var (key, value) in envVars)
-                                flags.Add($"-e {key}={value}");
+                                flags.Add($"-e '{key}={value}'");
 
                             if (meta?.MountPath != null)
                                 flags.Add($"-v {containerName}_data:{meta.MountPath}");
@@ -960,6 +1007,7 @@ public sealed class AwsProvider : ProviderHclBase
                                 flags.Add("-p 5000:5000");
 
                             var flagStr = string.Join(" ", flags);
+                            b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
                             b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
                         }
                     }
@@ -972,12 +1020,18 @@ public sealed class AwsProvider : ProviderHclBase
                         b.Line($"  \"sudo mkdir -p /opt/caddy\",");
                         var escapedCaddyfile = caddyfile.Replace("\"", "\\\"");
                         var caddyfileLines = escapedCaddyfile.Split('\n');
-                        b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                        b.Line($"  \"sudo tee /opt/caddy/Caddyfile > /dev/null << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
 
                         if (useSwarm)
+                        {
+                            b.Line($"  \"sudo docker service rm {caddyName} 2>/dev/null || true\",");
                             b.Line($"  \"sudo docker service create --name {caddyName} --replicas 1 --network xcord-bridge --restart-condition any -p 80:80 -p 443:443 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                        }
                         else
+                        {
+                            b.Line($"  \"sudo docker rm -f {caddyName} 2>/dev/null || true\",");
                             b.Line($"  \"sudo docker run -d --name {caddyName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                        }
 
                         // Always-on rate limiting for Caddy hosts
                         var rateLimitCmds = TopologyHelpers.GenerateRateLimitCommands(caddy);
@@ -993,7 +1047,7 @@ public sealed class AwsProvider : ProviderHclBase
 
                         // htpasswd auth when credentials are configured
                         b.Line($"  \"sudo mkdir -p /opt/registry/auth\",");
-                        b.Line($"  \"sudo bash -c 'if [ -n \\\"${{var.registry_username}}\\\" ]; then sudo apt-get install -y -qq apache2-utils && sudo htpasswd -Bbn \\\"${{var.registry_username}}\\\" \\\"${{var.registry_password}}\\\" > /opt/registry/auth/htpasswd; fi'\",");
+                        b.Line($"  \"sudo bash -c 'if [ -n \\\"${{var.registry_username}}\\\" ]; then sudo apt-get install -y -qq apache2-utils && sudo htpasswd -Bbn \\\"${{var.registry_username}}\\\" \\\"${{nonsensitive(var.registry_password)}}\\\" > /opt/registry/auth/htpasswd; fi'\",");
 
                         // Restart registry container with auth if htpasswd was created
                         b.Line($"  \"sudo bash -c 'if [ -f /opt/registry/auth/htpasswd ]; then sudo docker stop {registryName} 2>/dev/null; sudo docker rm {registryName} 2>/dev/null; sudo docker run -d --name {registryName} --network xcord-bridge --restart unless-stopped -v {registryName}_data:/var/lib/registry -v /opt/registry/auth:/auth -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=Registry -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd -p 5000:5000 registry:2; fi'\",");
@@ -1004,12 +1058,19 @@ public sealed class AwsProvider : ProviderHclBase
                         {
                             var registryCaddyfile = $"{registrySubdomain}.${{var.domain}} {{\\n  reverse_proxy {registryName}:5000\\n}}";
                             b.Line($"  \"sudo mkdir -p /opt/caddy\",");
-                            b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{registryCaddyfile}\\nCADDYEOF\",");
+                            b.Line($"  \"sudo tee /opt/caddy/Caddyfile > /dev/null << 'CADDYEOF'\\n{registryCaddyfile}\\nCADDYEOF\",");
+                            b.Line($"  \"sudo docker rm -f caddy_registry 2>/dev/null || true\",");
                             b.Line($"  \"sudo docker run -d --name caddy_registry --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
                         }
                     }
 
-                    var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host);
+                    if (topology.BackupTarget != null)
+                    {
+                        foreach (var cmd in TopologyHelpers.GenerateColdStoreEnvSetup())
+                            b.Line($"  \"sudo {cmd}\",");
+                    }
+
+                    var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host, topology.BackupTarget);
                     foreach (var cmd in backupCommands)
                         b.Line($"  \"{cmd}\",");
 
@@ -1044,7 +1105,7 @@ public sealed class AwsProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"aws_instance.{poolName}[0].public_ip");
                     cb.Attribute("user", "ubuntu");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
@@ -1056,7 +1117,7 @@ public sealed class AwsProvider : ProviderHclBase
                     b.Line("  \"sudo systemctl enable docker\",");
                     b.Line("  \"sudo systemctl start docker\",");
                     b.Line("  \"sudo docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')\",");
-                    b.Line("  \"sudo docker network create --driver overlay --attachable xcord-pool\",");
+                    b.Line("  \"sudo docker network create --driver overlay --attachable xcord-pool 2>/dev/null || true\",");
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
                     b.Line("  \"sudo docker swarm join-token -q worker | sudo tee /tmp/swarm-worker-token > /dev/null\",");
                     b.Line("  \"cd /tmp && nohup sudo python3 -m http.server 9999 &\",");
@@ -1078,7 +1139,8 @@ public sealed class AwsProvider : ProviderHclBase
                         b.Line($"  \"sudo mkdir -p /opt/caddy\",");
                         var escapedCaddyfile = caddyfile.Replace("\"", "\\\"");
                         var caddyfileLines = escapedCaddyfile.Split('\n');
-                        b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                        b.Line($"  \"sudo tee /opt/caddy/Caddyfile > /dev/null << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                        b.Line($"  \"sudo docker service rm {caddyName} 2>/dev/null || true\",");
                         b.Line($"  \"sudo docker service create --name {caddyName} --mode global --network xcord-pool -p 80:80 -p 443:443 -p 2019:2019 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
 
                         var rateLimitCmds = TopologyHelpers.GenerateRateLimitCommands(caddy);
@@ -1088,7 +1150,8 @@ public sealed class AwsProvider : ProviderHclBase
                     if (poolCaddies.Count == 0)
                     {
                         b.Line($"  \"sudo mkdir -p /opt/caddy\",");
-                        b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n\\nCADDYEOF\",");
+                        b.Line($"  \"sudo tee /opt/caddy/Caddyfile > /dev/null << 'CADDYEOF'\\n\\nCADDYEOF\",");
+                        b.Line($"  \"sudo docker service rm caddy 2>/dev/null || true\",");
                         b.Line($"  \"sudo docker service create --name caddy --mode global --network xcord-pool -p 80:80 -p 443:443 -p 2019:2019 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
                     }
 
@@ -1108,7 +1171,7 @@ public sealed class AwsProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"aws_instance.{poolName}[count.index + 1].public_ip");
                     cb.Attribute("user", "ubuntu");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
@@ -1158,7 +1221,7 @@ public sealed class AwsProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"aws_instance.{resourceName}.public_ip");
                     cb.Attribute("user", "ubuntu");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
@@ -1168,7 +1231,7 @@ public sealed class AwsProvider : ProviderHclBase
                     b.Line("  \"sudo usermod -aG docker ubuntu\",");
                     b.Line("  \"sudo systemctl enable docker\",");
                     b.Line("  \"sudo systemctl start docker\",");
-                    b.Line("  \"sudo docker network create xcord-bridge\",");
+                    b.Line("  \"sudo docker network create xcord-bridge 2>/dev/null || true\",");
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
 
                     // Deploy co-located non-elastic images on the Caddy host
@@ -1196,7 +1259,7 @@ public sealed class AwsProvider : ProviderHclBase
                         };
 
                         foreach (var (key, value) in envVars)
-                            flags.Add($"-e {key}={value}");
+                            flags.Add($"-e '{key}={value}'");
 
                         // Use pre-computed port assignments to avoid host port conflicts
                         if (allPortAssignments.TryGetValue(image.Id, out var portMap))
@@ -1212,13 +1275,15 @@ public sealed class AwsProvider : ProviderHclBase
                             flags.Add($"-v {containerName}_data:{meta.MountPath}");
 
                         var flagStr = string.Join(" ", flags);
+                        b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
                         b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
                     }
 
                     b.Line($"  \"sudo mkdir -p /opt/caddy\",");
                     var escapedCaddyfile = caddyfile.Replace("\"", "\\\"");
                     var caddyfileLines = escapedCaddyfile.Split('\n');
-                    b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                    b.Line($"  \"sudo tee /opt/caddy/Caddyfile > /dev/null << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                    b.Line($"  \"sudo docker rm -f {resourceName} 2>/dev/null || true\",");
                     b.Line($"  \"sudo docker run -d --name {resourceName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
 
                     // Always-on rate limiting for standalone Caddy
@@ -1264,7 +1329,7 @@ public sealed class AwsProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"aws_instance.{resourceName}[count.index].public_ip");
                     cb.Attribute("user", "ubuntu");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
 
@@ -1275,7 +1340,7 @@ public sealed class AwsProvider : ProviderHclBase
                     b.Line("  \"sudo usermod -aG docker ubuntu\",");
                     b.Line("  \"sudo systemctl enable docker\",");
                     b.Line("  \"sudo systemctl start docker\",");
-                    b.Line("  \"sudo docker network create xcord-bridge\",");
+                    b.Line("  \"sudo docker network create xcord-bridge 2>/dev/null || true\",");
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
 
                     var flags = new List<string>
@@ -1287,7 +1352,7 @@ public sealed class AwsProvider : ProviderHclBase
                     };
 
                     foreach (var (key, value) in envVars)
-                        flags.Add($"-e {key}={value}");
+                        flags.Add($"-e '{key}={value}'");
 
                     if (meta?.MountPath != null)
                         flags.Add($"-v {resourceName}_data:{meta.MountPath}");
@@ -1299,6 +1364,7 @@ public sealed class AwsProvider : ProviderHclBase
                     }
 
                     var flagStr = string.Join(" ", flags);
+                    b.Line($"  \"sudo docker rm -f {resourceName} 2>/dev/null || true\",");
                     b.Line($"  \"sudo docker run {flagStr} {dockerImage}\",");
 
                     pb.Line("]");
@@ -1334,6 +1400,10 @@ public sealed class AwsProvider : ProviderHclBase
             var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
             var useSwarm = TopologyHelpers.HostNeedsSwarmMode(entry.Host);
 
+            // Check if this host has a provision resource (hosts with only private images don't)
+            var allImages = TopologyHelpers.CollectImages(entry.Host);
+            var hasProvisionResource = allImages.Any(i => !TopologyHelpers.RequiresPrivateRegistry(i.Kind));
+
             provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}\"", b =>
             {
                 var countExpr = TopologyHelpers.GetHostCountExpression(entry);
@@ -1342,7 +1412,10 @@ public sealed class AwsProvider : ProviderHclBase
                 else
                     b.RawAttribute("count", "var.deploy_apps ? 1 : 0");
 
-                b.RawAttribute("depends_on", $"[null_resource.provision_{resourceName}]");
+                // Depend on provision resource if it exists, otherwise on the instance itself
+                b.RawAttribute("depends_on", hasProvisionResource
+                    ? $"[null_resource.provision_{resourceName}]"
+                    : $"[aws_instance.{resourceName}]");
                 b.Line();
 
                 // Force recreation when app version changes
@@ -1359,13 +1432,23 @@ public sealed class AwsProvider : ProviderHclBase
                         ? $"aws_instance.{resourceName}[count.index].public_ip"
                         : $"aws_instance.{resourceName}.public_ip");
                     cb.Attribute("user", "ubuntu");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
 
                 b.Block("provisioner \"remote-exec\"", pb =>
                 {
                     pb.RawAttribute("inline", "[");
+
+                    // Install Docker if this host had no provision resource (idempotent — skips if already installed)
+                    if (!hasProvisionResource)
+                    {
+                        b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
+                        b.Line("  \"sudo usermod -aG docker ubuntu\",");
+                        b.Line("  \"sudo systemctl enable docker\",");
+                        b.Line("  \"sudo systemctl start docker\",");
+                        b.Line("  \"sudo docker network create xcord-bridge 2>/dev/null || true\",");
+                    }
 
                     // Docker login for private registry
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
@@ -1398,7 +1481,7 @@ public sealed class AwsProvider : ProviderHclBase
                             };
 
                             foreach (var (key, value) in envVars)
-                                flags.Add($"-e {key}={value}");
+                                flags.Add($"-e '{key}={value}'");
 
                             if (meta?.MountPath != null)
                                 flags.Add($"--mount type=volume,source={containerName}_data,target={meta.MountPath}");
@@ -1425,7 +1508,7 @@ public sealed class AwsProvider : ProviderHclBase
                             };
 
                             foreach (var (key, value) in envVars)
-                                flags.Add($"-e {key}={value}");
+                                flags.Add($"-e '{key}={value}'");
 
                             if (meta?.MountPath != null)
                                 flags.Add($"-v {containerName}_data:{meta.MountPath}");
@@ -1476,7 +1559,7 @@ public sealed class AwsProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"aws_instance.{resourceName}.public_ip");
                     cb.Attribute("user", "ubuntu");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
@@ -1499,7 +1582,7 @@ public sealed class AwsProvider : ProviderHclBase
                         b.Line($"  \"sudo docker pull {dockerImage}\",");
 
                         var flags = new List<string> { "-d", $"--name {containerName}", "--network xcord-bridge", "--restart unless-stopped" };
-                        foreach (var (key, value) in envVars) flags.Add($"-e {key}={value}");
+                        foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
                         if (allPortAssignments.TryGetValue(image.Id, out var portMap))
                             foreach (var (containerPort, hostPort) in portMap) flags.Add($"-p {hostPort}:{containerPort}");
                         if (meta?.MountPath != null) flags.Add($"-v {containerName}_data:{meta.MountPath}");
@@ -1540,12 +1623,19 @@ public sealed class AwsProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"aws_instance.{resourceName}[count.index].public_ip");
                     cb.Attribute("user", "ubuntu");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
                 {
                     pb.RawAttribute("inline", "[");
+
+                    // Elastic images get dedicated instances — install Docker (idempotent)
+                    b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
+                    b.Line("  \"sudo usermod -aG docker ubuntu\",");
+                    b.Line("  \"sudo systemctl enable docker\",");
+                    b.Line("  \"sudo systemctl start docker\",");
+                    b.Line("  \"sudo docker network create xcord-bridge 2>/dev/null || true\",");
 
                     // Docker login for private registry
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
@@ -1554,7 +1644,7 @@ public sealed class AwsProvider : ProviderHclBase
                     b.Line($"  \"sudo docker pull {dockerImage}\",");
 
                     var flags = new List<string> { "-d", $"--name {resourceName}", "--network xcord-bridge", "--restart unless-stopped" };
-                    foreach (var (key, value) in envVars) flags.Add($"-e {key}={value}");
+                    foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
                     if (meta?.MountPath != null) flags.Add($"-v {resourceName}_data:{meta.MountPath}");
                     if (meta?.Ports.Length > 0)
                         foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");

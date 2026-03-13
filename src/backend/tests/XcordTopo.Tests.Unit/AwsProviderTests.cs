@@ -302,28 +302,27 @@ public class AwsProviderTests
     // --- SSH private key variable defined and used ---
 
     [Fact]
-    public void GenerateHcl_SshPrivateKey_DefinedInVariables()
+    public void GenerateHcl_TlsPrivateKey_GeneratedAutomatically()
     {
         var topology = CreateProductionRobustTopology();
         var files = _provider.GenerateHcl(topology);
-        var vars = files["variables.tf"];
+        var main = files["main.tf"];
 
-        // ssh_private_key must be defined as a sensitive variable for provisioners
-        Assert.Contains("variable \"ssh_private_key\"", vars);
-        Assert.Contains("sensitive", vars.Substring(vars.IndexOf("ssh_private_key")));
+        // tls_private_key resource must be generated for SSH access
+        Assert.Contains("resource \"tls_private_key\" \"deploy\"", main);
+        Assert.Contains("ED25519", main);
     }
 
     [Fact]
-    public void GenerateHcl_SshPrivateKey_UsedInAllProvisioners()
+    public void GenerateHcl_TlsPrivateKey_UsedInAllProvisioners()
     {
         var topology = CreateProductionRobustTopology();
         var files = _provider.GenerateHcl(topology);
         var provisioning = files["provisioning.tf"];
 
-        // Every provisioner connection block must use var.ssh_private_key
-        // Count all connection blocks vs ones with private_key
+        // Every provisioner connection block must use tls_private_key
         var connectionCount = CountOccurrences(provisioning, "connection {");
-        var privateKeyCount = CountOccurrences(provisioning, "var.ssh_private_key");
+        var privateKeyCount = CountOccurrences(provisioning, "tls_private_key.deploy.private_key_pem");
 
         Assert.True(connectionCount > 0, "Should have at least one connection block");
         Assert.Equal(connectionCount, privateKeyCount);
@@ -1012,23 +1011,24 @@ public class AwsProviderTests
         Assert.Contains("reverse_proxy", caddyBlock);
     }
 
-    // --- Issue 15: SSH open to 0.0.0.0/0 ---
+    // --- SSH uses ssh_cidr_blocks with fallback to 0.0.0.0/0 for provisioners ---
 
     [Fact]
-    public void GenerateHcl_SecurityGroup_SshNotOpenToWorld()
+    public void GenerateHcl_SecurityGroup_SshUsesCidrBlocksWithFallback()
     {
         var topology = CreateProductionRobustTopology();
         var files = _provider.GenerateHcl(topology);
         var sg = files["security_groups.tf"];
 
-        // Find the SSH ingress block and check its CIDR
+        // SSH ingress must exist (provisioners require it)
         var sshIdx = sg.IndexOf("\"SSH\"");
         Assert.True(sshIdx >= 0, "Expected SSH ingress rule");
         var sshBlockEnd = sg.IndexOf('}', sshIdx);
         var sshBlock = sg[sshIdx..sshBlockEnd];
 
-        // SSH should NOT be open to 0.0.0.0/0 by default
-        Assert.DoesNotContain("0.0.0.0/0", sshBlock);
+        // Should use ssh_cidr_blocks when set, fall back to 0.0.0.0/0 for provisioners
+        Assert.Contains("var.ssh_cidr_blocks", sshBlock);
+        Assert.Contains("0.0.0.0/0", sshBlock);
     }
 
     // --- Issue 19: python3 -m http.server in /var ---

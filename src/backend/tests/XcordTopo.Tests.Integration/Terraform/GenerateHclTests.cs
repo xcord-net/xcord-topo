@@ -66,13 +66,13 @@ public sealed class GenerateHclTests : IClassFixture<TopoWebApplicationFactory>
             config = new Dictionary<string, string>
             {
                 ["provider"] = "linode",
-                ["region"] = "us-east"
+                ["linode_region"] = "us-east"
             }
         };
 
         dict["containers"] = JsonSerializer.SerializeToElement(new[] { host }, JsonOptions);
         dict["providerConfig"] = JsonSerializer.SerializeToElement(
-            new Dictionary<string, string> { ["region"] = "us-east" }, JsonOptions);
+            new Dictionary<string, string> { ["linode_region"] = "us-east" }, JsonOptions);
 
         await _client.PutAsJsonAsync($"/api/v1/topologies/{id}", dict, JsonOptions);
 

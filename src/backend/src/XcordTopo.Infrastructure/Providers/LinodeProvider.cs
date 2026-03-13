@@ -71,7 +71,7 @@ public sealed class LinodeProvider : ProviderHclBase
         },
         new()
         {
-            Key = "region",
+            Key = "linode_region",
             Label = "Region",
             Type = "select",
             Sensitive = false,
@@ -111,28 +111,6 @@ public sealed class LinodeProvider : ProviderHclBase
             },
             Validation = [new() { Type = "pattern", Value = @"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$", Message = "Enter a valid domain name (e.g. example.com)" }]
         },
-        new()
-        {
-            Key = "ssh_public_key",
-            Label = "SSH Public Key",
-            Type = "textarea",
-            Sensitive = false,
-            Required = false,
-            Placeholder = "ssh-rsa AAAA...",
-            Help = new()
-            {
-                Summary = "SSH public key for instance access",
-                Steps =
-                [
-                    "Generate a key pair: ssh-keygen -t ed25519",
-                    "Copy the public key: cat ~/.ssh/id_ed25519.pub",
-                    "Paste the full public key here",
-                    "The key will be added to all provisioned instances"
-                ],
-                Url = "https://techdocs.akamai.com/cloud-computing/docs/use-public-key-authentication-with-ssh"
-            },
-            Validation = [new() { Type = "pattern", Value = @"^ssh-(rsa|ed25519|ecdsa)\s+[A-Za-z0-9+/=]+", Message = "Must be a valid SSH public key (ssh-rsa, ssh-ed25519, or ssh-ecdsa)" }]
-        }
     ];
 
     public override Dictionary<string, string> GenerateHcl(
@@ -158,6 +136,10 @@ public sealed class LinodeProvider : ProviderHclBase
 
         if (dnsContainers.Count > 0)
             files["dns.tf"] = GenerateDnsRecords(dnsContainers, resolver, topology);
+
+        var coldStorage = GenerateColdStorage(topology);
+        if (coldStorage != null)
+            files["coldstorage.tf"] = coldStorage;
 
         return files;
     }
@@ -197,6 +179,10 @@ public sealed class LinodeProvider : ProviderHclBase
         var allHosts = TopologyHelpers.CollectHosts(topology.Containers);
         if (dnsContainers.Count > 0)
             files["dns_linode.tf"] = GenerateDnsRecords(dnsContainers, resolver, topology);
+
+        var coldStorage = GenerateColdStorage(topology);
+        if (coldStorage != null)
+            files["coldstorage_linode.tf"] = coldStorage;
 
         return files;
     }
@@ -296,6 +282,60 @@ public sealed class LinodeProvider : ProviderHclBase
         return dns.ToString();
     }
 
+    // --- Cold storage generation ---
+
+    private static string? GenerateColdStorage(Topology topology)
+    {
+        if (topology.BackupTarget is null || topology.BackupTarget.Kind != BackupTargetKind.LinodeObjectStorage)
+            return null;
+
+        var hcl = new HclBuilder();
+
+        hcl.Block("resource \"linode_object_storage_bucket\" \"backups\"", b =>
+        {
+            b.RawAttribute("cluster", "\"${var.linode_region}-1\"");
+            b.RawAttribute("label", "var.coldstore_bucket");
+        });
+        hcl.Line();
+
+        hcl.Block("resource \"linode_object_storage_key\" \"backups\"", b =>
+        {
+            b.RawAttribute("label", "\"xcord-backups-${var.domain}\"");
+            b.Line();
+            b.Block("bucket_access", ba =>
+            {
+                ba.RawAttribute("cluster", "linode_object_storage_bucket.backups.cluster");
+                ba.RawAttribute("bucket_name", "linode_object_storage_bucket.backups.label");
+                ba.Attribute("permissions", "read_write");
+            });
+        });
+        hcl.Line();
+
+        hcl.Block("output \"coldstore_endpoint\"", b =>
+        {
+            b.RawAttribute("value", "linode_object_storage_bucket.backups.hostname");
+            b.Attribute("description", "Cold storage endpoint for backups");
+        });
+        hcl.Line();
+
+        hcl.Block("output \"coldstore_access_key\"", b =>
+        {
+            b.RawAttribute("value", "linode_object_storage_key.backups.access_key");
+            b.Attribute("sensitive", true);
+            b.Attribute("description", "Cold storage access key");
+        });
+        hcl.Line();
+
+        hcl.Block("output \"coldstore_secret_key\"", b =>
+        {
+            b.RawAttribute("value", "linode_object_storage_key.backups.secret_key");
+            b.Attribute("sensitive", true);
+            b.Attribute("description", "Cold storage secret key");
+        });
+
+        return hcl.ToString();
+    }
+
     // --- File generators ---
 
     private static string GenerateMain()
@@ -315,12 +355,22 @@ public sealed class LinodeProvider : ProviderHclBase
                     rp.Attribute("source", "hashicorp/random");
                     rp.Attribute("version", "~> 3.0");
                 });
+                p.MapBlock("tls", tp =>
+                {
+                    tp.Attribute("source", "hashicorp/tls");
+                    tp.Attribute("version", "~> 4.0");
+                });
             });
         });
         main.Line();
         main.Block("provider \"linode\"", b =>
         {
             b.RawAttribute("token", "var.linode_token");
+        });
+        main.Line();
+        main.Block("resource \"tls_private_key\" \"deploy\"", b =>
+        {
+            b.Attribute("algorithm", "ED25519");
         });
         return main.ToString();
     }
@@ -335,10 +385,10 @@ public sealed class LinodeProvider : ProviderHclBase
             b.RawAttribute("sensitive", "true");
         });
         vars.Line();
-        vars.Block("variable \"region\"", b =>
+        vars.Block("variable \"linode_region\"", b =>
         {
             b.RawAttribute("type", "string");
-            b.Attribute("default", topology.ProviderConfig.GetValueOrDefault("region", "us-east"));
+            b.Attribute("default", topology.ProviderConfig.GetValueOrDefault("linode_region", "us-east"));
             b.Attribute("description", "Linode region");
         });
         vars.Line();
@@ -346,21 +396,6 @@ public sealed class LinodeProvider : ProviderHclBase
         {
             b.RawAttribute("type", "string");
             b.Attribute("description", "Primary domain name");
-        });
-        vars.Line();
-        vars.Block("variable \"ssh_public_key\"", b =>
-        {
-            b.RawAttribute("type", "string");
-            b.Attribute("default", "");
-            b.Attribute("description", "SSH public key for instance access");
-        });
-        vars.Line();
-        vars.Block("variable \"ssh_private_key\"", b =>
-        {
-            b.RawAttribute("type", "string");
-            b.Attribute("default", "");
-            b.Attribute("description", "SSH private key for provisioner authentication");
-            b.RawAttribute("sensitive", "true");
         });
         vars.Line();
         vars.Block("variable \"registry_url\"", b =>
@@ -431,10 +466,10 @@ public sealed class LinodeProvider : ProviderHclBase
                 b.Attribute("label", TopologyHelpers.IsReplicatedHost(entry)
                     ? $"{topology.Name}-{entry.Host.Name}-${{count.index}}"
                     : $"{topology.Name}-{entry.Host.Name}");
-                b.RawAttribute("region", "var.region");
+                b.RawAttribute("region", "var.linode_region");
                 b.Attribute("type", plan);
                 b.Attribute("image", "linode/ubuntu24.04");
-                b.RawAttribute("authorized_keys", "[var.ssh_public_key]");
+                b.RawAttribute("authorized_keys", "[chomp(tls_private_key.deploy.public_key_openssh)]");
                 b.Line();
                 b.ListAttribute("tags", ["xcord-topo", topology.Name, entry.Host.Kind.ToString().ToLowerInvariant()]);
             });
@@ -452,10 +487,10 @@ public sealed class LinodeProvider : ProviderHclBase
             {
                 b.RawAttribute("count", $"var.{poolName}_host_count");
                 b.Attribute("label", $"{topology.Name}-{pool.TierProfile.Name}-${{count.index}}");
-                b.RawAttribute("region", "var.region");
+                b.RawAttribute("region", "var.linode_region");
                 b.Attribute("type", selectedPlan.Id);
                 b.Attribute("image", "linode/ubuntu24.04");
-                b.RawAttribute("authorized_keys", "[var.ssh_public_key]");
+                b.RawAttribute("authorized_keys", "[chomp(tls_private_key.deploy.public_key_openssh)]");
                 b.Line();
                 b.ListAttribute("tags", ["xcord-topo", topology.Name, pool.TierProfile.Id]);
             });
@@ -476,10 +511,10 @@ public sealed class LinodeProvider : ProviderHclBase
             {
                 b.RawAttribute("count", $"var.{varName}");
                 b.Attribute("label", $"{topology.Name}-{image.Name}-${{count.index}}");
-                b.RawAttribute("region", "var.region");
+                b.RawAttribute("region", "var.linode_region");
                 b.Attribute("type", plan);
                 b.Attribute("image", "linode/ubuntu24.04");
-                b.RawAttribute("authorized_keys", "[var.ssh_public_key]");
+                b.RawAttribute("authorized_keys", "[chomp(tls_private_key.deploy.public_key_openssh)]");
                 b.Line();
                 b.ListAttribute("tags", ["xcord-topo", topology.Name, "elastic"]);
             });
@@ -495,10 +530,10 @@ public sealed class LinodeProvider : ProviderHclBase
             instances.Block($"resource \"linode_instance\" \"{resourceName}\"", b =>
             {
                 b.Attribute("label", $"{topology.Name}-{caddy.Name}");
-                b.RawAttribute("region", "var.region");
+                b.RawAttribute("region", "var.linode_region");
                 b.Attribute("type", plan);
                 b.Attribute("image", "linode/ubuntu24.04");
-                b.RawAttribute("authorized_keys", "[var.ssh_public_key]");
+                b.RawAttribute("authorized_keys", "[chomp(tls_private_key.deploy.public_key_openssh)]");
                 b.Line();
                 b.ListAttribute("tags", ["xcord-topo", topology.Name, "caddy"]);
             });
@@ -655,7 +690,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         ? $"linode_instance.{resourceName}[count.index].ip_address"
                         : $"linode_instance.{resourceName}.ip_address");
                     cb.Attribute("user", "root");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
 
@@ -671,11 +706,11 @@ public sealed class LinodeProvider : ProviderHclBase
                     {
                         // Swarm mode — enables replicated services with built-in DNS load balancing
                         b.Line("  \"docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')\",");
-                        b.Line("  \"docker network create --driver overlay --attachable xcord-bridge\",");
+                        b.Line("  \"docker network create --driver overlay --attachable xcord-bridge 2>/dev/null || true\",");
                     }
                     else
                     {
-                        b.Line("  \"docker network create xcord-bridge\",");
+                        b.Line("  \"docker network create xcord-bridge 2>/dev/null || true\",");
                     }
 
                     // Docker login for private registry images
@@ -713,7 +748,7 @@ public sealed class LinodeProvider : ProviderHclBase
                             };
 
                             foreach (var (key, value) in envVars)
-                                flags.Add($"-e {key}={value}");
+                                flags.Add($"-e '{key}={value}'");
 
                             if (meta?.MountPath != null)
                                 flags.Add($"--mount type=volume,source={containerName}_data,target={meta.MountPath}");
@@ -725,6 +760,7 @@ public sealed class LinodeProvider : ProviderHclBase
                             }
 
                             var flagStr = string.Join(" ", flags);
+                            b.Line($"  \"docker service rm {containerName} 2>/dev/null || true\",");
                             b.Line($"  \"docker service create {flagStr} {dockerImage}{cmd}\",");
                         }
                         else
@@ -738,7 +774,7 @@ public sealed class LinodeProvider : ProviderHclBase
                             };
 
                             foreach (var (key, value) in envVars)
-                                flags.Add($"-e {key}={value}");
+                                flags.Add($"-e '{key}={value}'");
 
                             if (meta?.MountPath != null)
                                 flags.Add($"-v {containerName}_data:{meta.MountPath}");
@@ -750,6 +786,7 @@ public sealed class LinodeProvider : ProviderHclBase
                             }
 
                             var flagStr = string.Join(" ", flags);
+                            b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
                             b.Line($"  \"docker run {flagStr} {dockerImage}{cmd}\",");
                         }
                     }
@@ -765,9 +802,15 @@ public sealed class LinodeProvider : ProviderHclBase
                         b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
 
                         if (useSwarm)
+                        {
+                            b.Line($"  \"docker service rm {caddyName} 2>/dev/null || true\",");
                             b.Line($"  \"docker service create --name {caddyName} --replicas 1 --network xcord-bridge --restart-condition any -p 80:80 -p 443:443 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                        }
                         else
+                        {
+                            b.Line($"  \"docker rm -f {caddyName} 2>/dev/null || true\",");
                             b.Line($"  \"docker run -d --name {caddyName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                        }
 
                         // Always-on rate limiting for Caddy hosts
                         var rateLimitCmds = TopologyHelpers.GenerateRateLimitCommands(caddy);
@@ -782,7 +825,7 @@ public sealed class LinodeProvider : ProviderHclBase
 
                         // htpasswd auth when credentials are configured
                         b.Line($"  \"mkdir -p /opt/registry/auth\",");
-                        b.Line($"  \"bash -c 'if [ -n \\\"${{var.registry_username}}\\\" ]; then apt-get install -y -qq apache2-utils && htpasswd -Bbn \\\"${{var.registry_username}}\\\" \\\"${{var.registry_password}}\\\" > /opt/registry/auth/htpasswd; fi'\",");
+                        b.Line($"  \"bash -c 'if [ -n \\\"${{var.registry_username}}\\\" ]; then apt-get install -y -qq apache2-utils && htpasswd -Bbn \\\"${{var.registry_username}}\\\" \\\"${{nonsensitive(var.registry_password)}}\\\" > /opt/registry/auth/htpasswd; fi'\",");
 
                         // Restart registry container with auth if htpasswd was created
                         b.Line($"  \"bash -c 'if [ -f /opt/registry/auth/htpasswd ]; then docker stop {registryName} 2>/dev/null; docker rm {registryName} 2>/dev/null; docker run -d --name {registryName} --network xcord-bridge --restart unless-stopped -v {registryName}_data:/var/lib/registry -v /opt/registry/auth:/auth -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=Registry -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd -p 5000:5000 registry:2; fi'\",");
@@ -793,11 +836,18 @@ public sealed class LinodeProvider : ProviderHclBase
                             var registryCaddyfile = $"{registrySubdomain}.${{var.domain}} {{\\n  reverse_proxy {registryName}:5000\\n}}";
                             b.Line($"  \"mkdir -p /opt/caddy\",");
                             b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{registryCaddyfile}\\nCADDYEOF\",");
+                            b.Line($"  \"docker rm -f caddy_registry 2>/dev/null || true\",");
                             b.Line($"  \"docker run -d --name caddy_registry --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
                         }
                     }
 
-                    var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host);
+                    if (topology.BackupTarget != null)
+                    {
+                        foreach (var cmd in TopologyHelpers.GenerateColdStoreEnvSetup())
+                            b.Line($"  \"{cmd}\",");
+                    }
+
+                    var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host, topology.BackupTarget);
                     foreach (var cmd in backupCommands)
                         b.Line($"  \"{cmd}\",");
 
@@ -832,7 +882,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"linode_instance.{poolName}[0].ip_address");
                     cb.Attribute("user", "root");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
@@ -843,7 +893,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     b.Line("  \"systemctl enable docker\",");
                     b.Line("  \"systemctl start docker\",");
                     b.Line("  \"docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')\",");
-                    b.Line("  \"docker network create --driver overlay --attachable xcord-pool\",");
+                    b.Line("  \"docker network create --driver overlay --attachable xcord-pool 2>/dev/null || true\",");
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: false)}\",");
                     b.Line("  \"docker swarm join-token -q worker > /var/swarm-worker-token\",");
                     b.Line("  \"cd /var && nohup python3 -m http.server 9999 &\",");
@@ -866,6 +916,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         var escapedCaddyfile = caddyfile.Replace("\"", "\\\"");
                         var caddyfileLines = escapedCaddyfile.Split('\n');
                         b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                        b.Line($"  \"docker service rm {caddyName} 2>/dev/null || true\",");
                         b.Line($"  \"docker service create --name {caddyName} --mode global --network xcord-pool -p 80:80 -p 443:443 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
 
                         var rateLimitCmds = TopologyHelpers.GenerateRateLimitCommands(caddy);
@@ -876,6 +927,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     {
                         b.Line($"  \"mkdir -p /opt/caddy\",");
                         b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n\\nCADDYEOF\",");
+                        b.Line($"  \"docker service rm caddy 2>/dev/null || true\",");
                         b.Line($"  \"docker service create --name caddy --mode global --network xcord-pool -p 80:80 -p 443:443 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
                     }
 
@@ -895,7 +947,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"linode_instance.{poolName}[count.index + 1].ip_address");
                     cb.Attribute("user", "root");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
@@ -944,7 +996,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"linode_instance.{resourceName}.ip_address");
                     cb.Attribute("user", "root");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
@@ -953,7 +1005,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
                     b.Line("  \"systemctl enable docker\",");
                     b.Line("  \"systemctl start docker\",");
-                    b.Line("  \"docker network create xcord-bridge\",");
+                    b.Line("  \"docker network create xcord-bridge 2>/dev/null || true\",");
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: false)}\",");
 
                     // Deploy co-located non-elastic images on the Caddy host
@@ -981,7 +1033,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         };
 
                         foreach (var (key, value) in envVars)
-                            flags.Add($"-e {key}={value}");
+                            flags.Add($"-e '{key}={value}'");
 
                         // Use pre-computed port assignments to avoid host port conflicts
                         if (allPortAssignments.TryGetValue(image.Id, out var portMap))
@@ -994,6 +1046,7 @@ public sealed class LinodeProvider : ProviderHclBase
                             flags.Add($"-v {containerName}_data:{meta.MountPath}");
 
                         var flagStr = string.Join(" ", flags);
+                        b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
                         b.Line($"  \"docker run {flagStr} {dockerImage}{cmd}\",");
                     }
 
@@ -1001,6 +1054,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     var escapedCaddyfile = caddyfile.Replace("\"", "\\\"");
                     var caddyfileLines = escapedCaddyfile.Split('\n');
                     b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
+                    b.Line($"  \"docker rm -f {resourceName} 2>/dev/null || true\",");
                     b.Line($"  \"docker run -d --name {resourceName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
 
                     // Always-on rate limiting for standalone Caddy
@@ -1046,7 +1100,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"linode_instance.{resourceName}[count.index].ip_address");
                     cb.Attribute("user", "root");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
 
@@ -1056,7 +1110,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
                     b.Line("  \"systemctl enable docker\",");
                     b.Line("  \"systemctl start docker\",");
-                    b.Line("  \"docker network create xcord-bridge\",");
+                    b.Line("  \"docker network create xcord-bridge 2>/dev/null || true\",");
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: false)}\",");
 
                     var flags = new List<string>
@@ -1068,7 +1122,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     };
 
                     foreach (var (key, value) in envVars)
-                        flags.Add($"-e {key}={value}");
+                        flags.Add($"-e '{key}={value}'");
 
                     if (meta?.MountPath != null)
                         flags.Add($"-v {resourceName}_data:{meta.MountPath}");
@@ -1080,6 +1134,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     }
 
                     var flagStr = string.Join(" ", flags);
+                    b.Line($"  \"docker rm -f {resourceName} 2>/dev/null || true\",");
                     b.Line($"  \"docker run {flagStr} {dockerImage}\",");
 
                     pb.Line("]");
@@ -1115,6 +1170,9 @@ public sealed class LinodeProvider : ProviderHclBase
             var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
             var useSwarm = TopologyHelpers.HostNeedsSwarmMode(entry.Host);
 
+            var allImages = TopologyHelpers.CollectImages(entry.Host);
+            var hasProvisionResource = allImages.Any(i => !TopologyHelpers.RequiresPrivateRegistry(i.Kind));
+
             provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}\"", b =>
             {
                 var countExpr = TopologyHelpers.GetHostCountExpression(entry);
@@ -1123,7 +1181,9 @@ public sealed class LinodeProvider : ProviderHclBase
                 else
                     b.RawAttribute("count", "var.deploy_apps ? 1 : 0");
 
-                b.RawAttribute("depends_on", $"[null_resource.provision_{resourceName}]");
+                b.RawAttribute("depends_on", hasProvisionResource
+                    ? $"[null_resource.provision_{resourceName}]"
+                    : $"[linode_instance.{resourceName}]");
                 b.Line();
                 b.MapBlock("triggers", tb => tb.RawAttribute("app_version", "var.app_version"));
                 b.Line();
@@ -1135,13 +1195,22 @@ public sealed class LinodeProvider : ProviderHclBase
                         ? $"linode_instance.{resourceName}[count.index].ip_address"
                         : $"linode_instance.{resourceName}.ip_address");
                     cb.Attribute("user", "root");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
 
                 b.Block("provisioner \"remote-exec\"", pb =>
                 {
                     pb.RawAttribute("inline", "[");
+
+                    // Install Docker if this host had no provision resource (idempotent)
+                    if (!hasProvisionResource)
+                    {
+                        b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
+                        b.Line("  \"systemctl enable docker\",");
+                        b.Line("  \"systemctl start docker\",");
+                        b.Line("  \"docker network create xcord-bridge 2>/dev/null || true\",");
+                    }
 
                     // Docker login for private registry
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: false)}\",");
@@ -1172,7 +1241,7 @@ public sealed class LinodeProvider : ProviderHclBase
                                 "--restart-condition any"
                             };
 
-                            foreach (var (key, value) in envVars) flags.Add($"-e {key}={value}");
+                            foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
                             if (meta?.MountPath != null) flags.Add($"--mount type=volume,source={containerName}_data,target={meta.MountPath}");
                             if (publishPorts && meta != null)
                                 foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");
@@ -1183,7 +1252,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         else
                         {
                             var flags = new List<string> { "-d", $"--name {containerName}", "--network xcord-bridge", "--restart unless-stopped" };
-                            foreach (var (key, value) in envVars) flags.Add($"-e {key}={value}");
+                            foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
                             if (meta?.MountPath != null) flags.Add($"-v {containerName}_data:{meta.MountPath}");
                             if (publishPorts && meta != null)
                                 foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");
@@ -1227,7 +1296,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"linode_instance.{resourceName}.ip_address");
                     cb.Attribute("user", "root");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
@@ -1250,7 +1319,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         b.Line($"  \"docker pull {dockerImage}\",");
 
                         var flags = new List<string> { "-d", $"--name {containerName}", "--network xcord-bridge", "--restart unless-stopped" };
-                        foreach (var (key, value) in envVars) flags.Add($"-e {key}={value}");
+                        foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
                         if (allPortAssignments.TryGetValue(image.Id, out var portMap))
                             foreach (var (containerPort, hostPort) in portMap) flags.Add($"-p {hostPort}:{containerPort}");
                         if (meta?.MountPath != null) flags.Add($"-v {containerName}_data:{meta.MountPath}");
@@ -1291,12 +1360,18 @@ public sealed class LinodeProvider : ProviderHclBase
                     cb.Attribute("type", "ssh");
                     cb.RawAttribute("host", $"linode_instance.{resourceName}[count.index].ip_address");
                     cb.Attribute("user", "root");
-                    cb.RawAttribute("private_key", "var.ssh_private_key");
+                    cb.RawAttribute("private_key", "nonsensitive(tls_private_key.deploy.private_key_pem)");
                 });
                 b.Line();
                 b.Block("provisioner \"remote-exec\"", pb =>
                 {
                     pb.RawAttribute("inline", "[");
+
+                    // Elastic images get dedicated instances — install Docker (idempotent)
+                    b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
+                    b.Line("  \"systemctl enable docker\",");
+                    b.Line("  \"systemctl start docker\",");
+                    b.Line("  \"docker network create xcord-bridge 2>/dev/null || true\",");
 
                     // Docker login for private registry
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: false)}\",");
@@ -1305,7 +1380,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     b.Line($"  \"docker pull {dockerImage}\",");
 
                     var flags = new List<string> { "-d", $"--name {resourceName}", "--network xcord-bridge", "--restart unless-stopped" };
-                    foreach (var (key, value) in envVars) flags.Add($"-e {key}={value}");
+                    foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
                     if (meta?.MountPath != null) flags.Add($"-v {resourceName}_data:{meta.MountPath}");
                     if (meta?.Ports.Length > 0)
                         foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");
@@ -1346,7 +1421,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         b.Attribute("label", $"{image.Name}-vol");
                     }
 
-                    b.RawAttribute("region", "var.region");
+                    b.RawAttribute("region", "var.linode_region");
                     b.Attribute("size", size);
                     b.RawAttribute("linode_id", isReplicated
                         ? $"linode_instance.{TopologyHelpers.SanitizeName(entry.Host.Name)}[count.index].id"

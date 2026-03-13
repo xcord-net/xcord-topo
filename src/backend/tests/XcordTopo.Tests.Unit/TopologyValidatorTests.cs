@@ -239,13 +239,13 @@ public class TopologyValidatorTests
         {
             Name = "Test",
             Provider = "linode",
-            ProviderConfig = new() { ["region"] = "mars-1" }
+            ProviderConfig = new() { ["linode_region"] = "mars-1" }
         };
         topology.Containers.Add(new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 });
 
         var result = _validator.ValidateFull(topology);
 
-        Assert.Contains(result.Errors, e => e.Message.Contains("mars-1") && e.Field == "region");
+        Assert.Contains(result.Errors, e => e.Message.Contains("mars-1") && e.Field == "linode_region");
     }
 
     [Fact]
@@ -255,13 +255,13 @@ public class TopologyValidatorTests
         {
             Name = "Test",
             Provider = "linode",
-            ProviderConfig = new() { ["region"] = "us-east" }
+            ProviderConfig = new() { ["linode_region"] = "us-east" }
         };
         topology.Containers.Add(new Container { Name = "Host", Kind = ContainerKind.Host, Width = 300, Height = 200 });
 
         var result = _validator.ValidateFull(topology);
 
-        Assert.DoesNotContain(result.Errors, e => e.Field == "region");
+        Assert.DoesNotContain(result.Errors, e => e.Field == "linode_region");
     }
 
     [Fact]

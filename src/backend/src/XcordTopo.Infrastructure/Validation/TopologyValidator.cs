@@ -181,16 +181,17 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
 
     private void CheckRegionValidity(Topology topology, List<TopologyValidationError> items)
     {
-        if (topology.ProviderConfig.TryGetValue("region", out var region) && !string.IsNullOrEmpty(region))
+        // Check provider-namespaced region keys (e.g., aws_region, linode_region)
+        foreach (var provider in registry.GetAll())
         {
-            var provider = registry.Get(topology.Provider);
-            if (provider != null)
+            var regionKey = $"{provider.Key}_region";
+            if (topology.ProviderConfig.TryGetValue(regionKey, out var region) && !string.IsNullOrEmpty(region))
             {
                 var validRegions = provider.GetRegions().Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 if (!validRegions.Contains(region))
                     items.Add(new(ValidationSeverity.Error,
-                        $"Region '{region}' is not valid for provider '{topology.Provider}'. Valid regions: {string.Join(", ", validRegions)}",
-                        Field: "region"));
+                        $"Region '{region}' is not valid for provider '{provider.Key}'. Valid regions: {string.Join(", ", validRegions)}",
+                        Field: regionKey));
             }
         }
     }

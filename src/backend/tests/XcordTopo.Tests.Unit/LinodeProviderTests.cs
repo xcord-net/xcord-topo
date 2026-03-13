@@ -348,9 +348,10 @@ public class LinodeProviderTests
         var vars = files["variables.tf"];
 
         Assert.Contains("variable \"linode_token\"", vars);
-        Assert.Contains("variable \"region\"", vars);
+        Assert.Contains("variable \"linode_region\"", vars);
         Assert.Contains("variable \"domain\"", vars);
-        Assert.Contains("variable \"ssh_public_key\"", vars);
+        Assert.DoesNotContain("variable \"ssh_public_key\"", vars);
+        Assert.DoesNotContain("variable \"ssh_private_key\"", vars);
     }
 
     [Fact]
@@ -922,10 +923,10 @@ public class LinodeProviderTests
         Assert.Contains("sensitive = true", vars);
 
         // Provisioning should inject service keys as env vars for HubServer
-        Assert.Contains("Stripe__PublishableKey=${var.stripe_publishable_key}", provisioning);
-        Assert.Contains("Stripe__SecretKey=${var.stripe_secret_key}", provisioning);
+        Assert.Contains("Stripe__PublishableKey=${nonsensitive(var.stripe_publishable_key)}", provisioning);
+        Assert.Contains("Stripe__SecretKey=${nonsensitive(var.stripe_secret_key)}", provisioning);
         Assert.Contains("Email__SmtpHost=${var.smtp_host}", provisioning);
-        Assert.Contains("Email__SmtpPassword=${var.smtp_password}", provisioning);
+        Assert.Contains("Email__SmtpPassword=${nonsensitive(var.smtp_password)}", provisioning);
     }
 
     [Fact]
@@ -981,8 +982,8 @@ public class LinodeProviderTests
 
         // FedServer should get SMTP + Tenor
         Assert.Contains("Email__SmtpHost=${var.smtp_host}", provisioning);
-        Assert.Contains("Email__SmtpPassword=${var.smtp_password}", provisioning);
-        Assert.Contains("Gif__ApiKey=${var.tenor_api_key}", provisioning);
+        Assert.Contains("Email__SmtpPassword=${nonsensitive(var.smtp_password)}", provisioning);
+        Assert.Contains("Gif__ApiKey=${nonsensitive(var.tenor_api_key)}", provisioning);
 
         // FedServer should NOT get Stripe
         Assert.DoesNotContain("Stripe__", provisioning);

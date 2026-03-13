@@ -20,6 +20,7 @@ public sealed class Topology
     public DeployStatus? LastDeployStatus { get; set; }
     public DateTimeOffset? LastDeployedAt { get; set; }
     public int DeployedResourceCount { get; set; }
+    public BackupTarget? BackupTarget { get; set; }
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -133,4 +134,22 @@ public sealed class Wire
     public Guid FromPortId { get; set; }
     public Guid ToNodeId { get; set; }
     public Guid ToPortId { get; set; }
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum BackupTargetKind
+{
+    LinodeObjectStorage,
+    AwsS3,
+    S3Compatible
+}
+
+public sealed class BackupTarget
+{
+    public string Label { get; set; } = string.Empty;
+    public BackupTargetKind Kind { get; set; }
+    public string Region { get; set; } = string.Empty;
+    public string BucketName { get; set; } = string.Empty;
+    public string? Endpoint { get; set; }
+    public int? GlacierTransitionDays { get; set; }
 }

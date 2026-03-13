@@ -69,6 +69,8 @@ run() {
     --name "$CONTAINER_NAME" \
     -p "$PORT:80" \
     -u "$(id -u):$(id -g)" \
+    --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
     -v "$SCRIPT_DIR/docker/data:/data" \
     -e ASPNETCORE_ENVIRONMENT=Production \
     -e Data__BasePath=/data \
@@ -94,6 +96,8 @@ dev() {
     --name "$CONTAINER_NAME" \
     -p "$PORT:80" \
     -u "$(id -u):$(id -g)" \
+    --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
     -v "$SCRIPT_DIR/docker/data:/data" \
     -e ASPNETCORE_ENVIRONMENT=Development \
     -e Data__BasePath=/data \

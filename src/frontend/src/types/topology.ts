@@ -66,6 +66,17 @@ export interface Wire {
   toPortId: string;
 }
 
+export type BackupTargetKind = 'LinodeObjectStorage' | 'AwsS3' | 'S3Compatible';
+
+export interface BackupTarget {
+  label: string;
+  kind: BackupTargetKind;
+  region: string;
+  bucketName: string;
+  endpoint?: string;
+  glacierTransitionDays?: number;
+}
+
 export interface ImageResourceSpec {
   memoryMb: number;
   cpuMillicores: number;
@@ -97,6 +108,7 @@ export interface Topology {
   lastDeployStatus?: DeployStatus;
   lastDeployedAt?: string;
   deployedResourceCount: number;
+  backupTarget?: BackupTarget;
 }
 
 export interface TopologySummary {

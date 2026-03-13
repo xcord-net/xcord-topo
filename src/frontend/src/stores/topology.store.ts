@@ -1,6 +1,6 @@
 import { createRoot } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
-import type { Topology, Container, Image, Wire, Port, DeployStatus } from '../types/topology';
+import type { Topology, Container, Image, Wire, Port, DeployStatus, BackupTarget } from '../types/topology';
 import { imageDefinitions } from '../catalog/images';
 import { defaultTierProfiles } from '../catalog/tierProfiles';
 
@@ -439,6 +439,17 @@ export function useTopology() {
     updateServiceKeys(keys: Record<string, string>): void {
       store.setTopology(produce(t => {
         t.serviceKeys = { ...t.serviceKeys, ...keys };
+        t.updatedAt = new Date().toISOString();
+      }));
+    },
+
+    updateBackupTarget(backupTarget: BackupTarget | null): void {
+      store.setTopology(produce(t => {
+        if (backupTarget === null) {
+          delete t.backupTarget;
+        } else {
+          t.backupTarget = backupTarget;
+        }
         t.updatedAt = new Date().toISOString();
       }));
     },

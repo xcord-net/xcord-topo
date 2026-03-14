@@ -134,14 +134,12 @@ public abstract class ProviderHclBase : ICloudProvider
             var length = secret.ResourceName switch
             {
                 "hub_jwt_secret" => 64,
-                "hub_admin_password" => 24,
                 _ => 32
             };
-            var special = secret.ResourceName == "hub_admin_password";
             secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
             {
                 b.Attribute("length", length);
-                b.RawAttribute("special", special ? "true" : "false");
+                b.RawAttribute("special", "false");
             });
             secrets.Line();
         }

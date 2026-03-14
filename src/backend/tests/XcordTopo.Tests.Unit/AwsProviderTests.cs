@@ -1165,10 +1165,10 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var secrets = files["secrets.tf"];
 
-        // Hub needs auto-generated secrets for JWT, encryption, admin password
+        // Hub needs auto-generated secrets for JWT and encryption (admin password is a service key)
         Assert.Contains("hub_jwt_secret", secrets);
         Assert.Contains("hub_encryption_key", secrets);
-        Assert.Contains("hub_admin_password", secrets);
+        Assert.DoesNotContain("hub_admin_password", secrets);
     }
 
     [Fact]

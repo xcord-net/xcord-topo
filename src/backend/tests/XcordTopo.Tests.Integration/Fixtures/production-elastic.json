@@ -1,6 +1,6 @@
 {
   "id": "00000000-0000-0000-0000-000000000002",
-  "name": "Production — Elastic",
+  "name": "Production - Elastic",
   "description": "Elastic architecture with separated data and compute pools. DataPool hosts PG/Redis/MinIO independently. ComputePool is tier-agnostic (hub decides tenant placement). FederationServers are hub-provisioned at runtime.",
   "provider": "aws",
   "providerConfig": {},

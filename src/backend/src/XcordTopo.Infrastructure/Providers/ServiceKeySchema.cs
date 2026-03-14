@@ -292,6 +292,25 @@ public static class ServiceKeySchema
         },
         new()
         {
+            Key = "hub_admin_password",
+            Label = "Admin Password",
+            Type = "text",
+            Sensitive = true,
+            Required = true,
+            Placeholder = "",
+            Help = new()
+            {
+                Summary = "Password for the hub admin account created on first boot",
+                Steps =
+                [
+                    "Choose a strong password for the hub administrator",
+                    "Must be at least 12 characters"
+                ]
+            },
+            Validation = [new() { Type = "minLength", Value = "12", Message = "Password must be at least 12 characters" }]
+        },
+        new()
+        {
             Key = "hub_base_domain",
             Label = "Hub Base Domain",
             Type = "text",

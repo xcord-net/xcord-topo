@@ -405,7 +405,7 @@ public static class TopologyHelpers
                 case ImageKind.HubServer:
                     secrets.Add(new("hub_jwt_secret", "JWT signing key for hub server"));
                     secrets.Add(new("hub_encryption_key", "Encryption key for hub server"));
-                    secrets.Add(new("hub_admin_password", "Admin password for hub server"));
+                    // hub_admin_password is a user-provided service key, not auto-generated
                     break;
             }
         }
@@ -634,9 +634,6 @@ public static class TopologyHelpers
                 // Encryption (auto-generated secret)
                 envVars.Add(("Encryption__Key", "${nonsensitive(random_password.hub_encryption_key.result)}"));
 
-                // Admin (auto-generated password)
-                envVars.Add(("Admin__Password", "${nonsensitive(random_password.hub_admin_password.result)}"));
-
                 // Captcha
                 envVars.Add(("Captcha__Enabled", "false"));
 
@@ -653,6 +650,7 @@ public static class TopologyHelpers
                     AddServiceKeyEnvVar(envVars, topology, "smtp_from_name", "Email__FromName");
                     AddServiceKeyEnvVar(envVars, topology, "hub_admin_username", "Admin__Username");
                     AddServiceKeyEnvVar(envVars, topology, "hub_admin_email", "Admin__Email");
+                    AddServiceKeyEnvVar(envVars, topology, "hub_admin_password", "Admin__Password");
 
                     // Derive JWT issuer and CORS from hub_base_domain
                     if (topology.ServiceKeys.ContainsKey("hub_base_domain"))

@@ -36,6 +36,7 @@ dist/
 
 # Runtime deployment data (credentials, terraform state, migrations)
 docker/data/deployments/
+docker/data/active-topology
 
 # Claude Code (local-only)
 .claude/

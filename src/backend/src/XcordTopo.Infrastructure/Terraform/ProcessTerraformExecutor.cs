@@ -11,6 +11,7 @@ namespace XcordTopo.Infrastructure.Terraform;
 public sealed class ProcessTerraformExecutor : ITerraformExecutor
 {
     private readonly IHclFileManager _hclFileManager;
+    private readonly ITopologyStore _topologyStore;
     private readonly string _basePath;
     private readonly ILogger<ProcessTerraformExecutor> _logger;
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _runningProcesses = new();
@@ -18,10 +19,12 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
 
     public ProcessTerraformExecutor(
         IHclFileManager hclFileManager,
+        ITopologyStore topologyStore,
         IOptions<DataOptions> dataOptions,
         ILogger<ProcessTerraformExecutor> logger)
     {
         _hclFileManager = hclFileManager;
+        _topologyStore = topologyStore;
         _basePath = dataOptions.Value.BasePath;
         _logger = logger;
     }
@@ -97,6 +100,25 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
                     Text = $"\n--- Terraform {command} exited with code {process.ExitCode} ---",
                     IsError = process.ExitCode != 0
                 }, CancellationToken.None);
+
+                if (command is TerraformCommand.Apply or TerraformCommand.Destroy)
+                {
+                    var status = process.ExitCode == 0 ? DeployStatus.Succeeded : DeployStatus.Failed;
+                    var topo = await _topologyStore.GetAsync(topologyId);
+                    if (topo != null)
+                    {
+                        topo.LastDeployStatus = status;
+                        topo.LastDeployedAt = DateTimeOffset.UtcNow;
+                        await _topologyStore.SaveAsync(topo);
+                    }
+
+                    if (command == TerraformCommand.Apply && process.ExitCode == 0)
+                    {
+                        await File.WriteAllTextAsync(
+                            Path.Combine(_basePath, "active-topology"),
+                            topologyId.ToString());
+                    }
+                }
             }
             catch (OperationCanceledException)
             {

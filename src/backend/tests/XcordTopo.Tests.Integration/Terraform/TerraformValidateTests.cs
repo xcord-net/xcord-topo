@@ -119,7 +119,7 @@ public sealed class TerraformValidateTests : IDisposable
 
         foreach (var path in candidates)
         {
-            if (File.Exists(path)) return path;
+            if (File.Exists(path) && VerifyTerraform(path)) return path;
         }
 
         // Fall back to PATH
@@ -136,11 +136,38 @@ public sealed class TerraformValidateTests : IDisposable
             using var process = Process.Start(psi)!;
             var result = process.StandardOutput.ReadToEnd().Trim();
             process.WaitForExit();
-            return process.ExitCode == 0 && !string.IsNullOrEmpty(result) ? result : null;
+            if (process.ExitCode == 0 && !string.IsNullOrEmpty(result) && VerifyTerraform(result))
+                return result;
         }
         catch
         {
-            return null;
+            // ignored
+        }
+
+        return null;
+    }
+
+    private static bool VerifyTerraform(string path)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = path,
+                Arguments = "version",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var process = Process.Start(psi)!;
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            return process.ExitCode == 0 && output.Contains("Terraform");
+        }
+        catch
+        {
+            return false;
         }
     }
 

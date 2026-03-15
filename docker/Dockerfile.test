@@ -1,0 +1,12 @@
+FROM mcr.microsoft.com/dotnet/sdk:9.0
+
+# Install terraform (same version as runtime Dockerfile)
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends wget unzip \
+    && wget -q https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -O /tmp/terraform.zip \
+    && unzip /tmp/terraform.zip -d /usr/local/bin/ \
+    && rm /tmp/terraform.zip \
+    && apt-get remove -y wget unzip && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace

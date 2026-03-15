@@ -18,7 +18,7 @@ public sealed class ProcessTerraformExecutorTests : IDisposable
 
         var dataOptions = Options.Create(new DataOptions { BasePath = _tempDir });
         var hclFileManager = new HclFileManager(dataOptions, NullLogger<HclFileManager>.Instance);
-        _executor = new ProcessTerraformExecutor(hclFileManager, dataOptions, NullLogger<ProcessTerraformExecutor>.Instance);
+        _executor = new ProcessTerraformExecutor(hclFileManager, new NullTopologyStore(), dataOptions, NullLogger<ProcessTerraformExecutor>.Instance);
     }
 
     [Fact]
@@ -321,6 +321,14 @@ public sealed class ProcessTerraformExecutorTests : IDisposable
         {
             Environment.SetEnvironmentVariable("PATH", originalPath);
         }
+    }
+
+    private sealed class NullTopologyStore : ITopologyStore
+    {
+        public Task<List<Topology>> ListAsync(CancellationToken ct = default) => Task.FromResult(new List<Topology>());
+        public Task<Topology?> GetAsync(Guid id, CancellationToken ct = default) => Task.FromResult<Topology?>(null);
+        public Task SaveAsync(Topology t, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private static async Task SetExecutableAsync(string path)

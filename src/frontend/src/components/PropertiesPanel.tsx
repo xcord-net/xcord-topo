@@ -112,7 +112,7 @@ const PropertiesPanel: Component = () => {
   const imageConfigFields = createMemo(() => {
     const imgData = selectedImage();
     if (!imgData) return [];
-    const def = imageDefinitions.find(d => d.kind === imgData.image.kind);
+    const def = imageDefinitions().find(d => d.kind === imgData.image.kind);
     if (!def?.configFields) return [];
     const parentKind = findParentKind(topo.topology.containers, imgData.image.id);
     return def.configFields.filter(f =>

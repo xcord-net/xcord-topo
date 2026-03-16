@@ -86,7 +86,7 @@ function migrateTopology(topology: Topology): Topology {
   const migrateImages = (containers: Container[]) => {
     for (const c of containers) {
       for (const img of c.images) {
-        const def = imageDefinitions.find(d => d.kind === img.kind);
+        const def = imageDefinitions().find(d => d.kind === img.kind);
         if (!def) continue;
         // Replace ports with catalog defaults, preserving IDs by position
         img.ports = def.defaultPorts.map((dp, i) => ({

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using XcordTopo.Infrastructure.Manifest;
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Terraform;
 
@@ -13,7 +14,8 @@ public sealed record GenerateManifestResponse(PublicManifest PublicManifest, Gat
 
 public sealed class GenerateManifestHandler(
     ITopologyStore topologyStore,
-    IHclFileManager hclFileManager)
+    IHclFileManager hclFileManager,
+    ImagePluginRegistry imagePluginRegistry)
     : IRequestHandler<GenerateManifestRequest, Result<GenerateManifestResponse>>
 {
     public async Task<Result<GenerateManifestResponse>> Handle(GenerateManifestRequest request, CancellationToken ct)
@@ -27,7 +29,7 @@ public sealed class GenerateManifestHandler(
             return Error.Validation("NO_TERRAFORM_STATE",
                 "Cannot generate manifest: Terraform has not been applied for this topology. Run terraform init/plan/apply first.");
 
-        var generator = new ManifestGenerator();
+        var generator = new ManifestGenerator(imagePluginRegistry);
         var (publicManifest, gatewaySection) = generator.Generate(topology, stateJson);
 
         return new GenerateManifestResponse(publicManifest, gatewaySection);

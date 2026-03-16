@@ -4,6 +4,7 @@
     <ProjectReference Include="..\XcordTopo.Features\XcordTopo.Features.csproj" />
     <ProjectReference Include="..\XcordTopo.Infrastructure\XcordTopo.Infrastructure.csproj" />
     <ProjectReference Include="..\XcordTopo.Shared\XcordTopo.Shared.csproj" />
+    <ProjectReference Include="..\XcordTopo.PluginSdk\XcordTopo.PluginSdk.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

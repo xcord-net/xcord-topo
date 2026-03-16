@@ -1,4 +1,5 @@
-import type { ImageDefinition } from '../types/catalog';
+import { createSignal } from 'solid-js';
+import type { ImageDefinition, ConfigField } from '../types/catalog';
 
 const subdomainRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
@@ -9,7 +10,55 @@ function validateSubdomain(value: string): string | null {
   return null;
 }
 
-export const imageDefinitions: ImageDefinition[] = [
+/** Convert a validateRegex/validateMessage from the API into a validate function. */
+function buildValidator(field: { validateRegex?: string; validateMessage?: string }): ((value: string) => string | null) | undefined {
+  if (!field.validateRegex) return undefined;
+  const regex = new RegExp(field.validateRegex);
+  const message = field.validateMessage ?? 'Invalid value';
+  return (value: string) => {
+    if (!value) return null;
+    return regex.test(value) ? null : message;
+  };
+}
+
+/** Map API catalog response to ImageDefinition[]. */
+function mapApiCatalog(entries: any[]): ImageDefinition[] {
+  return entries.map(entry => ({
+    kind: entry.typeId,
+    label: entry.label,
+    color: entry.color,
+    defaultWidth: entry.defaultWidth,
+    defaultHeight: entry.defaultHeight,
+    defaultPorts: (entry.defaultPorts ?? []).map((p: any) => ({
+      id: '',
+      name: p.name,
+      type: p.type,
+      direction: p.direction,
+      side: p.side,
+      offset: p.offset,
+    })),
+    defaultDockerImage: entry.defaultDockerImage,
+    configFields: (entry.configFields ?? []).map((f: any) => ({
+      key: f.key,
+      label: f.label,
+      type: f.type ?? 'text',
+      placeholder: f.placeholder,
+      options: f.options,
+      optionsFrom: f.optionsFrom,
+      parentKinds: f.parentKinds,
+      validate: buildValidator(f),
+      validateRegex: f.validateRegex,
+      validateMessage: f.validateMessage,
+    })),
+    defaultScaling: entry.defaultScaling === 'PerTenant' ? 'PerTenant' : 'Shared',
+    description: entry.description,
+    wireRequirements: entry.wireRequirements,
+    dockerBehavior: entry.dockerBehavior,
+  }));
+}
+
+// Built-in fallback catalog (used before API is available)
+const BUILTIN_CATALOG: ImageDefinition[] = [
   {
     kind: 'HubServer',
     label: 'Hub Server',
@@ -30,6 +79,11 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
     ],
     description: 'xcord hub control plane',
+    wireRequirements: [
+      { portName: 'pg', targetTypeLabel: 'PostgreSQL', required: true },
+      { portName: 'redis', targetTypeLabel: 'Redis', required: true },
+    ],
+    dockerBehavior: { requiresPrivateRegistry: true, versionVariableName: 'hub_version', dbNameWhenConsuming: 'xcord_hub' },
   },
   {
     kind: 'FederationServer',
@@ -54,6 +108,12 @@ export const imageDefinitions: ImageDefinition[] = [
     ],
     defaultScaling: 'PerTenant',
     description: 'xcord federation instance',
+    wireRequirements: [
+      { portName: 'pg', targetTypeLabel: 'PostgreSQL', required: true },
+      { portName: 'redis', targetTypeLabel: 'Redis', required: true },
+      { portName: 'minio', targetTypeLabel: 'MinIO', required: true },
+    ],
+    dockerBehavior: { requiresPrivateRegistry: true, versionVariableName: 'fed_version', dbNameWhenConsuming: 'xcord' },
   },
   {
     kind: 'Redis',
@@ -76,6 +136,8 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'backupRetention', label: 'Backup Retention', placeholder: '7' },
     ],
     description: 'Redis in-memory data store',
+    wireRequirements: [],
+    dockerBehavior: { requiresPrivateRegistry: false },
   },
   {
     kind: 'PostgreSQL',
@@ -98,6 +160,8 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'backupRetention', label: 'Backup Retention', placeholder: '7' },
     ],
     description: 'PostgreSQL database',
+    wireRequirements: [],
+    dockerBehavior: { requiresPrivateRegistry: false },
   },
   {
     kind: 'MinIO',
@@ -120,6 +184,8 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'backupRetention', label: 'Backup Retention', placeholder: '7' },
     ],
     description: 'S3-compatible object storage',
+    wireRequirements: [],
+    dockerBehavior: { requiresPrivateRegistry: false },
   },
   {
     kind: 'LiveKit',
@@ -141,6 +207,8 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
     ],
     description: 'LiveKit WebRTC SFU',
+    wireRequirements: [],
+    dockerBehavior: { requiresPrivateRegistry: false },
   },
   {
     kind: 'Registry',
@@ -155,6 +223,8 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'volumeSize', label: 'Volume (GB)', placeholder: '50' },
     ],
     description: 'Private Docker registry with auto-TLS via Caddy',
+    wireRequirements: [],
+    dockerBehavior: { requiresPrivateRegistry: false },
   },
   {
     kind: 'Custom',
@@ -174,5 +244,28 @@ export const imageDefinitions: ImageDefinition[] = [
       { key: 'replicas', label: 'Replicas', placeholder: '1' },
     ],
     description: 'Custom Docker image',
+    wireRequirements: [],
+    dockerBehavior: { requiresPrivateRegistry: false },
   },
 ];
+
+const [catalog, setCatalog] = createSignal<ImageDefinition[]>(BUILTIN_CATALOG);
+
+/** Reactive accessor for the image catalog. Call as imageDefinitions() to get the array. */
+export const imageDefinitions = catalog;
+
+/** Fetch image catalog from the API and update the reactive store. Falls back to built-in catalog on error. */
+export async function loadImageCatalog(): Promise<void> {
+  try {
+    const res = await fetch('/api/v1/catalog/images');
+    if (res.ok) {
+      const data = await res.json();
+      const mapped = mapApiCatalog(data);
+      if (mapped.length > 0) {
+        setCatalog(mapped);
+      }
+    }
+  } catch {
+    // Keep built-in fallback
+  }
+}

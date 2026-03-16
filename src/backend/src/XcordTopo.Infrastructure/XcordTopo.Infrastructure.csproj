@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\XcordTopo.Shared\XcordTopo.Shared.csproj" />
+    <ProjectReference Include="..\XcordTopo.PluginSdk\XcordTopo.PluginSdk.csproj" />
   </ItemGroup>
 
   <ItemGroup>

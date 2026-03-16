@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using XcordTopo.Features.Topologies;
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Terraform;
@@ -25,7 +26,7 @@ public class TopologySerializationTests : IDisposable
     private UpdateTopologyHandler CreateHandler(FileTopologyStore store)
     {
         var registry = new ProviderRegistry([new AwsProvider(), new LinodeProvider()]);
-        var generator = new MultiProviderHclGenerator(registry);
+        var generator = new MultiProviderHclGenerator(registry, DefaultPlugins.CreateRegistry());
         var hclFileManager = new HclFileManager(
             Options.Create(new DataOptions { BasePath = _tempDir }),
             NullLogger<HclFileManager>.Instance);
@@ -169,7 +170,7 @@ public class TopologySerializationTests : IDisposable
         var aws = new AwsProvider();
         var linode = new LinodeProvider();
         var registry = new ProviderRegistry([linode, aws]);
-        var generator = new MultiProviderHclGenerator(registry);
+        var generator = new MultiProviderHclGenerator(registry, DefaultPlugins.CreateRegistry());
 
         // This is the code path the API uses - multi-provider since DNS is on linode
         var files = generator.Generate(topology);
@@ -187,7 +188,7 @@ public class TopologySerializationTests : IDisposable
     {
         var topology = DeserializeFixture(fixtureName);
         var registry = new ProviderRegistry([new LinodeProvider(), new AwsProvider()]);
-        var generator = new MultiProviderHclGenerator(registry);
+        var generator = new MultiProviderHclGenerator(registry, DefaultPlugins.CreateRegistry());
         return generator.Generate(topology);
     }
 

@@ -1,5 +1,6 @@
 import type { Topology, Container, Image, Wire } from '../types/topology';
 import type { ValidationItem } from '../types/deploy';
+import { imageDefinitions } from '../catalog/images';
 
 // --- Utility ---
 
@@ -229,20 +230,22 @@ function checkComputePoolRequiredImages(topology: Topology, items: ValidationIte
 }
 
 function checkWireCompleteness(topology: Topology, items: ValidationItem[]): void {
+  const catalog = imageDefinitions();
+
   walkImages(topology.containers, (img, parent) => {
-    if (img.kind === 'FederationServer') {
-      if (!resolveWiredImage(topology, img.id, 'pg'))
-        items.push({ severity: 'Error', message: `FederationServer '${img.name}' in '${parent.name}' is not connected to a PostgreSQL image.`, nodeId: img.id });
-      if (!resolveWiredImage(topology, img.id, 'redis'))
-        items.push({ severity: 'Error', message: `FederationServer '${img.name}' in '${parent.name}' is not connected to a Redis image.`, nodeId: img.id });
-      if (!resolveWiredImage(topology, img.id, 'minio'))
-        items.push({ severity: 'Error', message: `FederationServer '${img.name}' in '${parent.name}' is not connected to a MinIO image.`, nodeId: img.id });
-    }
-    if (img.kind === 'HubServer') {
-      if (!resolveWiredImage(topology, img.id, 'pg'))
-        items.push({ severity: 'Error', message: `HubServer '${img.name}' in '${parent.name}' is not connected to a PostgreSQL image.`, nodeId: img.id });
-      if (!resolveWiredImage(topology, img.id, 'redis'))
-        items.push({ severity: 'Error', message: `HubServer '${img.name}' in '${parent.name}' is not connected to a Redis image.`, nodeId: img.id });
+    const def = catalog.find(d => d.kind === img.kind);
+    if (!def?.wireRequirements) return;
+
+    for (const req of def.wireRequirements) {
+      if (req.required !== false) {
+        if (!resolveWiredImage(topology, img.id, req.portName)) {
+          items.push({
+            severity: 'Error',
+            message: `${def.label} '${img.name}' in '${parent.name}' is not connected to a ${req.targetTypeLabel} image.`,
+            nodeId: img.id,
+          });
+        }
+      }
     }
   });
 }

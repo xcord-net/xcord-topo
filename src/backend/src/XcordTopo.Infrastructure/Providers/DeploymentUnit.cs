@@ -1,3 +1,4 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Providers;
@@ -28,6 +29,21 @@ public sealed record ServiceEntry(
         return new ServiceEntry(
             Name: image.Name,
             Kind: image.Kind.ToString(),
+            DockerImage: dockerImage,
+            RamMb: ramMb,
+            Scaling: image.Scaling,
+            Source: image);
+    }
+
+    public static ServiceEntry FromImage(Image image, ImagePluginRegistry pluginRegistry, string? registry = null)
+    {
+        var desc = pluginRegistry.GetDescriptor(image);
+        var ramMb = desc?.MinRamMb ?? 256;
+        var dockerImage = image.DockerImage ?? TopologyHelpers.GetDefaultDockerImage(image.Kind, registry);
+
+        return new ServiceEntry(
+            Name: image.Name,
+            Kind: image.ResolveTypeId(),
             DockerImage: dockerImage,
             RamMb: ramMb,
             Scaling: image.Scaling,

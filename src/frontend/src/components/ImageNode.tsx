@@ -13,7 +13,7 @@ const ImageNode: Component<{
 }> = (props) => {
   const interaction = useInteraction();
   const validation = useValidation();
-  const def = () => imageDefinitions.find(d => d.kind === props.image.kind);
+  const def = () => imageDefinitions().find(d => d.kind === props.image.kind);
 
   const absX = () => props.containerX + props.image.x;
   const absY = () => props.containerY + props.image.y;

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using XcordTopo.Features.Terraform;
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Models;
@@ -21,7 +22,7 @@ public sealed class StagedDeploymentTests
         var linode = new LinodeProvider();
         var aws = new AwsProvider();
         var registry = new ProviderRegistry([linode, aws]);
-        _generator = new MultiProviderHclGenerator(registry);
+        _generator = new MultiProviderHclGenerator(registry, DefaultPlugins.CreateRegistry());
     }
 
     /// <summary>
@@ -288,7 +289,7 @@ public sealed class StagedDeploymentTests
             TierProfiles =
             [
                 new() { Id = "free", Name = "Free Tier", ImageSpecs = new()
-                    { ["FederationServer"] = new() { MemoryMb = 192, CpuMillicores = 100, DiskMb = 256 } } }
+                    { ["FederationServer"] = new() { MemoryMb = 256, CpuMillicores = 250, DiskMb = 512 } } }
             ],
             Registry = "docker.xcord.net"
         };

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Models;
 
@@ -25,7 +26,7 @@ public sealed class TerraformValidateTests : IDisposable
         Directory.CreateDirectory(_tempDir);
 
         var registry = new ProviderRegistry([new AwsProvider(), new LinodeProvider()]);
-        _generator = new MultiProviderHclGenerator(registry);
+        _generator = new MultiProviderHclGenerator(registry, DefaultPlugins.CreateRegistry());
     }
 
     [SkippableFact]

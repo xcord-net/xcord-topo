@@ -17,7 +17,8 @@ export type ImageKind =
   | 'MinIO'
   | 'LiveKit'
   | 'Registry'
-  | 'Custom';
+  | 'Custom'
+  | (string & {});
 
 export type ImageScaling = 'Shared' | 'PerTenant';
 
@@ -34,6 +35,7 @@ export interface Image {
   id: string;
   name: string;
   kind: ImageKind;
+  typeId?: string;
   x: number;
   y: number;
   width: number;

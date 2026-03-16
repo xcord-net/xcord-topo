@@ -1,3 +1,4 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Validation;
 using XcordTopo.Models;
@@ -11,7 +12,7 @@ public class TopologyValidatorTests
     public TopologyValidatorTests()
     {
         var registry = new ProviderRegistry([new LinodeProvider(), new AwsProvider()]);
-        _validator = new TopologyValidator(registry);
+        _validator = new TopologyValidator(registry, DefaultPlugins.CreateRegistry());
     }
 
     // ─── Existing structural tests (ported) ──────────────────────────

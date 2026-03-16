@@ -77,7 +77,7 @@ const Palette: Component<{ tab: PaletteTab; onTabChange: (t: PaletteTab) => void
               )}
             </For>
           ) : (
-            <For each={imageDefinitions}>
+            <For each={imageDefinitions()}>
               {(def) => (
                 <button
                   class="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-topo-bg-tertiary transition-colors group cursor-grab"

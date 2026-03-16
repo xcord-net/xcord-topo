@@ -1,4 +1,4 @@
-import { Component, createSignal, Show } from 'solid-js';
+import { Component, createSignal, Show, onMount } from 'solid-js';
 import Canvas from './components/Canvas';
 import Palette from './components/Palette';
 import type { PaletteTab } from './components/Palette';
@@ -7,11 +7,16 @@ import PropertiesPanel from './components/PropertiesPanel';
 import SourceEditor from './components/SourceEditor';
 import DeployWizard from './components/DeployWizard';
 import { useInteraction } from './stores/interaction.store';
+import { loadImageCatalog } from './catalog/images';
 
 const App: Component = () => {
   const interaction = useInteraction();
   const [showDeploy, setShowDeploy] = createSignal(false);
   const [paletteTab, setPaletteTab] = createSignal<PaletteTab>('containers');
+
+  onMount(() => {
+    loadImageCatalog();
+  });
 
   const toggleDeploy = () => {
     setShowDeploy(prev => !prev);

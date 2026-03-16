@@ -1,3 +1,4 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Providers;
@@ -76,7 +77,7 @@ public static class ImageOperationalMetadata
         [ImageKind.FederationServer] = new(
             Ports: [80],
             MountPath: null,
-            MinRamMb: 192,
+            MinRamMb: 512,
             SharedOverheadMb: 0,
             CommandOverride: null,
             EnvVarTemplates: new()
@@ -135,7 +136,7 @@ public static class ImageOperationalMetadata
             Name = "Free Tier",
             ImageSpecs = new()
             {
-                ["FederationServer"] = new() { MemoryMb = 192, CpuMillicores = 100, DiskMb = 256 }
+                ["FederationServer"] = new() { MemoryMb = 256, CpuMillicores = 250, DiskMb = 512 }
             }
         },
         new()
@@ -144,7 +145,7 @@ public static class ImageOperationalMetadata
             Name = "Basic Tier",
             ImageSpecs = new()
             {
-                ["FederationServer"] = new() { MemoryMb = 256, CpuMillicores = 250, DiskMb = 512 }
+                ["FederationServer"] = new() { MemoryMb = 512, CpuMillicores = 500, DiskMb = 2048 }
             }
         },
         new()
@@ -153,7 +154,7 @@ public static class ImageOperationalMetadata
             Name = "Pro Tier",
             ImageSpecs = new()
             {
-                ["FederationServer"] = new() { MemoryMb = 512, CpuMillicores = 350, DiskMb = 2048 }
+                ["FederationServer"] = new() { MemoryMb = 1024, CpuMillicores = 1000, DiskMb = 5120 }
             }
         },
         new()
@@ -162,10 +163,23 @@ public static class ImageOperationalMetadata
             Name = "Enterprise Tier",
             ImageSpecs = new()
             {
-                ["FederationServer"] = new() { MemoryMb = 1024, CpuMillicores = 750, DiskMb = 8192 }
+                ["FederationServer"] = new() { MemoryMb = 2048, CpuMillicores = 2000, DiskMb = 25600 }
             }
         }
     ];
+
+    /// <summary>
+    /// Calculates the total shared infrastructure overhead (in MB) for a compute pool host.
+    /// This is the sum of SharedOverheadMb for shared image kinds (PG, Redis, MinIO) plus Caddy.
+    /// </summary>
+    public static int CalculateSharedOverheadMb()
+    {
+        var overhead = Images[ImageKind.PostgreSQL].SharedOverheadMb
+            + Images[ImageKind.Redis].SharedOverheadMb
+            + Images[ImageKind.MinIO].SharedOverheadMb
+            + Caddy.MinRamMb;
+        return overhead;
+    }
 
     /// <summary>
     /// Calculates shared infrastructure overhead for a compute pool host
@@ -185,6 +199,21 @@ public static class ImageOperationalMetadata
         // Always include Caddy overhead for compute pools
         overhead += Caddy.MinRamMb;
         return overhead;
+    }
+
+    /// <summary>
+    /// Calculates how many tenants of a given tier can fit on a compute host with the given total memory.
+    /// </summary>
+    public static int CalculateTenantsPerHost(int hostMemoryMb, TierProfile tierProfile)
+    {
+        var sharedOverhead = CalculateSharedOverheadMb();
+        var available = hostMemoryMb - sharedOverhead;
+        if (available <= 0) return 0;
+
+        var fedSpec = tierProfile.ImageSpecs.GetValueOrDefault("FederationServer");
+        if (fedSpec == null || fedSpec.MemoryMb <= 0) return 0;
+
+        return available / fedSpec.MemoryMb;
     }
 
     /// <summary>
@@ -213,5 +242,61 @@ public static class ImageOperationalMetadata
         if (perTenantMb <= 0)
             return poolImages.Count > 0 ? 1 : 0; // Dedicated host model: 1 tenant per host
         return available / perTenantMb;
+    }
+
+    /// <summary>
+    /// Calculates shared infrastructure overhead using plugin registry.
+    /// </summary>
+    public static int CalculateSharedOverheadMb(List<Image> poolImages, ImagePluginRegistry registry)
+    {
+        var overhead = 0;
+        foreach (var image in poolImages)
+        {
+            if (image.Scaling == ImageScaling.Shared)
+            {
+                var desc = registry.GetDescriptor(image);
+                if (desc != null)
+                    overhead += Math.Max(desc.MinRamMb, desc.SharedOverheadMb);
+            }
+        }
+        overhead += Caddy.MinRamMb;
+        return overhead;
+    }
+
+    /// <summary>
+    /// Calculates tenants per host using plugin registry for image specs.
+    /// </summary>
+    public static int CalculateTenantsPerHost(int hostMemoryMb, TierProfile tierProfile, List<Image> poolImages, ImagePluginRegistry registry)
+    {
+        var sharedOverhead = CalculateSharedOverheadMb(poolImages, registry);
+        var available = hostMemoryMb - sharedOverhead;
+        if (available <= 0) return 0;
+
+        var perTenantMb = 0;
+        foreach (var image in poolImages)
+        {
+            if (image.Scaling != ImageScaling.PerTenant) continue;
+            var spec = tierProfile.ImageSpecs.GetValueOrDefault(image.ResolveTypeId());
+            if (spec != null)
+                perTenantMb += spec.MemoryMb;
+            else
+            {
+                var desc = registry.GetDescriptor(image);
+                perTenantMb += desc?.MinRamMb ?? 256;
+            }
+        }
+
+        if (perTenantMb <= 0)
+            return poolImages.Count > 0 ? 1 : 0;
+        return available / perTenantMb;
+    }
+
+    /// <summary>
+    /// Calculates how many compute hosts are needed for a target number of tenants.
+    /// </summary>
+    public static int CalculateHostsRequired(int targetTenants, int tenantsPerHost)
+    {
+        if (tenantsPerHost <= 0) return targetTenants;
+        return (targetTenants + tenantsPerHost - 1) / tenantsPerHost;
     }
 }

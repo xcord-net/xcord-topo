@@ -1,10 +1,11 @@
 namespace XcordTopo.Infrastructure.Manifest;
 
 using System.Text.Json;
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Models;
 
-public sealed class ManifestGenerator
+public sealed class ManifestGenerator(ImagePluginRegistry imagePluginRegistry)
 {
     public (PublicManifest Public, GatewayTopologySection Gateway) Generate(
         Topology topology, string? terraformStateJson)
@@ -17,7 +18,7 @@ public sealed class ManifestGenerator
             ParseTerraformState(terraformStateJson, secrets, outputs);
         }
 
-        var wireResolver = new WireResolver(topology);
+        var wireResolver = new WireResolver(topology, imagePluginRegistry);
         var hosts = TopologyHelpers.CollectHosts(topology.Containers);
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology);
         var dnsContainers = TopologyHelpers.CollectDnsContainers(topology.Containers);
@@ -74,7 +75,7 @@ public sealed class ManifestGenerator
                 Docker = new GatewayDockerEntry
                 {
                     SocketProxyUrl = $"https://{privateIp}:2376",
-                    InstanceImage = TopologyHelpers.GetDefaultDockerImage(ImageKind.FederationServer, TopologyHelpers.ResolveRegistry(topology))
+                    InstanceImage = TopologyHelpers.GetDefaultDockerImage("FederationServer", TopologyHelpers.ResolveRegistry(topology), imagePluginRegistry)
                 },
                 Caddy = new GatewayCaddyEntry { AdminUrl = $"https://{privateIp}:2019" },
                 LiveKit = BuildLiveKitEntry(livekitImage, hostName, privateIp, secrets),

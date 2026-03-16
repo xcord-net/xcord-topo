@@ -7,6 +7,7 @@ import { validateField, validateAllFields } from '../lib/credential-validation';
 import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, ResourceSummary, TerraformOutputLine, HostingOptions, PoolSelection, InfraSelection, TopologyValidationResult, ValidationItem } from '../types/deploy';
 import type { MigrationDiffResult, MigrationDecision, MigrationPlan } from '../types/migration';
 import type { Topology, Container } from '../types/topology';
+import { imageDefinitions } from '../catalog/images';
 
 interface ProviderInfo {
   key: string;
@@ -35,25 +36,33 @@ function collectActiveProviders(topology: Topology): string[] {
   return Array.from(keys);
 }
 
-/** Map image kinds that are built from source to their GitHub repo name. */
-const APP_IMAGE_REPOS: Record<string, string> = {
-  HubServer: 'xcord-hub',
-  FederationServer: 'xcord-fed',
-};
-
-/** Collect all application image kinds present in the topology. */
+/** Collect all application image kinds present in the topology that require a private registry. */
 function collectAppImageKinds(topology: Topology): string[] {
+  const catalog = imageDefinitions();
   const kinds = new Set<string>();
   function walk(containers: Container[]) {
     for (const c of containers) {
       for (const img of c.images) {
-        if (img.kind in APP_IMAGE_REPOS) kinds.add(img.kind);
+        const def = catalog.find(d => d.kind === img.kind);
+        if (def?.dockerBehavior?.requiresPrivateRegistry) kinds.add(img.kind);
       }
       if (c.children) walk(c.children);
     }
   }
   walk(topology.containers);
   return Array.from(kinds);
+}
+
+/** Derive the GitHub repo name for an image kind from the catalog. */
+function getRepoName(kind: string): string {
+  const catalog = imageDefinitions();
+  const def = catalog.find(d => d.kind === kind);
+  const varName = def?.dockerBehavior?.versionVariableName;
+  if (varName) {
+    const prefix = varName.replace('_version', '');
+    return `xcord-${prefix}`;
+  }
+  return kind.toLowerCase();
 }
 
 const STEPS: { key: DeployStep; label: string }[] = [
@@ -676,7 +685,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         if (appKinds.length > 0) {
           const tagResults: Record<string, deployApi.ImageTagInfo[]> = {};
           await Promise.all(appKinds.map(async (kind) => {
-            const repoName = APP_IMAGE_REPOS[kind];
+            const repoName = getRepoName(kind);
             try {
               tagResults[kind] = await deployApi.getImageTags(repoName);
             } catch {
@@ -1054,7 +1063,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
           if (appKinds.length > 0) {
             const tagResults: Record<string, deployApi.ImageTagInfo[]> = {};
             await Promise.all(appKinds.map(async (kind) => {
-              const repoName = APP_IMAGE_REPOS[kind];
+              const repoName = getRepoName(kind);
               try {
                 tagResults[kind] = await deployApi.getImageTags(repoName);
               } catch {
@@ -1923,7 +1932,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                   <div class="bg-topo-bg-secondary rounded-lg border border-topo-border divide-y divide-topo-border/50">
                     <For each={Object.entries(availableTags())}>
                       {([kind, tags]) => {
-                        const repoName = APP_IMAGE_REPOS[kind];
+                        const repoName = getRepoName(kind);
                         const selectedVersion = () => imageVersions()[kind] ?? (tags.length > 0 ? tags[0].name : 'latest');
                         return (
                           <div class="flex items-center gap-3 px-3 py-2">

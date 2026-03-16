@@ -1,12 +1,16 @@
+using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using XcordTopo.Api;
 using XcordTopo.Infrastructure.Credentials;
 using XcordTopo.Infrastructure.Migration;
+using XcordTopo.Infrastructure.Plugins;
+using XcordTopo.Infrastructure.Plugins.Images;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Infrastructure.Validation;
+using XcordTopo.PluginSdk;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,6 +34,44 @@ builder.Services.AddSingleton<ITopologyValidator, TopologyValidator>();
 builder.Services.AddSingleton<IHclFileManager, HclFileManager>();
 builder.Services.AddSingleton<ITerraformExecutor, ProcessTerraformExecutor>();
 builder.Services.AddSingleton<IImagePushExecutor, ProcessImagePushExecutor>();
+
+// Image plugins (built-in)
+builder.Services.AddSingleton<IImagePlugin, PostgreSqlImagePlugin>();
+builder.Services.AddSingleton<IImagePlugin, RedisImagePlugin>();
+builder.Services.AddSingleton<IImagePlugin, MinIOImagePlugin>();
+builder.Services.AddSingleton<IImagePlugin, LiveKitImagePlugin>();
+builder.Services.AddSingleton<IImagePlugin, HubServerImagePlugin>();
+builder.Services.AddSingleton<IImagePlugin, FederationServerImagePlugin>();
+builder.Services.AddSingleton<IImagePlugin, RegistryImagePlugin>();
+builder.Services.AddSingleton<IImagePlugin, CustomImagePlugin>();
+
+// External plugins (loaded from plugins directory)
+var earlyDataOptions = builder.Configuration.GetSection(DataOptions.SectionName).Get<DataOptions>() ?? new DataOptions();
+var pluginDir = Path.Combine(earlyDataOptions.BasePath, "plugins");
+if (Directory.Exists(pluginDir))
+{
+    foreach (var dll in Directory.GetFiles(pluginDir, "*.dll"))
+    {
+        try
+        {
+            var context = new AssemblyLoadContext(Path.GetFileNameWithoutExtension(dll), isCollectible: false);
+            var assembly = context.LoadFromAssemblyPath(Path.GetFullPath(dll));
+            foreach (var type in assembly.GetExportedTypes()
+                .Where(t => typeof(IImagePlugin).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface))
+            {
+                builder.Services.AddSingleton(typeof(IImagePlugin), type);
+                Console.WriteLine($"[Plugins] Registered external plugin: {type.Name} from {Path.GetFileName(dll)}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Plugins] Failed to load {Path.GetFileName(dll)}: {ex.Message}");
+        }
+    }
+}
+
+// Plugin registry (collects all IImagePlugin registrations)
+builder.Services.AddSingleton<ImagePluginRegistry>();
 
 // Providers
 builder.Services.AddSingleton<LinodeProvider>();

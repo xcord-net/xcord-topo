@@ -1,4 +1,16 @@
-import type { ContainerKind, ImageKind, ImageScaling, Port, PortType } from './topology';
+import type { ContainerKind, ImageScaling, Port, PortType } from './topology';
+
+export interface WireRequirement {
+  portName: string;
+  targetTypeLabel: string;
+  required?: boolean;
+}
+
+export interface ImageDockerBehavior {
+  requiresPrivateRegistry: boolean;
+  versionVariableName?: string | null;
+  dbNameWhenConsuming?: string | null;
+}
 
 export interface ConfigField {
   key: string;
@@ -12,6 +24,8 @@ export interface ConfigField {
   parentKinds?: ContainerKind[];
   /** Returns an error message if the value is invalid, or null/undefined if valid. */
   validate?: (value: string) => string | null | undefined;
+  validateRegex?: string;
+  validateMessage?: string;
 }
 
 export interface ContainerDefinition {
@@ -26,7 +40,7 @@ export interface ContainerDefinition {
 }
 
 export interface ImageDefinition {
-  kind: ImageKind;
+  kind: string;
   label: string;
   color: string;
   defaultWidth: number;
@@ -36,4 +50,6 @@ export interface ImageDefinition {
   configFields?: ConfigField[];
   defaultScaling?: ImageScaling;
   description: string;
+  wireRequirements?: WireRequirement[];
+  dockerBehavior?: ImageDockerBehavior;
 }

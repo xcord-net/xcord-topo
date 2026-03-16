@@ -1,3 +1,4 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Models;
 
@@ -5,6 +6,16 @@ namespace XcordTopo.Infrastructure.Providers;
 
 public sealed class AwsProvider : ProviderHclBase
 {
+    private readonly ImagePluginRegistry _imageRegistry;
+    private readonly TemplateEngine _templateEngine = new();
+
+    public AwsProvider(ImagePluginRegistry imageRegistry)
+    {
+        _imageRegistry = imageRegistry;
+    }
+
+    public AwsProvider() : this(DefaultPlugins.CreateRegistry()) { }
+
     protected override string InstanceResourceType => "aws_instance";
     protected override string PublicIpField => "public_ip";
     protected override string PrivateIpField => "private_ip";
@@ -147,13 +158,13 @@ public sealed class AwsProvider : ProviderHclBase
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology, poolSelections);
         var dnsContainers = TopologyHelpers.CollectDnsContainers(topology.Containers);
         var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddiesRecursive(topology.Containers);
-        var resolver = new WireResolver(topology);
+        var resolver = new WireResolver(topology, _imageRegistry);
 
         files["main.tf"] = GenerateMain();
         files["variables.tf"] = GenerateVariables(topology, pools);
-        files["secrets.tf"] = GenerateSecrets(hosts, resolver, pools, standaloneCaddies);
+        files["secrets.tf"] = GenerateSecrets(hosts, resolver, _imageRegistry, pools, standaloneCaddies);
         files["network.tf"] = GenerateNetwork(topology);
-        files["security_groups.tf"] = GenerateSecurityGroups(topology, hosts);
+        files["security_groups.tf"] = GenerateSecurityGroups(topology, hosts, _imageRegistry);
         files["instances.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies, infraSelections);
         files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
         files["outputs.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
@@ -188,13 +199,13 @@ public sealed class AwsProvider : ProviderHclBase
             .Where(c => TopologyHelpers.ResolveProviderKey(c, topology)
                 .Equals(Key, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        var resolver = new WireResolver(topology);
+        var resolver = new WireResolver(topology, _imageRegistry);
 
         files["main_aws.tf"] = GenerateMain();
         files["variables_aws.tf"] = GenerateVariables(topology, pools);
-        files["secrets.tf"] = GenerateSecrets(hosts, resolver, pools, standaloneCaddies);
+        files["secrets.tf"] = GenerateSecrets(hosts, resolver, _imageRegistry, pools, standaloneCaddies);
         files["network_aws.tf"] = GenerateNetwork(topology);
-        files["security_groups_aws.tf"] = GenerateSecurityGroups(topology, hosts);
+        files["security_groups_aws.tf"] = GenerateSecurityGroups(topology, hosts, _imageRegistry);
         files["instances_aws.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies, infraSelections);
         files["provisioning_aws.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
         files["outputs_aws.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
@@ -557,7 +568,7 @@ public sealed class AwsProvider : ProviderHclBase
         return net.ToString();
     }
 
-    private static string GenerateSecurityGroups(Topology topology, List<TopologyHelpers.HostEntry> hosts)
+    private static string GenerateSecurityGroups(Topology topology, List<TopologyHelpers.HostEntry> hosts, ImagePluginRegistry imageRegistry)
     {
         var name = TopologyHelpers.SanitizeName(topology.Name);
         var sg = new HclBuilder();
@@ -565,9 +576,9 @@ public sealed class AwsProvider : ProviderHclBase
         // Check entire topology for LiveKit - it may be on hosts, standalone Caddies, or elastic
         var hasLiveKit = topology.Containers.Any(c => HasLiveKitRecursive(c));
 
-        static bool HasLiveKitRecursive(Container c)
+        bool HasLiveKitRecursive(Container c)
         {
-            if (c.Images.Any(i => i.Kind == ImageKind.LiveKit)) return true;
+            if (c.Images.Any(i => imageRegistry.GetDescriptor(i)?.IsPublicEndpoint == true && imageRegistry.GetPorts(i).Any(p => p == 7880))) return true;
             return c.Children.Any(HasLiveKitRecursive);
         }
 
@@ -699,7 +710,7 @@ public sealed class AwsProvider : ProviderHclBase
         foreach (var entry in hosts)
         {
             var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
-            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host);
+            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host, _imageRegistry);
             var instanceType = SelectPlan(entry.Host.Name, ramRequired, infraSelections);
             var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
 
@@ -786,8 +797,8 @@ public sealed class AwsProvider : ProviderHclBase
         foreach (var image in elasticImages)
         {
             var resourceName = TopologyHelpers.SanitizeName(image.Name);
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-            var ramRequired = meta?.MinRamMb ?? 256;
+            var desc = _imageRegistry.GetDescriptor(image);
+            var ramRequired = desc?.MinRamMb ?? 256;
             var instanceType = SelectPlan(image.Name, ramRequired, infraSelections);
             var varName = $"{resourceName}_replicas";
 
@@ -827,7 +838,7 @@ public sealed class AwsProvider : ProviderHclBase
         foreach (var caddy in standaloneCaddies)
         {
             var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
-            var ramRequired = TopologyHelpers.CalculateStandaloneCaddyRam(caddy);
+            var ramRequired = TopologyHelpers.CalculateStandaloneCaddyRam(caddy, _imageRegistry);
             var instanceType = SelectPlan(caddy.Name, ramRequired, infraSelections);
 
             instances.Block($"resource \"aws_instance\" \"{resourceName}\"", b =>
@@ -864,7 +875,7 @@ public sealed class AwsProvider : ProviderHclBase
         return instances.ToString();
     }
 
-    private static string GenerateProvisioning(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
+    private string GenerateProvisioning(List<TopologyHelpers.HostEntry> hosts, WireResolver resolver, Topology topology, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
     {
         var provisioning = new HclBuilder();
         foreach (var entry in hosts)
@@ -885,7 +896,7 @@ public sealed class AwsProvider : ProviderHclBase
                 if (countExpr != null)
                     b.RawAttribute("count", countExpr);
 
-                var secrets = TopologyHelpers.CollectSecrets(entry, resolver);
+                var secrets = TopologyHelpers.CollectSecrets(entry, resolver, _imageRegistry);
                 foreach (var secret in secrets)
                     depsList.Add($"random_password.{secret.ResourceName}");
 
@@ -934,20 +945,20 @@ public sealed class AwsProvider : ProviderHclBase
                     foreach (var image in images)
                     {
                         // Private registry images (Hub, Fed) are deployed post-push via deploy_apps phase
-                        if (TopologyHelpers.RequiresPrivateRegistry(image.Kind))
+                        if (TopologyHelpers.RequiresPrivateRegistry(image.ResolveTypeId(), _imageRegistry))
                             continue;
 
-                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
-                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, topology);
-                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver);
+                        var desc = _imageRegistry.GetDescriptor(image);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, _imageRegistry, _templateEngine, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver, _imageRegistry, _templateEngine);
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
                         // Publish ports if the image has cross-host consumers, needs direct external access,
                         // or lives on a DataPool (DataPool images are always accessed from other hosts)
-                        var publishPorts = meta?.Ports.Length > 0 &&
-                            (image.Kind == ImageKind.LiveKit ||
+                        var publishPorts = desc?.Ports.Length > 0 &&
+                            ((desc?.IsPublicEndpoint ?? false) ||
                              entry.Host.Kind == ContainerKind.DataPool ||
                              TopologyHelpers.HasCrossHostConsumers(image, entry.Host, resolver));
 
@@ -965,19 +976,19 @@ public sealed class AwsProvider : ProviderHclBase
                             foreach (var (key, value) in envVars)
                                 flags.Add($"-e '{key}={value}'");
 
-                            if (meta?.MountPath != null)
-                                flags.Add($"--mount type=volume,source={containerName}_data,target={meta.MountPath}");
+                            if (desc?.MountPath != null)
+                                flags.Add($"--mount type=volume,source={containerName}_data,target={desc.MountPath}");
 
-                            if (publishPorts && meta != null)
+                            if (publishPorts && desc != null)
                             {
-                                foreach (var port in meta.Ports)
+                                foreach (var port in desc.Ports)
                                 {
                                     var bindPrefix = entry.Host.Kind == ContainerKind.DataPool ? "$PRIVATE_IP:" : "";
-                                    flags.Add($"-p {bindPrefix}{port}:{port}");
+                                    flags.Add($"-p {bindPrefix}{port.Port}:{port.Port}");
                                 }
                             }
 
-                            if (image.Kind == ImageKind.Registry)
+                            if (image.ResolveTypeId() == "Registry")
                                 flags.Add("-p 5000:5000");
 
                             var flagStr = string.Join(" ", flags);
@@ -997,19 +1008,19 @@ public sealed class AwsProvider : ProviderHclBase
                             foreach (var (key, value) in envVars)
                                 flags.Add($"-e '{key}={value}'");
 
-                            if (meta?.MountPath != null)
-                                flags.Add($"-v {containerName}_data:{meta.MountPath}");
+                            if (desc?.MountPath != null)
+                                flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
-                            if (publishPorts && meta != null)
+                            if (publishPorts && desc != null)
                             {
-                                foreach (var port in meta.Ports)
+                                foreach (var port in desc.Ports)
                                 {
                                     var bindPrefix = entry.Host.Kind == ContainerKind.DataPool ? "$PRIVATE_IP:" : "";
-                                    flags.Add($"-p {bindPrefix}{port}:{port}");
+                                    flags.Add($"-p {bindPrefix}{port.Port}:{port.Port}");
                                 }
                             }
 
-                            if (image.Kind == ImageKind.Registry)
+                            if (image.ResolveTypeId() == "Registry")
                                 flags.Add("-p 5000:5000");
 
                             var flagStr = string.Join(" ", flags);
@@ -1020,7 +1031,7 @@ public sealed class AwsProvider : ProviderHclBase
 
                     foreach (var caddy in caddies)
                     {
-                        var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, topology);
+                        var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, _imageRegistry, topology);
                         var caddyName = TopologyHelpers.SanitizeName(caddy.Name);
 
                         b.Line($"  \"sudo mkdir -p /opt/caddy\",");
@@ -1046,7 +1057,7 @@ public sealed class AwsProvider : ProviderHclBase
                     }
 
                     // Registry images: configure htpasswd auth
-                    foreach (var image in images.Where(i => i.Kind == ImageKind.Registry))
+                    foreach (var image in images.Where(i => i.ResolveTypeId() == "Registry"))
                     {
                         var registryName = TopologyHelpers.SanitizeName(image.Name);
                         var registrySubdomain = registryName;
@@ -1076,7 +1087,7 @@ public sealed class AwsProvider : ProviderHclBase
                             b.Line($"  \"sudo {cmd}\",");
                     }
 
-                    var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host, topology.BackupTarget);
+                    var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host, _imageRegistry, _templateEngine, topology.BackupTarget);
                     foreach (var cmd in backupCommands)
                         b.Line($"  \"{cmd}\",");
 
@@ -1094,7 +1105,7 @@ public sealed class AwsProvider : ProviderHclBase
             var poolSecretPrefix = TopologyHelpers.SanitizeName(pool.Pool.Name);
 
             // Build depends_on from actual pool secrets (shared across tiers)
-            var poolSecrets = TopologyHelpers.CollectPoolSecrets(pool);
+            var poolSecrets = TopologyHelpers.CollectPoolSecrets(pool, _imageRegistry);
             var secretDeps = string.Join(", ", poolSecrets.Select(s => $"random_password.{s.ResourceName}"));
             var dependsOn = string.IsNullOrEmpty(secretDeps)
                 ? $"[aws_instance.{poolName}]"
@@ -1131,7 +1142,7 @@ public sealed class AwsProvider : ProviderHclBase
                     // Deploy shared services from actual pool images (data-driven)
                     foreach (var image in pool.Pool.Images)
                     {
-                        var cmd = TopologyHelpers.GenerateSwarmServiceCommand(image, poolSecretPrefix, resolver, useSudo: true, pool.Pool.Images);
+                        var cmd = TopologyHelpers.GenerateSwarmServiceCommand(image, poolSecretPrefix, resolver, _imageRegistry, _templateEngine, useSudo: true, pool.Pool.Images);
                         if (cmd != null)
                             b.Line($"  \"{cmd}\",");
                     }
@@ -1140,7 +1151,7 @@ public sealed class AwsProvider : ProviderHclBase
                     var poolCaddies = TopologyHelpers.CollectCaddyContainers(pool.Pool);
                     foreach (var caddy in poolCaddies)
                     {
-                        var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, topology);
+                        var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, _imageRegistry, topology);
                         var caddyName = TopologyHelpers.SanitizeName(caddy.Name);
                         b.Line($"  \"sudo mkdir -p /opt/caddy\",");
                         var escapedCaddyfile = caddyfile.Replace("\"", "\\\"");
@@ -1201,7 +1212,7 @@ public sealed class AwsProvider : ProviderHclBase
         var allPortAssignments = new Dictionary<Guid, Dictionary<int, int>>();
         foreach (var caddy in standaloneCaddies)
         {
-            var assignments = TopologyHelpers.ComputeHostPortAssignments(caddy, resolver);
+            var assignments = TopologyHelpers.ComputeHostPortAssignments(caddy, resolver, _imageRegistry);
             foreach (var (imgId, ports) in assignments)
                 allPortAssignments[imgId] = ports;
         }
@@ -1210,10 +1221,10 @@ public sealed class AwsProvider : ProviderHclBase
         foreach (var caddy in standaloneCaddies)
         {
             var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
-            var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, topology);
+            var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, _imageRegistry, topology);
 
             // Collect secret dependencies for co-located images
-            var caddySecrets = TopologyHelpers.CollectSecrets(new TopologyHelpers.HostEntry(caddy), resolver, excludePools: true);
+            var caddySecrets = TopologyHelpers.CollectSecrets(new TopologyHelpers.HostEntry(caddy), resolver, _imageRegistry, excludePools: true);
             var depsList = new List<string> { $"aws_instance.{resourceName}" };
             foreach (var secret in caddySecrets)
                 depsList.Add($"random_password.{secret.ResourceName}");
@@ -1247,13 +1258,13 @@ public sealed class AwsProvider : ProviderHclBase
                     {
                         var (imgMin, imgMax) = TopologyHelpers.ParseReplicaRange(image.Config);
                         if (imgMin > 1 || imgMax > 1) continue; // Elastic - gets its own instance
-                        if (TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
+                        if (TopologyHelpers.RequiresPrivateRegistry(image.ResolveTypeId(), _imageRegistry)) continue;
 
-                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
-                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                        var envVars = TopologyHelpers.BuildEnvVars(image, caddyEntry, resolver, topology);
-                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver);
+                        var desc = _imageRegistry.GetDescriptor(image);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, caddyEntry, resolver, _imageRegistry, _templateEngine, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver, _imageRegistry, _templateEngine);
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
                         var flags = new List<string>
@@ -1274,11 +1285,11 @@ public sealed class AwsProvider : ProviderHclBase
                                 flags.Add($"-p {hostPort}:{containerPort}");
                         }
 
-                        if (image.Kind == ImageKind.Registry)
+                        if (image.ResolveTypeId() == "Registry")
                             flags.Add("-p 5000:5000");
 
-                        if (meta?.MountPath != null)
-                            flags.Add($"-v {containerName}_data:{meta.MountPath}");
+                        if (desc?.MountPath != null)
+                            flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
                         var flagStr = string.Join(" ", flags);
                         b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
@@ -1307,11 +1318,11 @@ public sealed class AwsProvider : ProviderHclBase
         var elasticImages = TopologyHelpers.CollectElasticImages(hosts, standaloneCaddies);
         foreach (var image in elasticImages)
         {
-            if (TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
+            if (TopologyHelpers.RequiresPrivateRegistry(image.ResolveTypeId(), _imageRegistry)) continue;
 
             var resourceName = TopologyHelpers.SanitizeName(image.Name);
-            var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+            var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
+            var desc = _imageRegistry.GetDescriptor(image);
 
             // Find the parent container (Host or Caddy) for secret name resolution
             var parentContainer = resolver.FindHostFor(image.Id) ?? resolver.FindCaddyFor(image.Id);
@@ -1321,7 +1332,7 @@ public sealed class AwsProvider : ProviderHclBase
             // Elastic images run on their own instances - use a synthetic source host
             // so ResolveServiceHost knows this is NOT co-located with the parent
             var resolveFrom = new Container { Id = Guid.NewGuid(), Name = resourceName };
-            var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, topology, resolveFrom, allPortAssignments);
+            var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, _imageRegistry, _templateEngine, topology, resolveFrom, allPortAssignments);
 
             provisioning.Block($"resource \"null_resource\" \"provision_{resourceName}\"", b =>
             {
@@ -1360,13 +1371,13 @@ public sealed class AwsProvider : ProviderHclBase
                     foreach (var (key, value) in envVars)
                         flags.Add($"-e '{key}={value}'");
 
-                    if (meta?.MountPath != null)
-                        flags.Add($"-v {resourceName}_data:{meta.MountPath}");
+                    if (desc?.MountPath != null)
+                        flags.Add($"-v {resourceName}_data:{desc.MountPath}");
 
-                    if (meta?.Ports.Length > 0)
+                    if (desc?.Ports.Length > 0)
                     {
-                        foreach (var port in meta.Ports)
-                            flags.Add($"-p {port}:{port}");
+                        foreach (var port in desc.Ports)
+                            flags.Add($"-p {port.Port}:{port.Port}");
                     }
 
                     var flagStr = string.Join(" ", flags);
@@ -1386,7 +1397,7 @@ public sealed class AwsProvider : ProviderHclBase
         return provisioning.ToString();
     }
 
-    private static void GenerateAppDeployResources(
+    private void GenerateAppDeployResources(
         HclBuilder provisioning,
         List<TopologyHelpers.HostEntry> hosts,
         List<Container> standaloneCaddies,
@@ -1399,7 +1410,7 @@ public sealed class AwsProvider : ProviderHclBase
         foreach (var entry in hosts)
         {
             var images = TopologyHelpers.CollectImages(entry.Host);
-            var privateImages = images.Where(i => TopologyHelpers.RequiresPrivateRegistry(i.Kind)).ToList();
+            var privateImages = images.Where(i => TopologyHelpers.RequiresPrivateRegistry(i.ResolveTypeId(), _imageRegistry)).ToList();
             if (privateImages.Count == 0) continue;
 
             var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
@@ -1408,7 +1419,7 @@ public sealed class AwsProvider : ProviderHclBase
 
             // Check if this host has a provision resource (hosts with only private images don't)
             var allImages = TopologyHelpers.CollectImages(entry.Host);
-            var hasProvisionResource = allImages.Any(i => !TopologyHelpers.RequiresPrivateRegistry(i.Kind));
+            var hasProvisionResource = allImages.Any(i => !TopologyHelpers.RequiresPrivateRegistry(i.ResolveTypeId(), _imageRegistry));
 
             provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}\"", b =>
             {
@@ -1429,7 +1440,7 @@ public sealed class AwsProvider : ProviderHclBase
                 {
                     foreach (var img in privateImages)
                     {
-                        var versionVar = TopologyHelpers.GetVersionVariableName(img.Kind);
+                        var versionVar = TopologyHelpers.GetVersionVariableName(img.ResolveTypeId(), _imageRegistry);
                         tb.RawAttribute(versionVar, $"var.{versionVar}");
                     }
                 });
@@ -1465,14 +1476,14 @@ public sealed class AwsProvider : ProviderHclBase
 
                     foreach (var image in privateImages)
                     {
-                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
-                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, topology);
-                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver);
+                        var desc = _imageRegistry.GetDescriptor(image);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, _imageRegistry, _templateEngine, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver, _imageRegistry, _templateEngine);
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
-                        var publishPorts = meta?.Ports.Length > 0 &&
+                        var publishPorts = desc?.Ports.Length > 0 &&
                             (TopologyHelpers.HasCrossHostConsumers(image, entry.Host, resolver));
 
                         // Pull new image while old container still serves
@@ -1481,7 +1492,7 @@ public sealed class AwsProvider : ProviderHclBase
                         if (useSwarm)
                         {
                             // Rolling update - zero downtime
-                            b.Line($"  \"sudo docker service update --image {dockerImage} {containerName} 2>/dev/null || sudo docker service create --name {containerName} --replicas {TopologyHelpers.GetImageReplicaExpression(image)} --network xcord-bridge --restart-condition any {string.Join(" ", envVars.Select(e => $"-e '{e.Key}={e.Value}'"))}{(meta?.MountPath != null ? $" --mount type=volume,source={containerName}_data,target={meta.MountPath}" : "")}{(publishPorts && meta != null ? string.Concat(meta.Ports.Select(p => $" -p {p}:{p}")) : "")} {dockerImage}{cmd}\",");
+                            b.Line($"  \"sudo docker service update --image {dockerImage} {containerName} 2>/dev/null || sudo docker service create --name {containerName} --replicas {TopologyHelpers.GetImageReplicaExpression(image)} --network xcord-bridge --restart-condition any {string.Join(" ", envVars.Select(e => $"-e '{e.Key}={e.Value}'"))}{(desc?.MountPath != null ? $" --mount type=volume,source={containerName}_data,target={desc.MountPath}" : "")}{(publishPorts && desc != null ? string.Concat(desc.Ports.Select(p => $" -p {p.Port}:{p.Port}")) : "")} {dockerImage}{cmd}\",");
                         }
                         else
                         {
@@ -1496,13 +1507,13 @@ public sealed class AwsProvider : ProviderHclBase
                             foreach (var (key, value) in envVars)
                                 flags.Add($"-e '{key}={value}'");
 
-                            if (meta?.MountPath != null)
-                                flags.Add($"-v {containerName}_data:{meta.MountPath}");
+                            if (desc?.MountPath != null)
+                                flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
-                            if (publishPorts && meta != null)
+                            if (publishPorts && desc != null)
                             {
-                                foreach (var port in meta.Ports)
-                                    flags.Add($"-p {port}:{port}");
+                                foreach (var port in desc.Ports)
+                                    flags.Add($"-p {port.Port}:{port.Port}");
                             }
 
                             var flagStr = string.Join(" ", flags);
@@ -1523,7 +1534,7 @@ public sealed class AwsProvider : ProviderHclBase
         {
             var coLocatedImages = TopologyHelpers.CollectImagesExcludingPools(caddy);
             var privateImages = coLocatedImages
-                .Where(i => TopologyHelpers.RequiresPrivateRegistry(i.Kind))
+                .Where(i => TopologyHelpers.RequiresPrivateRegistry(i.ResolveTypeId(), _imageRegistry))
                 .Where(i =>
                 {
                     var (min, max) = TopologyHelpers.ParseReplicaRange(i.Config);
@@ -1544,7 +1555,7 @@ public sealed class AwsProvider : ProviderHclBase
                 {
                     foreach (var img in privateImages)
                     {
-                        var versionVar = TopologyHelpers.GetVersionVariableName(img.Kind);
+                        var versionVar = TopologyHelpers.GetVersionVariableName(img.ResolveTypeId(), _imageRegistry);
                         tb.RawAttribute(versionVar, $"var.{versionVar}");
                     }
                 });
@@ -1566,11 +1577,11 @@ public sealed class AwsProvider : ProviderHclBase
 
                     foreach (var image in privateImages)
                     {
-                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
-                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                        var envVars = TopologyHelpers.BuildEnvVars(image, caddyEntry, resolver, topology);
-                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver);
+                        var desc = _imageRegistry.GetDescriptor(image);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, caddyEntry, resolver, _imageRegistry, _templateEngine, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver, _imageRegistry, _templateEngine);
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
                         b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
@@ -1580,7 +1591,7 @@ public sealed class AwsProvider : ProviderHclBase
                         foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
                         if (allPortAssignments.TryGetValue(image.Id, out var portMap))
                             foreach (var (containerPort, hostPort) in portMap) flags.Add($"-p {hostPort}:{containerPort}");
-                        if (meta?.MountPath != null) flags.Add($"-v {containerName}_data:{meta.MountPath}");
+                        if (desc?.MountPath != null) flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
                         b.Line($"  \"sudo docker run {string.Join(" ", flags)} {dockerImage}{cmd}\",");
                     }
@@ -1593,17 +1604,17 @@ public sealed class AwsProvider : ProviderHclBase
         // Elastic private-registry images
         foreach (var image in elasticImages)
         {
-            if (!TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
+            if (!TopologyHelpers.RequiresPrivateRegistry(image.ResolveTypeId(), _imageRegistry)) continue;
 
             var resourceName = TopologyHelpers.SanitizeName(image.Name);
-            var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+            var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
+            var desc = _imageRegistry.GetDescriptor(image);
             var parentContainer = resolver.FindHostFor(image.Id) ?? resolver.FindCaddyFor(image.Id);
             var parentEntry = parentContainer != null
                 ? new TopologyHelpers.HostEntry(parentContainer)
                 : new TopologyHelpers.HostEntry(new Container { Name = resourceName });
             var resolveFrom = new Container { Id = Guid.NewGuid(), Name = resourceName };
-            var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, topology, resolveFrom, allPortAssignments);
+            var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, _imageRegistry, _templateEngine, topology, resolveFrom, allPortAssignments);
 
             provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}\"", b =>
             {
@@ -1611,7 +1622,7 @@ public sealed class AwsProvider : ProviderHclBase
                 b.RawAttribute("count", $"var.deploy_apps ? var.{varName} : 0");
                 b.RawAttribute("depends_on", $"[aws_instance.{resourceName}]");
                 b.Line();
-                var versionVar = TopologyHelpers.GetVersionVariableName(image.Kind);
+                var versionVar = TopologyHelpers.GetVersionVariableName(image.ResolveTypeId(), _imageRegistry);
                 b.MapBlock("triggers", tb => tb.RawAttribute(versionVar, $"var.{versionVar}"));
                 b.Line();
                 b.Block("connection", cb =>
@@ -1642,9 +1653,9 @@ public sealed class AwsProvider : ProviderHclBase
 
                     var flags = new List<string> { "-d", $"--name {resourceName}", "--network xcord-bridge", "--restart unless-stopped" };
                     foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
-                    if (meta?.MountPath != null) flags.Add($"-v {resourceName}_data:{meta.MountPath}");
-                    if (meta?.Ports.Length > 0)
-                        foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");
+                    if (desc?.MountPath != null) flags.Add($"-v {resourceName}_data:{desc.MountPath}");
+                    if (desc?.Ports.Length > 0)
+                        foreach (var port in desc.Ports) flags.Add($"-p {port.Port}:{port.Port}");
 
                     b.Line($"  \"sudo docker run {string.Join(" ", flags)} {dockerImage}\",");
                     pb.Line("]");

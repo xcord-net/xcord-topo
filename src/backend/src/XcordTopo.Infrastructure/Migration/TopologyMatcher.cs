@@ -1,3 +1,4 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Models;
 
@@ -25,8 +26,8 @@ public sealed class TopologyMatcher
         var sourceImages = FlattenImages(source);
         var targetImages = FlattenImages(target);
 
-        var sourceResolver = new WireResolver(source);
-        var targetResolver = new WireResolver(target);
+        var sourceResolver = new WireResolver(source, DefaultPlugins.CreateRegistry());
+        var targetResolver = new WireResolver(target, DefaultPlugins.CreateRegistry());
 
         // Pass 1: Image matching
         var imageMatches = MatchImages(sourceImages, targetImages, sourceResolver, targetResolver);

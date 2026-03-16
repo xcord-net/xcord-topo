@@ -1,10 +1,11 @@
 using System.Text.RegularExpressions;
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Validation;
 
-public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopologyValidator
+public sealed partial class TopologyValidator(ProviderRegistry registry, ImagePluginRegistry imagePluginRegistry) : ITopologyValidator
 {
     private static readonly Regex DomainRegex = DomainPattern();
     private static readonly Regex DangerousCharsRegex = DangerousCharsPattern();
@@ -273,10 +274,8 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
         Walk(topology.Containers);
     }
 
-    private static void CheckComputePoolRequiredImages(Topology topology, List<TopologyValidationError> items)
+    private void CheckComputePoolRequiredImages(Topology topology, List<TopologyValidationError> items)
     {
-        // ComputePool no longer requires FederationServer images - they are hub-provisioned at runtime.
-        // DataPool should contain at least one data service image.
         void Walk(List<Container> containers)
         {
             foreach (var container in containers)
@@ -284,7 +283,10 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
                 if (container.Kind == ContainerKind.DataPool)
                 {
                     var hasDataImage = container.Images.Any(i =>
-                        i.Kind is ImageKind.PostgreSQL or ImageKind.Redis or ImageKind.MinIO);
+                    {
+                        var desc = imagePluginRegistry.GetDescriptor(i);
+                        return desc?.IsDataService ?? false;
+                    });
                     if (!hasDataImage)
                         items.Add(new(ValidationSeverity.Error,
                             $"DataPool '{container.Name}' must contain at least one data service image (PostgreSQL, Redis, or MinIO).",
@@ -298,9 +300,9 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
         Walk(topology.Containers);
     }
 
-    private static void CheckWireCompleteness(Topology topology, List<TopologyValidationError> items)
+    private void CheckWireCompleteness(Topology topology, List<TopologyValidationError> items)
     {
-        var resolver = new WireResolver(topology);
+        var resolver = new WireResolver(topology, imagePluginRegistry);
 
         void Walk(List<Container> containers)
         {
@@ -308,32 +310,16 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
             {
                 foreach (var img in c.Images)
                 {
-                    switch (img.Kind)
+                    var plugin = imagePluginRegistry.GetForImage(img);
+                    if (plugin == null) continue;
+
+                    foreach (var req in plugin.GetWireRequirements())
                     {
-                        case ImageKind.FederationServer:
-                            if (resolver.ResolveWiredImage(img.Id, "pg") is null)
-                                items.Add(new(ValidationSeverity.Error,
-                                    $"FederationServer '{img.Name}' in '{c.Name}' is not connected to a PostgreSQL image.",
-                                    NodeId: img.Id.ToString()));
-                            if (resolver.ResolveWiredImage(img.Id, "redis") is null)
-                                items.Add(new(ValidationSeverity.Error,
-                                    $"FederationServer '{img.Name}' in '{c.Name}' is not connected to a Redis image.",
-                                    NodeId: img.Id.ToString()));
-                            if (resolver.ResolveWiredImage(img.Id, "minio") is null)
-                                items.Add(new(ValidationSeverity.Error,
-                                    $"FederationServer '{img.Name}' in '{c.Name}' is not connected to a MinIO image.",
-                                    NodeId: img.Id.ToString()));
-                            break;
-                        case ImageKind.HubServer:
-                            if (resolver.ResolveWiredImage(img.Id, "pg") is null)
-                                items.Add(new(ValidationSeverity.Error,
-                                    $"HubServer '{img.Name}' in '{c.Name}' is not connected to a PostgreSQL image.",
-                                    NodeId: img.Id.ToString()));
-                            if (resolver.ResolveWiredImage(img.Id, "redis") is null)
-                                items.Add(new(ValidationSeverity.Error,
-                                    $"HubServer '{img.Name}' in '{c.Name}' is not connected to a Redis image.",
-                                    NodeId: img.Id.ToString()));
-                            break;
+                        if (!req.Required) continue;
+                        if (resolver.ResolveWiredImage(img.Id, req.PortName) is null)
+                            items.Add(new(ValidationSeverity.Error,
+                                $"{plugin.Label} '{img.Name}' in '{c.Name}' is not connected to a {req.TargetTypeLabel} image.",
+                                NodeId: img.Id.ToString()));
                     }
                 }
 
@@ -378,7 +364,7 @@ public sealed partial class TopologyValidator(ProviderRegistry registry) : ITopo
 
         foreach (var entry in hosts)
         {
-            var required = TopologyHelpers.CalculateHostRam(entry.Host);
+            var required = TopologyHelpers.CalculateHostRam(entry.Host, imagePluginRegistry);
             if (required > maxPlanRam)
                 items.Add(new(ValidationSeverity.Error,
                     $"Host '{entry.Host.Name}' requires {required} MB RAM but the largest available plan for '{topology.Provider}' is {maxPlanRam} MB.",

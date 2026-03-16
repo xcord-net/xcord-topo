@@ -1,4 +1,6 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Models;
+using XcordTopo.PluginSdk;
 
 namespace XcordTopo.Infrastructure.Providers;
 
@@ -11,9 +13,13 @@ public sealed class WireResolver
     private readonly Dictionary<Guid, Container> _nodeToPool = new();
     private readonly Dictionary<Guid, Container> _nodeToCaddy = new();
     private readonly List<Wire> _wires;
+    private readonly ImagePluginRegistry _registry;
 
-    public WireResolver(Topology topology)
+    public WireResolver(Topology topology) : this(topology, DefaultPlugins.CreateRegistry()) { }
+
+    public WireResolver(Topology topology, ImagePluginRegistry registry)
     {
+        _registry = registry;
         _wires = topology.Wires;
         IndexContainers(topology.Containers, null, null, null);
     }
@@ -162,22 +168,25 @@ public sealed class WireResolver
         }
     }
 
-    private static string? GetSubdomain(Image image) => image.Kind switch
+    private string? GetSubdomain(Image image)
     {
-        ImageKind.HubServer => "www",
-        ImageKind.FederationServer => "*",
-        ImageKind.Custom => ValidateSubdomain(image.Config.GetValueOrDefault("subdomain")),
-        _ => DeriveSubdomainFromMetadata(image)
-    };
+        var plugin = _registry.GetForImage(image);
+        if (plugin == null) return null;
 
-    /// <summary>
-    /// For images with IsPublicEndpoint metadata, derive a subdomain from the image name.
-    /// This keeps all public endpoint routing consistent - no special domain config needed.
-    /// </summary>
-    private static string? DeriveSubdomainFromMetadata(Image image)
+        var rule = plugin.GetSubdomainRule();
+        return rule switch
+        {
+            FixedSubdomain f => f.Value,
+            WildcardSubdomain => "*",
+            ConfigSubdomain c => ValidateSubdomain(image.Config.GetValueOrDefault(c.ConfigKey)),
+            DerivedSubdomain => DeriveSubdomainFromName(image),
+            NoSubdomain => null,
+            _ => null
+        };
+    }
+
+    private static string? DeriveSubdomainFromName(Image image)
     {
-        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-        if (meta is not { IsPublicEndpoint: true }) return null;
         var name = image.Name.ToLowerInvariant().Replace(' ', '-').Replace('_', '-');
         return ValidateSubdomain(name);
     }

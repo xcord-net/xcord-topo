@@ -1,3 +1,4 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Models;
 
@@ -123,6 +124,14 @@ public abstract class ProviderHclBase : ICloudProvider
         List<TopologyHelpers.HostEntry> hosts,
         WireResolver resolver,
         List<TopologyHelpers.ComputePoolEntry>? pools = null,
+        List<Container>? standaloneCaddies = null) =>
+        GenerateSecrets(hosts, resolver, DefaultPlugins.CreateRegistry(), pools, standaloneCaddies);
+
+    internal static string GenerateSecrets(
+        List<TopologyHelpers.HostEntry> hosts,
+        WireResolver resolver,
+        ImagePluginRegistry registry,
+        List<TopologyHelpers.ComputePoolEntry>? pools = null,
         List<Container>? standaloneCaddies = null)
     {
         var secrets = new HclBuilder();
@@ -131,27 +140,22 @@ public abstract class ProviderHclBase : ICloudProvider
         void EmitSecret(TopologyHelpers.SecretEntry secret)
         {
             if (!emitted.Add(secret.ResourceName)) return;
-            var length = secret.ResourceName switch
-            {
-                "hub_jwt_secret" => 64,
-                _ => 32
-            };
             secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
             {
-                b.Attribute("length", length);
+                b.Attribute("length", secret.Length);
                 b.RawAttribute("special", "false");
             });
             secrets.Line();
         }
 
-        foreach (var secret in hosts.SelectMany(entry => TopologyHelpers.CollectSecrets(entry, resolver)))
+        foreach (var secret in hosts.SelectMany(entry => TopologyHelpers.CollectSecrets(entry, resolver, registry)))
             EmitSecret(secret);
 
         // Standalone Caddy images (pg_hub, redis_hub, etc.) need secrets too
         if (standaloneCaddies != null)
         {
             foreach (var secret in standaloneCaddies.SelectMany(caddy =>
-                TopologyHelpers.CollectSecrets(new TopologyHelpers.HostEntry(caddy), resolver, excludePools: true)))
+                TopologyHelpers.CollectSecrets(new TopologyHelpers.HostEntry(caddy), resolver, registry, excludePools: true)))
                 EmitSecret(secret);
         }
 
@@ -160,17 +164,9 @@ public abstract class ProviderHclBase : ICloudProvider
         if (pools != null)
         {
             foreach (var secret in pools.DistinctBy(p => p.Pool.Id)
-                .SelectMany(pool => TopologyHelpers.CollectPoolSecrets(pool)))
+                .SelectMany(pool => TopologyHelpers.CollectPoolSecrets(pool, registry)))
             {
-                var length = secret.ResourceName.Contains("access_key") ? 20
-                    : secret.ResourceName.Contains("secret_key") || secret.ResourceName.Contains("api_secret") ? 40
-                    : 32;
-                secrets.Block($"resource \"random_password\" \"{secret.ResourceName}\"", b =>
-                {
-                    b.Attribute("length", length);
-                    b.RawAttribute("special", "false");
-                });
-                secrets.Line();
+                EmitSecret(secret);
             }
         }
 

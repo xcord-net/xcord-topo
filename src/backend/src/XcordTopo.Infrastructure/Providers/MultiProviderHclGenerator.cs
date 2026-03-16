@@ -1,3 +1,4 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Models;
 
@@ -9,7 +10,7 @@ namespace XcordTopo.Infrastructure.Providers;
 /// Multi-provider topologies call each provider's GenerateHclForContainers and merge results.
 /// Generates unified main.tf, variables.tf, and secrets.tf to prevent duplicates.
 /// </summary>
-public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
+public sealed class MultiProviderHclGenerator(ProviderRegistry registry, ImagePluginRegistry imagePluginRegistry)
 {
     private static readonly HashSet<string> UnifiedFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -324,7 +325,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         var hosts = TopologyHelpers.CollectHosts(topology.Containers);
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology, poolSelections);
         var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddiesRecursive(topology.Containers);
-        var resolver = new WireResolver(topology);
+        var resolver = new WireResolver(topology, imagePluginRegistry);
 
         // Infrastructure hosts (excludes DataPool - those are pools, not infra)
         foreach (var entry in hosts)
@@ -336,7 +337,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             if (provider is null) continue;
 
             var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host);
+            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host, imagePluginRegistry);
             var plan = ResolveInfraPlan(entry.Host.Name, plans, ramRequired, infraSelections);
             var (min, _) = TopologyHelpers.ParseHostReplicas(entry.Host);
             var count = min ?? 1;
@@ -357,7 +358,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             if (provider is null) continue;
 
             var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-            var ramRequired = TopologyHelpers.CalculateStandaloneCaddyRam(caddy);
+            var ramRequired = TopologyHelpers.CalculateStandaloneCaddyRam(caddy, imagePluginRegistry);
             var plan = ResolveInfraPlan(caddy.Name, plans, ramRequired, infraSelections);
             var lineTotal = plan.PriceMonthly;
 
@@ -379,8 +380,8 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             if (provider is null) continue;
 
             var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-            var ramRequired = meta?.MinRamMb ?? 256;
+            var desc = imagePluginRegistry.GetDescriptor(image);
+            var ramRequired = desc?.MinRamMb ?? 256;
             var plan = ResolveInfraPlan(image.Name, plans, ramRequired, infraSelections);
             var (min, _) = TopologyHelpers.ParseReplicaRange(image.Config);
             var lineTotal = plan.PriceMonthly * min;
@@ -388,7 +389,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             resources.Add(new ResourceEntry(
                 image.Name, providerKey, plan.Id, plan.Label, plan.MemoryMb,
                 min, lineTotal, IsPool: false,
-                Services: [new ServiceDetail(image.Name, image.Kind.ToString(), meta?.MinRamMb ?? 256)]));
+                Services: [new ServiceDetail(image.Name, image.ResolveTypeId(), desc?.MinRamMb ?? 256)]));
             total += lineTotal;
         }
 
@@ -403,7 +404,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             var selectedPlan = ProviderHclBase.ResolvePoolPlan(pool, plans);
             var poolImages = TopologyHelpers.CollectImages(pool.Pool);
             var tenantsPerHost = ImageOperationalMetadata.CalculateTenantsPerHost(
-                selectedPlan.MemoryMb, pool.TierProfile, poolImages);
+                selectedPlan.MemoryMb, pool.TierProfile, poolImages, imagePluginRegistry);
 
             resources.Add(new ResourceEntry(
                 pool.ResourceName, providerKey, selectedPlan.Id, selectedPlan.Label,
@@ -423,7 +424,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
             if (provider is null) continue;
 
             var plans = provider.GetPlans().OrderBy(p => p.PriceMonthly).ToList();
-            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host);
+            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host, imagePluginRegistry);
             var plan = ResolveInfraPlan(entry.Host.Name, plans, ramRequired, infraSelections);
             var services = BuildServiceDetails(entry.Host, resolver);
 
@@ -433,7 +434,7 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         }
 
         // Public endpoints
-        var rawEndpoints = TopologyHelpers.CollectPublicEndpoints(topology);
+        var rawEndpoints = TopologyHelpers.CollectPublicEndpoints(topology, imagePluginRegistry);
         var endpoints = rawEndpoints
             .Select(e => new PublicEndpoint(e.Url, e.Kind, e.Backend))
             .ToList();
@@ -459,14 +460,14 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         return plans.FirstOrDefault(p => p.MemoryMb >= ramRequired) ?? plans.Last();
     }
 
-    private static List<ServiceDetail> BuildServiceDetails(Container container, WireResolver resolver)
+    private List<ServiceDetail> BuildServiceDetails(Container container, WireResolver resolver)
     {
         var services = new List<ServiceDetail>();
         var images = TopologyHelpers.CollectImagesExcludingPools(container);
         foreach (var image in images)
         {
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-            services.Add(new ServiceDetail(image.Name, image.Kind.ToString(), meta?.MinRamMb ?? 256));
+            var desc = imagePluginRegistry.GetDescriptor(image);
+            services.Add(new ServiceDetail(image.Name, image.ResolveTypeId(), desc?.MinRamMb ?? 256));
         }
         // Include Caddy itself if container is a Caddy or contains one
         if (container.Kind == ContainerKind.Caddy)
@@ -474,14 +475,14 @@ public sealed class MultiProviderHclGenerator(ProviderRegistry registry)
         return services;
     }
 
-    private static string GenerateUnifiedSecrets(
+    private string GenerateUnifiedSecrets(
         Topology topology,
         List<TopologyHelpers.PoolSelection>? poolSelections)
     {
         var hosts = TopologyHelpers.CollectHosts(topology.Containers);
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology, poolSelections);
         var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddiesRecursive(topology.Containers);
-        var resolver = new WireResolver(topology);
-        return ProviderHclBase.GenerateSecrets(hosts, resolver, pools, standaloneCaddies);
+        var resolver = new WireResolver(topology, imagePluginRegistry);
+        return ProviderHclBase.GenerateSecrets(hosts, resolver, imagePluginRegistry, pools, standaloneCaddies);
     }
 }

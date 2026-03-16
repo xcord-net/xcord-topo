@@ -375,7 +375,7 @@ const Canvas: Component = () => {
         } else {
           // Image - must drop on a container
           if (drag.dropTargetId) {
-            const def = imageDefinitions.find(d => d.kind === src.kind);
+            const def = imageDefinitions().find(d => d.kind === src.kind);
             if (def) {
               history.push(topo.getSnapshot());
               const parentAbs = absoluteContainerPosition(topo.topology.containers, drag.dropTargetId);
@@ -608,7 +608,7 @@ const Canvas: Component = () => {
           {(() => {
             const drag = interaction.dragState!;
             const src = drag.source as { type: 'palette'; itemType: string; kind: string };
-            const defs = src.itemType === 'container' ? containerDefinitions : imageDefinitions;
+            const defs = src.itemType === 'container' ? containerDefinitions : imageDefinitions();
             const def = defs.find((d: any) => d.kind === src.kind);
             if (!def) return null;
             const w = def.defaultWidth;

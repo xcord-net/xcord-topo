@@ -1,4 +1,6 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Models;
+using XcordTopo.PluginSdk;
 
 namespace XcordTopo.Infrastructure.Providers;
 
@@ -20,7 +22,7 @@ public static class TopologyHelpers
     }
     public record PoolSelection(string PoolName, string PlanId, int TargetTenants, string? TierProfileId = null);
     public record InfraSelection(string ImageName, string PlanId);
-    public record SecretEntry(string ResourceName, string Description);
+    public record SecretEntry(string ResourceName, string Description, int Length = 32);
 
     // --- Tree-walking ---
 
@@ -303,16 +305,17 @@ public static class TopologyHelpers
 
     // --- Compute plan auto-selection ---
 
-    public static int CalculateHostRam(Container host)
+    public static int CalculateHostRam(Container host) =>
+        CalculateHostRam(host, DefaultPlugins.CreateRegistry());
+
+    public static int CalculateHostRam(Container host, ImagePluginRegistry registry)
     {
         var totalRam = 0;
         var images = CollectImages(host);
         foreach (var image in images)
         {
-            if (ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta))
-                totalRam += meta.MinRamMb;
-            else
-                totalRam += 256;
+            var desc = registry.GetDescriptor(image);
+            totalRam += desc?.MinRamMb ?? 256;
         }
         var caddies = CollectCaddyContainers(host);
         if (caddies.Count > 0)
@@ -325,7 +328,10 @@ public static class TopologyHelpers
     /// Calculate RAM for a standalone Caddy container, excluding elastic images that break
     /// out into their own instances. Includes Caddy overhead + non-elastic co-located images.
     /// </summary>
-    public static int CalculateStandaloneCaddyRam(Container caddy)
+    public static int CalculateStandaloneCaddyRam(Container caddy) =>
+        CalculateStandaloneCaddyRam(caddy, DefaultPlugins.CreateRegistry());
+
+    public static int CalculateStandaloneCaddyRam(Container caddy, ImagePluginRegistry registry)
     {
         var totalRam = ImageOperationalMetadata.Caddy.MinRamMb;
         var images = CollectImagesExcludingPools(caddy);
@@ -334,10 +340,8 @@ public static class TopologyHelpers
             var (min, max) = ParseReplicaRange(image.Config);
             if (min > 1 || max > 1) continue; // Elastic - gets its own instance
 
-            if (ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta))
-                totalRam += meta.MinRamMb;
-            else
-                totalRam += 256;
+            var desc = registry.GetDescriptor(image);
+            totalRam += desc?.MinRamMb ?? 256;
         }
         return totalRam;
     }
@@ -375,7 +379,11 @@ public static class TopologyHelpers
     // --- Secret helpers ---
 
     public static List<SecretEntry> CollectSecrets(
-        HostEntry entry, WireResolver resolver, bool excludePools = false)
+        HostEntry entry, WireResolver resolver, bool excludePools = false) =>
+        CollectSecrets(entry, resolver, DefaultPlugins.CreateRegistry(), excludePools);
+
+    public static List<SecretEntry> CollectSecrets(
+        HostEntry entry, WireResolver resolver, ImagePluginRegistry registry, bool excludePools = false)
     {
         var secrets = new List<SecretEntry>();
         var hostName = SanitizeName(entry.Host.Name);
@@ -385,28 +393,12 @@ public static class TopologyHelpers
 
         foreach (var image in images)
         {
+            var plugin = registry.GetForImage(image);
+            if (plugin == null) continue;
             var imgName = SanitizeName(image.Name);
-            switch (image.Kind)
+            foreach (var secret in plugin.GetSecrets())
             {
-                case ImageKind.PostgreSQL:
-                    secrets.Add(new($"{hostName}_{imgName}_password", $"PostgreSQL password for {image.Name}"));
-                    break;
-                case ImageKind.Redis:
-                    secrets.Add(new($"{hostName}_{imgName}_password", $"Redis password for {image.Name}"));
-                    break;
-                case ImageKind.MinIO:
-                    secrets.Add(new($"{hostName}_{imgName}_access_key", $"MinIO access key for {image.Name}"));
-                    secrets.Add(new($"{hostName}_{imgName}_secret_key", $"MinIO secret key for {image.Name}"));
-                    break;
-                case ImageKind.LiveKit:
-                    secrets.Add(new($"{hostName}_{imgName}_api_key", $"LiveKit API key for {image.Name}"));
-                    secrets.Add(new($"{hostName}_{imgName}_api_secret", $"LiveKit API secret for {image.Name}"));
-                    break;
-                case ImageKind.HubServer:
-                    secrets.Add(new("hub_jwt_secret", "JWT signing key for hub server"));
-                    secrets.Add(new("hub_encryption_key", "Encryption key for hub server"));
-                    // hub_admin_password is a user-provided service key, not auto-generated
-                    break;
+                secrets.Add(new($"{hostName}_{imgName}_{secret.Name}", $"{secret.Description} for {image.Name}", secret.Length));
             }
         }
         return secrets;
@@ -415,29 +407,21 @@ public static class TopologyHelpers
     /// <summary>
     /// Collect secrets needed for a compute pool's images (data-driven, not hardcoded).
     /// </summary>
-    public static List<SecretEntry> CollectPoolSecrets(ComputePoolEntry pool)
+    public static List<SecretEntry> CollectPoolSecrets(ComputePoolEntry pool) =>
+        CollectPoolSecrets(pool, DefaultPlugins.CreateRegistry());
+
+    public static List<SecretEntry> CollectPoolSecrets(ComputePoolEntry pool, ImagePluginRegistry registry)
     {
         var secrets = new List<SecretEntry>();
         var poolName = SanitizeName(pool.Pool.Name);
         foreach (var image in pool.Pool.Images)
         {
+            var plugin = registry.GetForImage(image);
+            if (plugin == null) continue;
             var imgName = SanitizeName(image.Name);
-            switch (image.Kind)
+            foreach (var secret in plugin.GetSecrets())
             {
-                case ImageKind.PostgreSQL:
-                    secrets.Add(new($"{poolName}_{imgName}_password", $"PostgreSQL password for {image.Name}"));
-                    break;
-                case ImageKind.Redis:
-                    secrets.Add(new($"{poolName}_{imgName}_password", $"Redis password for {image.Name}"));
-                    break;
-                case ImageKind.MinIO:
-                    secrets.Add(new($"{poolName}_{imgName}_access_key", $"MinIO access key for {image.Name}"));
-                    secrets.Add(new($"{poolName}_{imgName}_secret_key", $"MinIO secret key for {image.Name}"));
-                    break;
-                case ImageKind.LiveKit:
-                    secrets.Add(new($"{poolName}_{imgName}_api_key", $"LiveKit API key for {image.Name}"));
-                    secrets.Add(new($"{poolName}_{imgName}_api_secret", $"LiveKit API secret for {image.Name}"));
-                    break;
+                secrets.Add(new($"{poolName}_{imgName}_{secret.Name}", $"{secret.Description} for {image.Name}", secret.Length));
             }
         }
         return secrets;
@@ -449,16 +433,22 @@ public static class TopologyHelpers
     /// </summary>
     public static string? GenerateSwarmServiceCommand(
         Image image, string poolName, WireResolver resolver, bool useSudo,
+        IReadOnlyList<Image>? poolImages = null) =>
+        GenerateSwarmServiceCommand(image, poolName, resolver, DefaultPlugins.CreateRegistry(), new TemplateEngine(), useSudo, poolImages);
+
+    public static string? GenerateSwarmServiceCommand(
+        Image image, string poolName, WireResolver resolver,
+        ImagePluginRegistry registry, TemplateEngine templateEngine, bool useSudo,
         IReadOnlyList<Image>? poolImages = null)
     {
-        // Skip PerTenant images - they are hub-provisioned at runtime, not topo-deployed
         if (image.Scaling == ImageScaling.PerTenant)
             return null;
 
-        if (!ImageOperationalMetadata.Images.TryGetValue(image.Kind, out var meta))
-            return null;
+        var plugin = registry.GetForImage(image);
+        if (plugin == null) return null;
+        var desc = plugin.GetDescriptor();
 
-        var dockerImage = GetDockerImageForHcl(image, "");
+        var dockerImage = GetDockerImageForHcl(image, "", registry);
         if (string.IsNullOrEmpty(dockerImage))
             return null;
 
@@ -472,49 +462,73 @@ public static class TopologyHelpers
             "--network xcord-pool"
         };
 
-        // Volume mount
-        if (meta.MountPath != null)
+        if (desc.MountPath != null)
         {
             var volumeName = $"{imgName}data";
-            parts.Add($"--mount type=volume,source={volumeName},target={meta.MountPath}");
+            parts.Add($"--mount type=volume,source={volumeName},target={desc.MountPath}");
         }
 
-        // Resolve sibling service names for connection string templates
-        var pgService = poolImages?.FirstOrDefault(i => i.Kind == ImageKind.PostgreSQL);
-        var redisService = poolImages?.FirstOrDefault(i => i.Kind == ImageKind.Redis);
-        var minioService = poolImages?.FirstOrDefault(i => i.Kind == ImageKind.MinIO);
-        var pgName = pgService != null ? SanitizeName(pgService.Name) : "postgres";
-        var redisName = redisService != null ? SanitizeName(redisService.Name) : "redis";
-        var minioName = minioService != null ? SanitizeName(minioService.Name) : "minio";
-        var dbName = DeriveDbName(image, resolver);
-
-        // Environment variables from secrets
-        foreach (var (envKey, template) in meta.EnvVarTemplates)
+        // Use template engine for env vars
+        var templates = plugin.GetEnvVarTemplates();
+        var templateContext = new TemplateContext
         {
-            var value = template switch
+            HostName = poolName,
+            ImageName = imgName,
+            ResolveWire = portName =>
             {
-                "{password}" => $"${{nonsensitive(random_password.{poolName}_{imgName}_password.result)}}",
-                "{accessKey}" => $"${{nonsensitive(random_password.{poolName}_{imgName}_access_key.result)}}",
-                "{secretKey}" => $"${{nonsensitive(random_password.{poolName}_{imgName}_secret_key.result)}}",
-                "{dbName}" => dbName,
-                "{pg}" => $"Host=shared-{pgName};Port=5432;Database={dbName};Username=postgres;Password=${{nonsensitive(random_password.{poolName}_{pgName}_password.result)}}",
-                "{redis}" => $"shared-{redisName}:6379,password=${{nonsensitive(random_password.{poolName}_{redisName}_password.result)}}",
-                "{minio_endpoint}" => $"shared-{minioName}:9000",
-                "{minio_accessKey}" => $"${{nonsensitive(random_password.{poolName}_{minioName}_access_key.result)}}",
-                "{minio_secretKey}" => $"${{nonsensitive(random_password.{poolName}_{minioName}_secret_key.result)}}",
-                _ => template
-            };
-            parts.Add($"-e {envKey}={value}");
+                var target = resolver.ResolveWiredImage(image.Id, portName);
+                if (target == null) return null;
+                var targetName = SanitizeName(target.Name);
+                var targetDesc = registry.GetDescriptor(target);
+                var port = targetDesc?.Ports.FirstOrDefault()?.Port ?? 80;
+                var secretRef = $"${{nonsensitive(random_password.{poolName}_{targetName}_password.result)}}";
+                return ($"shared-{targetName}", port, secretRef);
+            },
+            ImageConfig = image.Config,
+            DerivedDbName = DeriveDbName(image, resolver, registry)
+        };
+
+        if (plugin.HasCustomEnvVarBuilder)
+        {
+            var context = new EnvVarContext(
+                HostName: poolName,
+                ImageName: imgName,
+                SecretRef: secretName =>
+                    $"${{nonsensitive(random_password.{poolName}_{imgName}_{secretName}.result)}}",
+                ResolveWire: portName =>
+                {
+                    var target = resolver.ResolveWiredImage(image.Id, portName);
+                    if (target == null) return null;
+                    var targetName = SanitizeName(target.Name);
+                    var targetDesc = registry.GetDescriptor(target);
+                    var port = targetDesc?.Ports.FirstOrDefault()?.Port ?? 80;
+                    var secretRef = $"${{nonsensitive(random_password.{poolName}_{targetName}_password.result)}}";
+                    return new WireResolution($"shared-{targetName}", port, secretRef);
+                },
+                ServiceKeys: new Dictionary<string, string>(),
+                ServiceKeyRef: _ => null,
+                BaseDomain: null);
+
+            foreach (var e in plugin.BuildEnvVars(context))
+                parts.Add($"-e {e.Key}={e.Value}");
+        }
+        else
+        {
+            foreach (var template in templates)
+            {
+                var value = templateEngine.Resolve(template.ValueTemplate, templateContext);
+                parts.Add($"-e {template.Key}={value}");
+            }
         }
 
         parts.Add(dockerImage);
 
         // Command override
-        if (meta.CommandOverride != null)
+        var cmdOverride = plugin.GetCommandOverride();
+        if (cmdOverride != null)
         {
-            var cmd = meta.CommandOverride;
-            cmd = cmd.Replace("{password}", $"${{nonsensitive(random_password.{poolName}_{imgName}_password.result)}}");
-            parts.Add(cmd);
+            var resolvedCmd = templateEngine.Resolve(cmdOverride, templateContext);
+            parts.Add(resolvedCmd);
         }
 
         return string.Join(" ", parts);
@@ -524,19 +538,20 @@ public static class TopologyHelpers
     /// Derive DB name from the consumer wired to this PG image.
     /// HubServer -> xcord_hub, FederationServer -> xcord, otherwise -> app
     /// </summary>
-    public static string DeriveDbName(Image pgImage, WireResolver resolver)
+    public static string DeriveDbName(Image pgImage, WireResolver resolver) =>
+        DeriveDbName(pgImage, resolver, DefaultPlugins.CreateRegistry());
+
+    public static string DeriveDbName(Image pgImage, WireResolver resolver, ImagePluginRegistry registry)
     {
         var incoming = resolver.ResolveIncoming(pgImage.Id, "postgres");
         foreach (var (node, _) in incoming)
         {
             if (node is Image consumerImage)
             {
-                return consumerImage.Kind switch
-                {
-                    ImageKind.HubServer => "xcord_hub",
-                    ImageKind.FederationServer => "xcord",
-                    _ => "app"
-                };
+                var consumerPlugin = registry.GetForImage(consumerImage);
+                var dbName = consumerPlugin?.GetDockerBehavior().DbNameWhenConsuming;
+                if (!string.IsNullOrEmpty(dbName))
+                    return dbName;
             }
         }
         return "app";
@@ -547,216 +562,104 @@ public static class TopologyHelpers
     public static List<(string Key, string Value)> BuildEnvVars(
         Image image, HostEntry entry, WireResolver resolver, Topology? topology = null,
         Container? resolveFrom = null,
+        Dictionary<Guid, Dictionary<int, int>>? portAssignments = null) =>
+        BuildEnvVars(image, entry, resolver, DefaultPlugins.CreateRegistry(), new TemplateEngine(), topology, resolveFrom, portAssignments);
+
+    public static List<(string Key, string Value)> BuildEnvVars(
+        Image image, HostEntry entry, WireResolver resolver,
+        ImagePluginRegistry registry, TemplateEngine templateEngine,
+        Topology? topology = null,
+        Container? resolveFrom = null,
         Dictionary<Guid, Dictionary<int, int>>? portAssignments = null)
     {
-        var envVars = new List<(string, string)>();
+        var plugin = registry.GetForImage(image);
+        if (plugin == null) return [];
+
         var hostName = SanitizeName(entry.Host.Name);
+        var imgName = SanitizeName(image.Name);
         var sourceHost = resolveFrom ?? entry.Host;
 
-        switch (image.Kind)
+        if (plugin.HasCustomEnvVarBuilder)
         {
-            case ImageKind.PostgreSQL:
-            {
-                var secretRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_password.result)}}";
-                var dbName = DeriveDbName(image, resolver);
-                envVars.Add(("POSTGRES_PASSWORD", secretRef));
-                envVars.Add(("POSTGRES_DB", dbName));
-                envVars.Add(("POSTGRES_USER", "postgres"));
-                break;
-            }
-            case ImageKind.Redis:
-                break;
-            case ImageKind.MinIO:
-            {
-                var accessKeyRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_access_key.result)}}";
-                var secretKeyRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_secret_key.result)}}";
-                envVars.Add(("MINIO_ROOT_USER", accessKeyRef));
-                envVars.Add(("MINIO_ROOT_PASSWORD", secretKeyRef));
-                break;
-            }
-            case ImageKind.HubServer:
-            {
-                var pgTarget = resolver.ResolveWiredImage(image.Id, "pg");
-                if (pgTarget != null)
+            var context = new EnvVarContext(
+                HostName: hostName,
+                ImageName: imgName,
+                SecretRef: secretName =>
+                    $"${{nonsensitive(random_password.{hostName}_{imgName}_{secretName}.result)}}",
+                ResolveWire: portName =>
                 {
-                    var pgContainer = SanitizeName(pgTarget.Name);
-                    var pgHost = resolver.FindHostFor(pgTarget.Id);
-                    var pgHostName = pgHost != null ? SanitizeName(pgHost.Name) : hostName;
-                    var dbName = DeriveDbName(pgTarget, resolver);
-                    var pgSecretRef = $"${{nonsensitive(random_password.{pgHostName}_{pgContainer}_password.result)}}";
-                    var pgAddress = topology != null
-                        ? ResolveServiceHost(pgTarget, sourceHost, resolver, topology)
-                        : pgContainer;
-                    var pgPort = ResolveServicePort(pgTarget, sourceHost, 5432, resolver, portAssignments);
-                    envVars.Add(("Database__ConnectionString",
-                        $"Host={pgAddress};Port={pgPort};Database={dbName};Username=postgres;Password={pgSecretRef}"));
-                }
-
-                var redisTarget = resolver.ResolveWiredImage(image.Id, "redis");
-                if (redisTarget != null)
+                    var target = resolver.ResolveWiredImage(image.Id, portName);
+                    if (target == null) return null;
+                    var targetName = SanitizeName(target.Name);
+                    var targetHost = resolver.FindHostFor(target.Id);
+                    var targetHostName = targetHost != null ? SanitizeName(targetHost.Name) : hostName;
+                    var host = topology != null
+                        ? ResolveServiceHost(target, sourceHost, resolver, topology)
+                        : targetName;
+                    var desc = registry.GetDescriptor(target);
+                    var port = desc?.Ports.FirstOrDefault()?.Port ?? 80;
+                    var resolvedPort = ResolveServicePort(target, sourceHost, port, resolver, portAssignments);
+                    var secretRef = $"${{nonsensitive(random_password.{targetHostName}_{targetName}_password.result)}}";
+                    return new WireResolution(host, resolvedPort, secretRef);
+                },
+                ServiceKeys: topology?.ServiceKeys ?? new Dictionary<string, string>(),
+                ServiceKeyRef: serviceKey =>
                 {
-                    var redisContainer = SanitizeName(redisTarget.Name);
-                    var redisHost = resolver.FindHostFor(redisTarget.Id);
-                    var redisHostName = redisHost != null ? SanitizeName(redisHost.Name) : hostName;
-                    var redisSecretRef = $"${{nonsensitive(random_password.{redisHostName}_{redisContainer}_password.result)}}";
-                    var redisAddress = topology != null
-                        ? ResolveServiceHost(redisTarget, sourceHost, resolver, topology)
-                        : redisContainer;
-                    var redisPort = ResolveServicePort(redisTarget, sourceHost, 6379, resolver, portAssignments);
-                    envVars.Add(("Redis__ConnectionString",
-                        $"{redisAddress}:{redisPort},password={redisSecretRef}"));
-                }
+                    if (topology == null) return null;
+                    var prefix = serviceKey.Split('_')[0];
+                    var schema = ServiceKeySchema.GetSchema(topology);
+                    var field = schema.FirstOrDefault(f => f.Key.Equals(serviceKey, StringComparison.OrdinalIgnoreCase));
+                    var groupHasAnyKey = schema
+                        .Where(f => f.Key.StartsWith(prefix + "_", StringComparison.OrdinalIgnoreCase) || f.Key == prefix)
+                        .Any(f => topology.ServiceKeys.ContainsKey(f.Key));
+                    if (!groupHasAnyKey) return null;
+                    return field?.Sensitive == true
+                        ? $"${{nonsensitive(var.{serviceKey})}}"
+                        : $"${{var.{serviceKey}}}";
+                },
+                BaseDomain: topology?.ServiceKeys.ContainsKey("hub_base_domain") == true
+                    ? "${var.hub_base_domain}" : null);
 
-                // MinIO/Storage (wired)
-                var minioTarget = resolver.ResolveWiredImage(image.Id, "minio");
-                if (minioTarget != null)
-                {
-                    var minioContainer = SanitizeName(minioTarget.Name);
-                    var minioHost = resolver.FindHostFor(minioTarget.Id);
-                    var minioHostName = minioHost != null ? SanitizeName(minioHost.Name) : hostName;
-                    var accessRef = $"${{nonsensitive(random_password.{minioHostName}_{minioContainer}_access_key.result)}}";
-                    var secretRef = $"${{nonsensitive(random_password.{minioHostName}_{minioContainer}_secret_key.result)}}";
-                    var minioAddress = topology != null
-                        ? ResolveServiceHost(minioTarget, sourceHost, resolver, topology)
-                        : minioContainer;
-                    var minioPort = ResolveServicePort(minioTarget, sourceHost, 9000, resolver, portAssignments);
-                    envVars.Add(("Storage__Endpoint", $"{minioAddress}:{minioPort}"));
-                    envVars.Add(("Storage__AccessKey", accessRef));
-                    envVars.Add(("Storage__SecretKey", secretRef));
-                    envVars.Add(("Storage__BucketName", "xcord-hub"));
-                    envVars.Add(("Storage__UseSsl", "false"));
-                }
-
-                // JWT (auto-generated secret)
-                envVars.Add(("Jwt__SecretKey", "${nonsensitive(random_password.hub_jwt_secret.result)}"));
-                envVars.Add(("Jwt__Audience", "xcord-hub"));
-
-                // Encryption (auto-generated secret)
-                envVars.Add(("Encryption__Key", "${nonsensitive(random_password.hub_encryption_key.result)}"));
-
-                // Captcha
-                envVars.Add(("Captcha__Enabled", "false"));
-
-                    // Service keys - hub gets Stripe + SMTP + Admin + Domain
-                    if (topology != null)
-                {
-                    AddServiceKeyEnvVar(envVars, topology, "stripe_publishable_key", "Stripe__PublishableKey");
-                    AddServiceKeyEnvVar(envVars, topology, "stripe_secret_key", "Stripe__SecretKey");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_host", "Email__SmtpHost");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_port", "Email__SmtpPort");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_username", "Email__SmtpUsername");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_password", "Email__SmtpPassword");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_from_address", "Email__FromAddress");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_from_name", "Email__FromName");
-                    AddServiceKeyEnvVar(envVars, topology, "hub_admin_username", "Admin__Username");
-                    AddServiceKeyEnvVar(envVars, topology, "hub_admin_email", "Admin__Email");
-                    AddServiceKeyEnvVar(envVars, topology, "hub_admin_password", "Admin__Password");
-
-                    // Derive JWT issuer and CORS from hub_base_domain
-                    if (topology.ServiceKeys.ContainsKey("hub_base_domain"))
-                    {
-                        envVars.Add(("Jwt__Issuer", "https://${var.hub_base_domain}"));
-                        envVars.Add(("Cors__AllowedOrigins__0", "https://${var.hub_base_domain}"));
-                        envVars.Add(("Cors__AllowedOrigins__1", "https://www.${var.hub_base_domain}"));
-                        envVars.Add(("Email__HubBaseUrl", "https://${var.hub_base_domain}"));
-                    }
-
-                    // Email extras
-                    envVars.Add(("Email__UseSsl", "true"));
-                    envVars.Add(("Email__DevMode", "false"));
-
-                    AddServiceKeyEnvVar(envVars, topology, "tenor_api_key", "Tenor__ApiKey");
-                }
-                break;
-            }
-            case ImageKind.FederationServer:
-            {
-                var pgTarget = resolver.ResolveWiredImage(image.Id, "pg");
-                if (pgTarget != null)
-                {
-                    var pgContainer = SanitizeName(pgTarget.Name);
-                    var pgHost = resolver.FindHostFor(pgTarget.Id);
-                    var pgHostName = pgHost != null ? SanitizeName(pgHost.Name) : hostName;
-                    var dbName = DeriveDbName(pgTarget, resolver);
-                    var pgSecretRef = $"${{nonsensitive(random_password.{pgHostName}_{pgContainer}_password.result)}}";
-                    var pgAddress = topology != null
-                        ? ResolveServiceHost(pgTarget, sourceHost, resolver, topology)
-                        : pgContainer;
-                    var pgPort = ResolveServicePort(pgTarget, sourceHost, 5432, resolver, portAssignments);
-                    envVars.Add(("Database__ConnectionString",
-                        $"Host={pgAddress};Port={pgPort};Database={dbName};Username=postgres;Password={pgSecretRef}"));
-                }
-
-                var redisTarget = resolver.ResolveWiredImage(image.Id, "redis");
-                if (redisTarget != null)
-                {
-                    var redisContainer = SanitizeName(redisTarget.Name);
-                    var redisHost = resolver.FindHostFor(redisTarget.Id);
-                    var redisHostName = redisHost != null ? SanitizeName(redisHost.Name) : hostName;
-                    var redisSecretRef = $"${{nonsensitive(random_password.{redisHostName}_{redisContainer}_password.result)}}";
-                    var redisAddress = topology != null
-                        ? ResolveServiceHost(redisTarget, sourceHost, resolver, topology)
-                        : redisContainer;
-                    var redisPort = ResolveServicePort(redisTarget, sourceHost, 6379, resolver, portAssignments);
-                    envVars.Add(("Redis__ConnectionString",
-                        $"{redisAddress}:{redisPort},password={redisSecretRef}"));
-                }
-
-                var minioTarget = resolver.ResolveWiredImage(image.Id, "minio");
-                if (minioTarget != null)
-                {
-                    var minioContainer = SanitizeName(minioTarget.Name);
-                    var minioHost = resolver.FindHostFor(minioTarget.Id);
-                    var minioHostName = minioHost != null ? SanitizeName(minioHost.Name) : hostName;
-                    var accessRef = $"${{nonsensitive(random_password.{minioHostName}_{minioContainer}_access_key.result)}}";
-                    var secretRef = $"${{nonsensitive(random_password.{minioHostName}_{minioContainer}_secret_key.result)}}";
-                    var minioAddress = topology != null
-                        ? ResolveServiceHost(minioTarget, sourceHost, resolver, topology)
-                        : minioContainer;
-                    var minioPort = ResolveServicePort(minioTarget, sourceHost, 9000, resolver, portAssignments);
-                    envVars.Add(("MinIO__Endpoint", $"{minioAddress}:{minioPort}"));
-                    envVars.Add(("MinIO__AccessKey", accessRef));
-                    envVars.Add(("MinIO__SecretKey", secretRef));
-                }
-
-                    // Service keys - instances get SMTP + Tenor
-                    if (topology != null)
-                {
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_host", "Email__SmtpHost");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_port", "Email__SmtpPort");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_username", "Email__SmtpUsername");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_password", "Email__SmtpPassword");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_from_address", "Email__FromAddress");
-                    AddServiceKeyEnvVar(envVars, topology, "smtp_from_name", "Email__FromName");
-                    AddServiceKeyEnvVar(envVars, topology, "tenor_api_key", "Gif__ApiKey");
-                }
-                break;
-            }
-            case ImageKind.LiveKit:
-            {
-                var apiKeyRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_api_key.result)}}";
-                var apiSecretRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_api_secret.result)}}";
-                envVars.Add(("LIVEKIT_KEYS", $"{apiKeyRef}:{apiSecretRef}"));
-
-                var redisTarget = resolver.ResolveWiredImage(image.Id, "redis");
-                if (redisTarget != null)
-                {
-                    var redisContainer = SanitizeName(redisTarget.Name);
-                    var redisHost = resolver.FindHostFor(redisTarget.Id);
-                    var redisHostName = redisHost != null ? SanitizeName(redisHost.Name) : hostName;
-                    var redisSecretRef = $"${{nonsensitive(random_password.{redisHostName}_{redisContainer}_password.result)}}";
-                    var redisAddress = topology != null
-                        ? ResolveServiceHost(redisTarget, sourceHost, resolver, topology)
-                        : redisContainer;
-                    var redisPort = ResolveServicePort(redisTarget, sourceHost, 6379, resolver, portAssignments);
-                    envVars.Add(("REDIS_URL", $"redis://:{redisSecretRef}@{redisAddress}:{redisPort}/0"));
-                }
-                break;
-            }
+            return plugin.BuildEnvVars(context)
+                .Select(e => (e.Key, e.Value))
+                .ToList();
         }
 
-        return envVars;
+        // Declarative plugins: resolve templates
+        var templates = plugin.GetEnvVarTemplates();
+        if (templates.Count == 0) return [];
+
+        var dbName = DeriveDbName(image, resolver, registry);
+        var templateContext = new TemplateContext
+        {
+            HostName = hostName,
+            ImageName = imgName,
+            ResolveWire = portName =>
+            {
+                var target = resolver.ResolveWiredImage(image.Id, portName);
+                if (target == null) return null;
+                var targetName = SanitizeName(target.Name);
+                var targetHost = resolver.FindHostFor(target.Id);
+                var targetHostName = targetHost != null ? SanitizeName(targetHost.Name) : hostName;
+                var host = topology != null
+                    ? ResolveServiceHost(target, sourceHost, resolver, topology)
+                    : targetName;
+                var desc = registry.GetDescriptor(target);
+                var port = desc?.Ports.FirstOrDefault()?.Port ?? 80;
+                var resolvedPort = ResolveServicePort(target, sourceHost, port, resolver, portAssignments);
+                var secretRef = $"${{nonsensitive(random_password.{targetHostName}_{targetName}_password.result)}}";
+                return (host, resolvedPort, secretRef);
+            },
+            Registry = topology != null ? ResolveRegistry(topology) : null,
+            ImageConfig = image.Config,
+            DerivedDbName = dbName
+        };
+
+        return templates
+            .Select(t => (t.Key, templateEngine.Resolve(t.ValueTemplate, templateContext)))
+            .ToList();
     }
+
 
     private static void AddServiceKeyEnvVar(
         List<(string Key, string Value)> envVars,
@@ -786,24 +689,37 @@ public static class TopologyHelpers
         }
     }
 
-    public static string? ResolveCommandOverride(Image image, HostEntry entry, WireResolver resolver)
+    public static string? ResolveCommandOverride(Image image, HostEntry entry, WireResolver resolver) =>
+        ResolveCommandOverride(image, entry, resolver, DefaultPlugins.CreateRegistry(), new TemplateEngine());
+
+    public static string? ResolveCommandOverride(
+        Image image, HostEntry entry, WireResolver resolver,
+        ImagePluginRegistry registry, TemplateEngine templateEngine)
     {
-        if (image.Kind == ImageKind.Redis)
+        var plugin = registry.GetForImage(image);
+        var cmdTemplate = plugin?.GetCommandOverride();
+        if (cmdTemplate == null) return null;
+
+        var hostName = SanitizeName(entry.Host.Name);
+        var imgName = SanitizeName(image.Name);
+        var templateContext = new TemplateContext
         {
-            var hostName = SanitizeName(entry.Host.Name);
-            var secretRef = $"${{nonsensitive(random_password.{hostName}_{SanitizeName(image.Name)}_password.result)}}";
-            return $"redis-server --requirepass {secretRef}";
-        }
-
-        if (image.Kind == ImageKind.MinIO)
-            return "server /data --console-address :9001";
-
-        return null;
+            HostName = hostName,
+            ImageName = imgName,
+            ImageConfig = image.Config
+        };
+        return templateEngine.Resolve(cmdTemplate, templateContext);
     }
 
     // --- Backup ---
 
-    public static List<string> GenerateBackupCommands(List<Image> images, Container host, BackupTarget? backupTarget = null)
+    public static List<string> GenerateBackupCommands(List<Image> images, Container host, BackupTarget? backupTarget = null) =>
+        GenerateBackupCommands(images, host, DefaultPlugins.CreateRegistry(), new TemplateEngine(), backupTarget);
+
+    public static List<string> GenerateBackupCommands(
+        List<Image> images, Container host,
+        ImagePluginRegistry registry, TemplateEngine templateEngine,
+        BackupTarget? backupTarget = null)
     {
         var commands = new List<string>();
         var scheduleMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -825,6 +741,10 @@ public static class TopologyHelpers
 
             if (!scheduleMap.TryGetValue(frequency, out var schedule)) continue;
 
+            var plugin = registry.GetForImage(image);
+            var backupDef = plugin?.GetBackupDefinition();
+            if (backupDef == null) continue;
+
             var retentionStr = image.Config.GetValueOrDefault("backupRetention", "");
             if (string.IsNullOrEmpty(retentionStr))
                 retentionStr = host.Config.GetValueOrDefault("backupRetention", "");
@@ -832,21 +752,17 @@ public static class TopologyHelpers
 
             var containerName = SanitizeName(image.Name);
             var backupDir = $"/opt/backups/{containerName}";
-
-            var backupCmd = image.Kind switch
-            {
-                ImageKind.PostgreSQL =>
-                    $"docker exec {containerName} pg_dumpall -U postgres | gzip > {backupDir}/{containerName}_$(date +%Y%m%d_%H%M%S).sql.gz",
-                ImageKind.Redis =>
-                    $"docker exec {containerName} redis-cli BGSAVE && sleep 2 && docker cp {containerName}:/data/dump.rdb {backupDir}/{containerName}_$(date +%Y%m%d_%H%M%S).rdb",
-                ImageKind.MinIO =>
-                    $"docker run --rm --network xcord-bridge -v {backupDir}:/backup minio/mc mirror http://{containerName}:9000 /backup/{containerName}_$(date +%Y%m%d_%H%M%S)/",
-                _ => null
-            };
-
-            if (backupCmd == null) continue;
-
             var hostName = SanitizeName(host.Name);
+
+            var templateContext = new TemplateContext
+            {
+                HostName = hostName,
+                ImageName = containerName,
+                BackupDir = backupDir,
+                ImageConfig = image.Config
+            };
+            var backupCmd = templateEngine.Resolve(backupDef.CommandTemplate, templateContext);
+
             var scriptLines = new List<string> { "#!/bin/bash", backupCmd };
 
             if (backupTarget != null)
@@ -1042,7 +958,11 @@ public static class TopologyHelpers
     /// Returns a map of imageId → (containerPort → hostPort).
     /// </summary>
     public static Dictionary<Guid, Dictionary<int, int>> ComputeHostPortAssignments(
-        Container caddy, WireResolver resolver)
+        Container caddy, WireResolver resolver) =>
+        ComputeHostPortAssignments(caddy, resolver, DefaultPlugins.CreateRegistry());
+
+    public static Dictionary<Guid, Dictionary<int, int>> ComputeHostPortAssignments(
+        Container caddy, WireResolver resolver, ImagePluginRegistry registry)
     {
         var assignments = new Dictionary<Guid, Dictionary<int, int>>();
         var usedPorts = new HashSet<int>();
@@ -1051,17 +971,18 @@ public static class TopologyHelpers
         foreach (var image in coLocatedImages)
         {
             var (imgMin, imgMax) = ParseReplicaRange(image.Config);
-            if (imgMin > 1 || imgMax > 1) continue; // Elastic - gets its own instance
+            if (imgMin > 1 || imgMax > 1) continue;
 
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-            if (meta?.Ports == null || meta.Ports.Length == 0) continue;
+            var ports = registry.GetPorts(image);
+            if (ports.Length == 0) continue;
 
-            var needsPorts = image.Kind == ImageKind.LiveKit ||
+            var desc = registry.GetDescriptor(image);
+            var needsPorts = (desc?.IsPublicEndpoint ?? false) ||
                 HasCrossHostConsumers(image, caddy, resolver);
             if (!needsPorts) continue;
 
             var imgPorts = new Dictionary<int, int>();
-            foreach (var port in meta.Ports)
+            foreach (var port in ports)
             {
                 var hostPort = port;
                 while (!usedPorts.Add(hostPort))
@@ -1128,11 +1049,12 @@ public static class TopologyHelpers
 
     // --- Caddyfile ---
 
-    public static string GenerateCaddyfile(Container caddy, WireResolver resolver, Topology? topology = null)
+    public static string GenerateCaddyfile(Container caddy, WireResolver resolver, Topology? topology = null) =>
+        GenerateCaddyfile(caddy, resolver, DefaultPlugins.CreateRegistry(), topology);
+
+    public static string GenerateCaddyfile(Container caddy, WireResolver resolver, ImagePluginRegistry registry, Topology? topology = null)
     {
         var upstreams = resolver.ResolveCaddyUpstreams(caddy);
-        // Always use Terraform variable interpolation so the domain is configurable at deploy time.
-        // Never hardcode the domain from topology config into the Caddyfile.
         var domain = "${var.domain}";
 
         var securityHeaders = new[]
@@ -1146,13 +1068,11 @@ public static class TopologyHelpers
             "  }"
         };
 
-        // Group upstreams by subdomain - multiple images with the same subdomain
-        // (e.g., FederationServer across pools) become load-balanced backends in one block
         var grouped = new Dictionary<string, List<string>>();
         foreach (var (image, subdomain) in upstreams)
         {
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-            var port = meta?.Ports.FirstOrDefault() ?? 80;
+            var ports = registry.GetPorts(image);
+            var port = ports.Length > 0 ? ports[0] : 80;
             var host = $"{subdomain}.{domain}";
 
             var upstreamHost = topology != null
@@ -1184,9 +1104,8 @@ public static class TopologyHelpers
             blocks.Add(string.Join("\n", block));
         }
 
-        // Bare domain (apex) route - xcord.net serves the hub.
-        // Find the HubServer's subdomain to reuse its backends for the apex block.
-        var hubUpstream = upstreams.FirstOrDefault(u => u.Image.Kind == ImageKind.HubServer);
+        // Apex domain route - find fixed "www" subdomain for hub
+        var hubUpstream = upstreams.FirstOrDefault(u => u.Subdomain == "www");
         if (hubUpstream != default)
         {
             var hubHost = $"{hubUpstream.Subdomain}.{domain}";
@@ -1223,15 +1142,17 @@ public static class TopologyHelpers
     /// All public images derive their subdomain from their name (same pattern as Caddy routing).
     /// Uses the topology's display domain, not Terraform variable interpolation.
     /// </summary>
-    public static List<(string Url, string Kind, string? Backend)> CollectPublicEndpoints(Topology topology)
+    public static List<(string Url, string Kind, string? Backend)> CollectPublicEndpoints(Topology topology) =>
+        CollectPublicEndpoints(topology, DefaultPlugins.CreateRegistry());
+
+    public static List<(string Url, string Kind, string? Backend)> CollectPublicEndpoints(Topology topology, ImagePluginRegistry registry)
     {
         var endpoints = new List<(string, string, string?)>();
         var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seenImageIds = new HashSet<Guid>();
-        var resolver = new WireResolver(topology);
+        var resolver = new WireResolver(topology, registry);
         var domain = ResolveDomain(topology);
 
-        // Walk Caddy containers - images routed through Caddy get subdomain-based URLs
         void WalkForCaddies(List<Container> containers)
         {
             foreach (var container in containers)
@@ -1243,8 +1164,8 @@ public static class TopologyHelpers
                     foreach (var (image, subdomain) in upstreams)
                     {
                         seenImageIds.Add(image.Id);
-                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                        var port = meta?.Ports.FirstOrDefault() ?? 80;
+                        var ports = registry.GetPorts(image);
+                        var port = ports.Length > 0 ? ports[0] : 80;
                         var host = $"{subdomain}.{domain}";
                         var backend = $"{SanitizeName(image.Name)}:{port}";
                         if (!grouped.TryGetValue(host, out var backends))
@@ -1263,8 +1184,7 @@ public static class TopologyHelpers
                             endpoints.Add((url, "reverse_proxy", string.Join(" ", backends)));
                     }
 
-                    // Apex domain - find HubServer's subdomain dynamically
-                    var hubUpstream = upstreams.FirstOrDefault(u => u.Image.Kind == ImageKind.HubServer);
+                    var hubUpstream = upstreams.FirstOrDefault(u => u.Subdomain == "www");
                     if (hubUpstream != default)
                     {
                         var hubHost = $"{hubUpstream.Subdomain}.{domain}";
@@ -1283,8 +1203,6 @@ public static class TopologyHelpers
 
         WalkForCaddies(topology.Containers);
 
-        // Walk all images - any with IsPublicEndpoint that wasn't already collected via Caddy routing
-        // gets added using name-derived subdomain (same pattern as Caddy upstream routing)
         void WalkForPublicImages(List<Container> containers)
         {
             foreach (var container in containers)
@@ -1292,17 +1210,16 @@ public static class TopologyHelpers
                 foreach (var image in container.Images)
                 {
                     if (seenImageIds.Contains(image.Id)) continue;
-                    var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                    if (meta is not { IsPublicEndpoint: true }) continue;
+                    var desc = registry.GetDescriptor(image);
+                    if (desc is not { IsPublicEndpoint: true }) continue;
 
                     var subdomain = image.Name.ToLowerInvariant().Replace(' ', '-').Replace('_', '-');
                     if (string.IsNullOrEmpty(subdomain)) continue;
 
-                    var port = meta.Ports.FirstOrDefault();
-                    if (port == 0) port = 80;
+                    var port = desc.Ports.FirstOrDefault()?.Port ?? 80;
                     var url = $"https://{subdomain}.{domain}";
                     if (seenUrls.Add(url))
-                        endpoints.Add((url, image.Kind.ToString().ToLowerInvariant(), $"{SanitizeName(image.Name)}:{port}"));
+                        endpoints.Add((url, image.ResolveTypeId().ToLowerInvariant(), $"{SanitizeName(image.Name)}:{port}"));
                 }
 
                 WalkForPublicImages(container.Children);
@@ -1356,33 +1273,59 @@ public static class TopologyHelpers
         _ => "alpine:3.21"
     };
 
-    /// <summary>
-    /// Returns true if the given image kind requires a private registry (xcord-built images).
-    /// </summary>
+    public static string GetDefaultDockerImage(string typeId, string? registry, ImagePluginRegistry pluginRegistry)
+    {
+        var plugin = pluginRegistry.Get(typeId);
+        if (plugin == null) return "alpine:3.21";
+        var desc = plugin.GetDescriptor();
+        var behavior = plugin.GetDockerBehavior();
+
+        if (behavior.RequiresPrivateRegistry)
+        {
+            var reg = registry ?? "docker.xcord.net";
+            var shortName = typeId switch
+            {
+                "HubServer" => "hub",
+                "FederationServer" => "fed",
+                _ => typeId.ToLowerInvariant()
+            };
+            return $"{reg}/{shortName}:latest";
+        }
+
+        return desc.DefaultDockerImage ?? "alpine:3.21";
+    }
+
     public static bool RequiresPrivateRegistry(ImageKind kind) =>
         kind is ImageKind.HubServer or ImageKind.FederationServer;
 
-    /// <summary>
-    /// Returns the docker image reference for use in HCL provisioning.
-    /// Private registry images use ${var.registry_url} for Terraform interpolation.
-    /// Third-party images use their static image reference.
-    /// </summary>
-    public static string GetDockerImageForHcl(Image image, string resolvedRegistry)
+    public static bool RequiresPrivateRegistry(string typeId, ImagePluginRegistry pluginRegistry) =>
+        pluginRegistry.Get(typeId)?.GetDockerBehavior().RequiresPrivateRegistry ?? false;
+
+    public static string GetDockerImageForHcl(Image image, string resolvedRegistry) =>
+        GetDockerImageForHcl(image, resolvedRegistry, DefaultPlugins.CreateRegistry());
+
+    public static string GetDockerImageForHcl(Image image, string resolvedRegistry, ImagePluginRegistry registry)
     {
-        if (!RequiresPrivateRegistry(image.Kind))
+        var plugin = registry.GetForImage(image);
+        var behavior = plugin?.GetDockerBehavior();
+
+        if (behavior is not { RequiresPrivateRegistry: true })
         {
-            var dockerImage = image.DockerImage ?? GetDefaultDockerImage(image.Kind);
+            var desc = plugin?.GetDescriptor();
+            var defaultImage = desc?.DefaultDockerImage ?? "alpine:3.21";
+            var dockerImage = image.DockerImage ?? defaultImage;
             if (dockerImage.EndsWith(":latest", StringComparison.OrdinalIgnoreCase))
-                return GetDefaultDockerImage(image.Kind);
+                return defaultImage;
             return dockerImage;
         }
 
-        // Private registry images use Terraform variables for both registry URL and version.
-        var (shortName, versionVar) = image.Kind switch
+        var versionVar = behavior.VersionVariableName ?? throw new ArgumentException(
+            $"Plugin '{image.ResolveTypeId()}' requires private registry but has no VersionVariableName");
+        var shortName = image.ResolveTypeId() switch
         {
-            ImageKind.HubServer => ("hub", "hub_version"),
-            ImageKind.FederationServer => ("fed", "fed_version"),
-            _ => throw new ArgumentException($"Unexpected private registry image kind: {image.Kind}")
+            "HubServer" => "hub",
+            "FederationServer" => "fed",
+            _ => image.ResolveTypeId().ToLowerInvariant()
         };
         return $"${{var.registry_url}}/{shortName}:${{var.{versionVar}}}";
     }
@@ -1393,6 +1336,13 @@ public static class TopologyHelpers
         ImageKind.FederationServer => "fed_version",
         _ => throw new ArgumentException($"No version variable for image kind: {kind}")
     };
+
+    public static string GetVersionVariableName(string typeId, ImagePluginRegistry pluginRegistry)
+    {
+        var plugin = pluginRegistry.GetRequired(typeId);
+        return plugin.GetDockerBehavior().VersionVariableName
+            ?? throw new ArgumentException($"No version variable for image type: {typeId}");
+    }
 
     /// <summary>
     /// Generates the docker login command for use in provisioning scripts.

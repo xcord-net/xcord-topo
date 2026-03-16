@@ -107,6 +107,7 @@ public sealed class Image
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
     public ImageKind Kind { get; set; }
+    public string? TypeId { get; set; }
     public double X { get; set; }
     public double Y { get; set; }
     public double Width { get; set; } = 120;
@@ -152,4 +153,15 @@ public sealed class BackupTarget
     public string BucketName { get; set; } = string.Empty;
     public string? Endpoint { get; set; }
     public int? GlacierTransitionDays { get; set; }
+}
+
+public static class ImageExtensions
+{
+    /// <summary>
+    /// Returns the TypeId if set, otherwise falls back to Kind.ToString().
+    /// This enables backward compatibility: old topologies without TypeId
+    /// still work, and plugin types set TypeId explicitly.
+    /// </summary>
+    public static string ResolveTypeId(this Image image) =>
+        image.TypeId ?? image.Kind.ToString();
 }

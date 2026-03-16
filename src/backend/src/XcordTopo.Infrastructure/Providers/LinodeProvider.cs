@@ -1,3 +1,4 @@
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Models;
 
@@ -5,6 +6,16 @@ namespace XcordTopo.Infrastructure.Providers;
 
 public sealed class LinodeProvider : ProviderHclBase
 {
+    private readonly ImagePluginRegistry _imageRegistry;
+    private readonly TemplateEngine _templateEngine = new();
+
+    public LinodeProvider(ImagePluginRegistry imageRegistry)
+    {
+        _imageRegistry = imageRegistry;
+    }
+
+    public LinodeProvider() : this(DefaultPlugins.CreateRegistry()) { }
+
     protected override string InstanceResourceType => "linode_instance";
     protected override string PublicIpField => "ip_address";
     protected override string PrivateIpField => "private_ip_address";
@@ -123,13 +134,13 @@ public sealed class LinodeProvider : ProviderHclBase
         var pools = TopologyHelpers.CollectComputePools(topology.Containers, topology, poolSelections);
         var dnsContainers = TopologyHelpers.CollectDnsContainers(topology.Containers);
         var standaloneCaddies = TopologyHelpers.CollectStandaloneCaddiesRecursive(topology.Containers);
-        var resolver = new WireResolver(topology);
+        var resolver = new WireResolver(topology, _imageRegistry);
 
         files["main.tf"] = GenerateMain();
-        files["secrets.tf"] = GenerateSecrets(hosts, resolver, pools, standaloneCaddies);
+        files["secrets.tf"] = GenerateSecrets(hosts, resolver, _imageRegistry, pools, standaloneCaddies);
         files["variables.tf"] = GenerateVariables(topology, pools);
         files["instances.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies, infraSelections);
-        files["firewall.tf"] = GenerateFirewall(topology, hosts, pools, standaloneCaddies);
+        files["firewall.tf"] = GenerateFirewall(topology, hosts, pools, standaloneCaddies, _imageRegistry);
         files["provisioning.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
         files["volumes.tf"] = GenerateVolumes(hosts);
         files["outputs.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
@@ -164,14 +175,14 @@ public sealed class LinodeProvider : ProviderHclBase
             .Where(c => TopologyHelpers.ResolveProviderKey(c, topology)
                 .Equals(Key, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        var resolver = new WireResolver(topology);
+        var resolver = new WireResolver(topology, _imageRegistry);
 
         files["main_linode.tf"] = GenerateMain();
         files["variables_linode.tf"] = GenerateVariables(topology, pools);
-        files["secrets.tf"] = GenerateSecrets(hosts, resolver, pools, standaloneCaddies);
+        files["secrets.tf"] = GenerateSecrets(hosts, resolver, _imageRegistry, pools, standaloneCaddies);
         files["instances_linode.tf"] = GenerateInstances(topology, hosts, pools, standaloneCaddies, infraSelections);
         if (hosts.Count > 0 || pools.Count > 0 || standaloneCaddies.Count > 0)
-            files["firewall_linode.tf"] = GenerateFirewall(topology, hosts, pools, standaloneCaddies);
+            files["firewall_linode.tf"] = GenerateFirewall(topology, hosts, pools, standaloneCaddies, _imageRegistry);
         files["provisioning_linode.tf"] = GenerateProvisioning(hosts, resolver, topology, pools, standaloneCaddies);
         files["volumes_linode.tf"] = GenerateVolumes(hosts);
         files["outputs_linode.tf"] = GenerateOutputs(hosts, pools, standaloneCaddies);
@@ -459,7 +470,7 @@ public sealed class LinodeProvider : ProviderHclBase
         foreach (var entry in hosts)
         {
             var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
-            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host);
+            var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host, _imageRegistry);
             var plan = SelectPlan(entry.Host.Name, ramRequired, infraSelections);
 
             instances.Block($"resource \"linode_instance\" \"{resourceName}\"", b =>
@@ -507,8 +518,8 @@ public sealed class LinodeProvider : ProviderHclBase
         foreach (var image in elasticImages)
         {
             var resourceName = TopologyHelpers.SanitizeName(image.Name);
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-            var ramRequired = meta?.MinRamMb ?? 256;
+            var desc = _imageRegistry.GetDescriptor(image);
+            var ramRequired = desc?.MinRamMb ?? 256;
             var plan = SelectPlan(image.Name, ramRequired, infraSelections);
             var varName = $"{resourceName}_replicas";
 
@@ -530,7 +541,7 @@ public sealed class LinodeProvider : ProviderHclBase
         foreach (var caddy in standaloneCaddies)
         {
             var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
-            var plan = SelectPlan(caddy.Name, TopologyHelpers.CalculateStandaloneCaddyRam(caddy), infraSelections);
+            var plan = SelectPlan(caddy.Name, TopologyHelpers.CalculateStandaloneCaddyRam(caddy, _imageRegistry), infraSelections);
 
             instances.Block($"resource \"linode_instance\" \"{resourceName}\"", b =>
             {
@@ -548,16 +559,16 @@ public sealed class LinodeProvider : ProviderHclBase
         return instances.ToString();
     }
 
-    private static string GenerateFirewall(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies)
+    private static string GenerateFirewall(Topology topology, List<TopologyHelpers.HostEntry> hosts, List<TopologyHelpers.ComputePoolEntry> pools, List<Container> standaloneCaddies, ImagePluginRegistry imageRegistry)
     {
         var firewall = new HclBuilder();
 
         // Check entire topology for LiveKit - it may be on hosts, standalone Caddies, or pools
         var hasLiveKit = topology.Containers.Any(HasLiveKitRecursive);
 
-        static bool HasLiveKitRecursive(Container c)
+        bool HasLiveKitRecursive(Container c)
         {
-            if (c.Images.Any(i => i.Kind == ImageKind.LiveKit)) return true;
+            if (c.Images.Any(i => imageRegistry.GetDescriptor(i)?.IsPublicEndpoint == true && imageRegistry.GetPorts(i).Any(p => p == 7880))) return true;
             return c.Children.Any(HasLiveKitRecursive);
         }
 
@@ -681,7 +692,7 @@ public sealed class LinodeProvider : ProviderHclBase
                 if (countExpr != null)
                     b.RawAttribute("count", countExpr);
 
-                var secrets = TopologyHelpers.CollectSecrets(entry, resolver);
+                var secrets = TopologyHelpers.CollectSecrets(entry, resolver, _imageRegistry);
                 foreach (var secret in secrets)
                     depsList.Add($"random_password.{secret.ResourceName}");
 
@@ -724,20 +735,20 @@ public sealed class LinodeProvider : ProviderHclBase
                     foreach (var image in images)
                     {
                         // Private registry images (Hub, Fed) are deployed post-push via deploy_apps phase
-                        if (TopologyHelpers.RequiresPrivateRegistry(image.Kind))
+                        if (TopologyHelpers.RequiresPrivateRegistry(image.ResolveTypeId(), _imageRegistry))
                             continue;
 
-                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
-                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, topology);
-                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver);
+                        var desc = _imageRegistry.GetDescriptor(image);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, _imageRegistry, _templateEngine, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver, _imageRegistry, _templateEngine);
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
                         // Publish ports if the image has cross-host consumers, needs direct external access,
                         // or lives on a DataPool (DataPool images are always accessed from other hosts)
-                        var publishPorts = meta?.Ports.Length > 0 &&
-                            (image.Kind == ImageKind.LiveKit ||
+                        var publishPorts = desc?.Ports.Length > 0 &&
+                            ((desc?.IsPublicEndpoint ?? false) ||
                              entry.Host.Kind == ContainerKind.DataPool ||
                              TopologyHelpers.HasCrossHostConsumers(image, entry.Host, resolver));
 
@@ -755,12 +766,12 @@ public sealed class LinodeProvider : ProviderHclBase
                             foreach (var (key, value) in envVars)
                                 flags.Add($"-e '{key}={value}'");
 
-                            if (meta?.MountPath != null)
-                                flags.Add($"--mount type=volume,source={containerName}_data,target={meta.MountPath}");
+                            if (desc?.MountPath != null)
+                                flags.Add($"--mount type=volume,source={containerName}_data,target={desc.MountPath}");
 
-                            if (publishPorts && meta != null)
+                            if (publishPorts && desc != null)
                             {
-                                foreach (var port in meta.Ports)
+                                foreach (var port in desc.Ports.Select(p => p.Port))
                                     flags.Add($"-p {port}:{port}");
                             }
 
@@ -781,12 +792,12 @@ public sealed class LinodeProvider : ProviderHclBase
                             foreach (var (key, value) in envVars)
                                 flags.Add($"-e '{key}={value}'");
 
-                            if (meta?.MountPath != null)
-                                flags.Add($"-v {containerName}_data:{meta.MountPath}");
+                            if (desc?.MountPath != null)
+                                flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
-                            if (publishPorts && meta != null)
+                            if (publishPorts && desc != null)
                             {
-                                foreach (var port in meta.Ports)
+                                foreach (var port in desc.Ports.Select(p => p.Port))
                                     flags.Add($"-p {port}:{port}");
                             }
 
@@ -798,7 +809,7 @@ public sealed class LinodeProvider : ProviderHclBase
 
                     foreach (var caddy in caddies)
                     {
-                        var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, topology);
+                        var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, _imageRegistry, topology);
                         var caddyName = TopologyHelpers.SanitizeName(caddy.Name);
 
                         b.Line($"  \"mkdir -p /opt/caddy\",");
@@ -823,7 +834,7 @@ public sealed class LinodeProvider : ProviderHclBase
                             b.Line($"  \"{rlCmd}\",");
                     }
                     // Registry images: configure htpasswd auth
-                    foreach (var image in images.Where(i => i.Kind == ImageKind.Registry))
+                    foreach (var image in images.Where(i => i.ResolveTypeId() == "Registry"))
                     {
                         var registryName = TopologyHelpers.SanitizeName(image.Name);
                         var registrySubdomain = registryName;
@@ -852,7 +863,7 @@ public sealed class LinodeProvider : ProviderHclBase
                             b.Line($"  \"{cmd}\",");
                     }
 
-                    var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host, topology.BackupTarget);
+                    var backupCommands = TopologyHelpers.GenerateBackupCommands(images, entry.Host, _imageRegistry, _templateEngine, topology.BackupTarget);
                     foreach (var cmd in backupCommands)
                         b.Line($"  \"{cmd}\",");
 
@@ -906,7 +917,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     // Deploy shared services from actual pool images (data-driven)
                     foreach (var image in pool.Pool.Images)
                     {
-                        var cmd = TopologyHelpers.GenerateSwarmServiceCommand(image, poolSecretPrefix, resolver, useSudo: false, pool.Pool.Images);
+                        var cmd = TopologyHelpers.GenerateSwarmServiceCommand(image, poolSecretPrefix, resolver, _imageRegistry, _templateEngine, useSudo: false, pool.Pool.Images);
                         if (cmd != null)
                             b.Line($"  \"{cmd}\",");
                     }
@@ -915,7 +926,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     var poolCaddies = TopologyHelpers.CollectCaddyContainers(pool.Pool);
                     foreach (var caddy in poolCaddies)
                     {
-                        var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, topology);
+                        var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, _imageRegistry, topology);
                         var caddyName = TopologyHelpers.SanitizeName(caddy.Name);
                         b.Line($"  \"mkdir -p /opt/caddy\",");
                         var escapedCaddyfile = caddyfile.Replace("\"", "\\\"");
@@ -975,7 +986,7 @@ public sealed class LinodeProvider : ProviderHclBase
         var allPortAssignments = new Dictionary<Guid, Dictionary<int, int>>();
         foreach (var caddy in standaloneCaddies)
         {
-            var assignments = TopologyHelpers.ComputeHostPortAssignments(caddy, resolver);
+            var assignments = TopologyHelpers.ComputeHostPortAssignments(caddy, resolver, _imageRegistry);
             foreach (var (imgId, ports) in assignments)
                 allPortAssignments[imgId] = ports;
         }
@@ -984,10 +995,10 @@ public sealed class LinodeProvider : ProviderHclBase
         foreach (var caddy in standaloneCaddies)
         {
             var resourceName = TopologyHelpers.SanitizeName(caddy.Name);
-            var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, topology);
+            var caddyfile = TopologyHelpers.GenerateCaddyfile(caddy, resolver, _imageRegistry, topology);
 
             // Collect secret dependencies for co-located images
-            var caddySecrets = TopologyHelpers.CollectSecrets(new TopologyHelpers.HostEntry(caddy), resolver, excludePools: true);
+            var caddySecrets = TopologyHelpers.CollectSecrets(new TopologyHelpers.HostEntry(caddy), resolver, _imageRegistry, excludePools: true);
             var depsList = new List<string> { $"linode_instance.{resourceName}" };
             foreach (var secret in caddySecrets)
                 depsList.Add($"random_password.{secret.ResourceName}");
@@ -1020,13 +1031,13 @@ public sealed class LinodeProvider : ProviderHclBase
                     {
                         var (imgMin, imgMax) = TopologyHelpers.ParseReplicaRange(image.Config);
                         if (imgMin > 1 || imgMax > 1) continue; // Elastic - gets its own instance
-                        if (TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
+                        if (TopologyHelpers.RequiresPrivateRegistry(image.ResolveTypeId(), _imageRegistry)) continue;
 
-                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
-                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                        var envVars = TopologyHelpers.BuildEnvVars(image, caddyEntry, resolver, topology);
-                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver);
+                        var desc = _imageRegistry.GetDescriptor(image);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, caddyEntry, resolver, _imageRegistry, _templateEngine, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver, _imageRegistry, _templateEngine);
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
                         var flags = new List<string>
@@ -1047,8 +1058,8 @@ public sealed class LinodeProvider : ProviderHclBase
                                 flags.Add($"-p {hostPort}:{containerPort}");
                         }
 
-                        if (meta?.MountPath != null)
-                            flags.Add($"-v {containerName}_data:{meta.MountPath}");
+                        if (desc?.MountPath != null)
+                            flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
                         var flagStr = string.Join(" ", flags);
                         b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
@@ -1077,11 +1088,11 @@ public sealed class LinodeProvider : ProviderHclBase
         var elasticImages = TopologyHelpers.CollectElasticImages(hosts, standaloneCaddies);
         foreach (var image in elasticImages)
         {
-            if (TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
+            if (TopologyHelpers.RequiresPrivateRegistry(image.ResolveTypeId(), _imageRegistry)) continue;
 
             var resourceName = TopologyHelpers.SanitizeName(image.Name);
-            var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+            var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
+            var desc = _imageRegistry.GetDescriptor(image);
 
             // Find the parent container (Host or Caddy) for secret name resolution
             var parentContainer = resolver.FindHostFor(image.Id) ?? resolver.FindCaddyFor(image.Id);
@@ -1091,7 +1102,7 @@ public sealed class LinodeProvider : ProviderHclBase
             // Elastic images run on their own instances - use a synthetic source host
             // so ResolveServiceHost knows this is NOT co-located with the parent
             var resolveFrom = new Container { Id = Guid.NewGuid(), Name = resourceName };
-            var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, topology, resolveFrom, allPortAssignments);
+            var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, _imageRegistry, _templateEngine, topology, resolveFrom, allPortAssignments);
 
             provisioning.Block($"resource \"null_resource\" \"provision_{resourceName}\"", b =>
             {
@@ -1129,12 +1140,12 @@ public sealed class LinodeProvider : ProviderHclBase
                     foreach (var (key, value) in envVars)
                         flags.Add($"-e '{key}={value}'");
 
-                    if (meta?.MountPath != null)
-                        flags.Add($"-v {resourceName}_data:{meta.MountPath}");
+                    if (desc?.MountPath != null)
+                        flags.Add($"-v {resourceName}_data:{desc.MountPath}");
 
-                    if (meta?.Ports.Length > 0)
+                    if (desc?.Ports.Length > 0)
                     {
-                        foreach (var port in meta.Ports)
+                        foreach (var port in desc.Ports.Select(p => p.Port))
                             flags.Add($"-p {port}:{port}");
                     }
 
@@ -1155,7 +1166,7 @@ public sealed class LinodeProvider : ProviderHclBase
         return provisioning.ToString();
     }
 
-    private static void GenerateAppDeployResources(
+    private void GenerateAppDeployResources(
         HclBuilder provisioning,
         List<TopologyHelpers.HostEntry> hosts,
         List<Container> standaloneCaddies,
@@ -1194,7 +1205,7 @@ public sealed class LinodeProvider : ProviderHclBase
                 {
                     foreach (var img in privateImages)
                     {
-                        var vv = TopologyHelpers.GetVersionVariableName(img.Kind);
+                        var vv = TopologyHelpers.GetVersionVariableName(img.ResolveTypeId(), _imageRegistry);
                         tb.RawAttribute(vv, $"var.{vv}");
                     }
                 });
@@ -1229,14 +1240,14 @@ public sealed class LinodeProvider : ProviderHclBase
 
                     foreach (var image in privateImages)
                     {
-                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
-                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, topology);
-                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver);
+                        var desc = _imageRegistry.GetDescriptor(image);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, entry, resolver, _imageRegistry, _templateEngine, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, entry, resolver, _imageRegistry, _templateEngine);
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
-                        var publishPorts = meta?.Ports.Length > 0 &&
+                        var publishPorts = desc?.Ports.Length > 0 &&
                             (TopologyHelpers.HasCrossHostConsumers(image, entry.Host, resolver));
 
                         // Pull new image while old container still serves
@@ -1245,15 +1256,15 @@ public sealed class LinodeProvider : ProviderHclBase
                         if (useSwarm)
                         {
                             // Rolling update - zero downtime
-                            b.Line($"  \"docker service update --image {dockerImage} {containerName} 2>/dev/null || docker service create --name {containerName} --replicas {TopologyHelpers.GetImageReplicaExpression(image)} --network xcord-bridge --restart-condition any {string.Join(" ", envVars.Select(e => $"-e '{e.Key}={e.Value}'"))}{(meta?.MountPath != null ? $" --mount type=volume,source={containerName}_data,target={meta.MountPath}" : "")}{(publishPorts && meta != null ? string.Concat(meta.Ports.Select(p => $" -p {p}:{p}")) : "")} {dockerImage}{cmd}\",");
+                            b.Line($"  \"docker service update --image {dockerImage} {containerName} 2>/dev/null || docker service create --name {containerName} --replicas {TopologyHelpers.GetImageReplicaExpression(image)} --network xcord-bridge --restart-condition any {string.Join(" ", envVars.Select(e => $"-e '{e.Key}={e.Value}'"))}{(desc?.MountPath != null ? $" --mount type=volume,source={containerName}_data,target={desc.MountPath}" : "")}{(publishPorts && desc != null ? string.Concat(desc.Ports.Select(p => $" -p {p.Port}:{p.Port}")) : "")} {dockerImage}{cmd}\",");
                         }
                         else
                         {
                             var flags = new List<string> { "-d", $"--name {containerName}", "--network xcord-bridge", "--restart unless-stopped" };
                             foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
-                            if (meta?.MountPath != null) flags.Add($"-v {containerName}_data:{meta.MountPath}");
-                            if (publishPorts && meta != null)
-                                foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");
+                            if (desc?.MountPath != null) flags.Add($"-v {containerName}_data:{desc.MountPath}");
+                            if (publishPorts && desc != null)
+                                foreach (var port in desc.Ports.Select(p => p.Port)) flags.Add($"-p {port}:{port}");
 
                             // Pull-then-swap: remove old container and start new one (image already cached)
                             b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
@@ -1293,7 +1304,7 @@ public sealed class LinodeProvider : ProviderHclBase
                 {
                     foreach (var img in privateImages)
                     {
-                        var vv = TopologyHelpers.GetVersionVariableName(img.Kind);
+                        var vv = TopologyHelpers.GetVersionVariableName(img.ResolveTypeId(), _imageRegistry);
                         tb.RawAttribute(vv, $"var.{vv}");
                     }
                 });
@@ -1315,11 +1326,11 @@ public sealed class LinodeProvider : ProviderHclBase
 
                     foreach (var image in privateImages)
                     {
-                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
+                        var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
                         var containerName = TopologyHelpers.SanitizeName(image.Name);
-                        var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
-                        var envVars = TopologyHelpers.BuildEnvVars(image, caddyEntry, resolver, topology);
-                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver);
+                        var desc = _imageRegistry.GetDescriptor(image);
+                        var envVars = TopologyHelpers.BuildEnvVars(image, caddyEntry, resolver, _imageRegistry, _templateEngine, topology);
+                        var cmdOverride = TopologyHelpers.ResolveCommandOverride(image, caddyEntry, resolver, _imageRegistry, _templateEngine);
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
                         // Pull new image while old container still serves
@@ -1330,7 +1341,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
                         if (allPortAssignments.TryGetValue(image.Id, out var portMap))
                             foreach (var (containerPort, hostPort) in portMap) flags.Add($"-p {hostPort}:{containerPort}");
-                        if (meta?.MountPath != null) flags.Add($"-v {containerName}_data:{meta.MountPath}");
+                        if (desc?.MountPath != null) flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
                         b.Line($"  \"docker run {string.Join(" ", flags)} {dockerImage}{cmd}\",");
                     }
@@ -1343,17 +1354,17 @@ public sealed class LinodeProvider : ProviderHclBase
         // Elastic private-registry images
         foreach (var image in elasticImages)
         {
-            if (!TopologyHelpers.RequiresPrivateRegistry(image.Kind)) continue;
+            if (!TopologyHelpers.RequiresPrivateRegistry(image.ResolveTypeId(), _imageRegistry)) continue;
 
             var resourceName = TopologyHelpers.SanitizeName(image.Name);
-            var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology));
-            var meta = ImageOperationalMetadata.Images.GetValueOrDefault(image.Kind);
+            var dockerImage = TopologyHelpers.GetDockerImageForHcl(image, TopologyHelpers.ResolveRegistry(topology), _imageRegistry);
+            var desc = _imageRegistry.GetDescriptor(image);
             var parentContainer = resolver.FindHostFor(image.Id) ?? resolver.FindCaddyFor(image.Id);
             var parentEntry = parentContainer != null
                 ? new TopologyHelpers.HostEntry(parentContainer)
                 : new TopologyHelpers.HostEntry(new Container { Name = resourceName });
             var resolveFrom = new Container { Id = Guid.NewGuid(), Name = resourceName };
-            var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, topology, resolveFrom, allPortAssignments);
+            var envVars = TopologyHelpers.BuildEnvVars(image, parentEntry, resolver, _imageRegistry, _templateEngine, topology, resolveFrom, allPortAssignments);
 
             provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}\"", b =>
             {
@@ -1361,7 +1372,7 @@ public sealed class LinodeProvider : ProviderHclBase
                 b.RawAttribute("count", $"var.deploy_apps ? var.{varName} : 0");
                 b.RawAttribute("depends_on", $"[linode_instance.{resourceName}]");
                 b.Line();
-                var versionVar = TopologyHelpers.GetVersionVariableName(image.Kind);
+                var versionVar = TopologyHelpers.GetVersionVariableName(image.ResolveTypeId(), _imageRegistry);
                 b.MapBlock("triggers", tb => tb.RawAttribute(versionVar, $"var.{versionVar}"));
                 b.Line();
                 b.Block("connection", cb =>
@@ -1391,9 +1402,9 @@ public sealed class LinodeProvider : ProviderHclBase
 
                     var flags = new List<string> { "-d", $"--name {resourceName}", "--network xcord-bridge", "--restart unless-stopped" };
                     foreach (var (key, value) in envVars) flags.Add($"-e '{key}={value}'");
-                    if (meta?.MountPath != null) flags.Add($"-v {resourceName}_data:{meta.MountPath}");
-                    if (meta?.Ports.Length > 0)
-                        foreach (var port in meta.Ports) flags.Add($"-p {port}:{port}");
+                    if (desc?.MountPath != null) flags.Add($"-v {resourceName}_data:{desc.MountPath}");
+                    if (desc?.Ports.Length > 0)
+                        foreach (var port in desc.Ports.Select(p => p.Port)) flags.Add($"-p {port}:{port}");
 
                     b.Line($"  \"docker run {string.Join(" ", flags)} {dockerImage}\",");
                     pb.Line("]");

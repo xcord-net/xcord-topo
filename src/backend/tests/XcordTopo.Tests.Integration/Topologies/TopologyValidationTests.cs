@@ -36,7 +36,6 @@ public sealed class TopologyValidationTests : IClassFixture<TopoWebApplicationFa
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
-        Assert.True(body.TryGetProperty("isValid", out _));
         Assert.True(body.TryGetProperty("canDeploy", out _));
         Assert.True(body.TryGetProperty("items", out var items));
         Assert.Equal(JsonValueKind.Array, items.ValueKind);

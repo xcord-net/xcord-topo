@@ -10,7 +10,6 @@ namespace XcordTopo.Features.Topologies;
 public sealed record ValidateTopologyRequest(Guid Id);
 
 public sealed record ValidateTopologyResponse(
-    bool IsValid,
     List<string> Errors,
     bool CanDeploy,
     List<TopologyValidationError> Items);
@@ -26,7 +25,6 @@ public sealed class ValidateTopologyHandler(ITopologyStore store, ITopologyValid
 
         var result = validator.ValidateFull(topology);
         return new ValidateTopologyResponse(
-            IsValid: result.CanDeploy,
             Errors: result.Errors.Select(e => e.Message).ToList(),
             CanDeploy: result.CanDeploy,
             Items: result.Items);

@@ -151,7 +151,6 @@ export interface ValidationItem {
 }
 
 export interface TopologyValidationResult {
-  isValid: boolean;
   errors: string[];
   canDeploy: boolean;
   items: ValidationItem[];

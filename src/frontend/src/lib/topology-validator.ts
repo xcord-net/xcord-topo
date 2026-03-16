@@ -1,11 +1,5 @@
 import type { Topology, Container, Image, Wire } from '../types/topology';
-
-export interface ValidationItem {
-  severity: 'Error' | 'Warning';
-  message: string;
-  nodeId?: string;
-  field?: string;
-}
+import type { ValidationItem } from '../types/deploy';
 
 // --- Utility ---
 

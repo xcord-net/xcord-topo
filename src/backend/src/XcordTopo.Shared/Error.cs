@@ -15,7 +15,6 @@ public sealed record Error
 
     public static Error NotFound(string code, string message) => new(code, message, 404);
     public static Error Validation(string code, string message) => new(code, message, 400);
-    public static Error BadRequest(string code, string message) => new(code, message, 400);
     public static Error Conflict(string code, string message) => new(code, message, 409);
     public static Error Failure(string code, string message) => new(code, message, 500);
 }

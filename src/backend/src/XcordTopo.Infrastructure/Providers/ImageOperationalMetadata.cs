@@ -214,13 +214,4 @@ public static class ImageOperationalMetadata
             return poolImages.Count > 0 ? 1 : 0; // Dedicated host model: 1 tenant per host
         return available / perTenantMb;
     }
-
-    /// <summary>
-    /// Calculates how many compute hosts are needed for a target number of tenants.
-    /// </summary>
-    public static int CalculateHostsRequired(int targetTenants, int tenantsPerHost)
-    {
-        if (tenantsPerHost <= 0) return targetTenants;
-        return (targetTenants + tenantsPerHost - 1) / tenantsPerHost;
-    }
 }

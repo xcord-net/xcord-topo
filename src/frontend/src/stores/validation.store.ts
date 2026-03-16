@@ -1,7 +1,7 @@
 import { createRoot, createMemo } from 'solid-js';
 import { useTopology } from './topology.store';
 import { validateTopology, getNodeErrors } from '../lib/topology-validator';
-import type { ValidationItem } from '../lib/topology-validator';
+import type { ValidationItem } from '../types/deploy';
 
 const store = createRoot(() => {
   const topo = useTopology();

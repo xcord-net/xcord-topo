@@ -76,7 +76,7 @@ public static class ImageOperationalMetadata
         [ImageKind.FederationServer] = new(
             Ports: [80],
             MountPath: null,
-            MinRamMb: 512,
+            MinRamMb: 192,
             SharedOverheadMb: 0,
             CommandOverride: null,
             EnvVarTemplates: new()
@@ -135,7 +135,7 @@ public static class ImageOperationalMetadata
             Name = "Free Tier",
             ImageSpecs = new()
             {
-                ["FederationServer"] = new() { MemoryMb = 256, CpuMillicores = 250, DiskMb = 512 }
+                ["FederationServer"] = new() { MemoryMb = 192, CpuMillicores = 100, DiskMb = 256 }
             }
         },
         new()
@@ -144,7 +144,7 @@ public static class ImageOperationalMetadata
             Name = "Basic Tier",
             ImageSpecs = new()
             {
-                ["FederationServer"] = new() { MemoryMb = 512, CpuMillicores = 500, DiskMb = 2048 }
+                ["FederationServer"] = new() { MemoryMb = 256, CpuMillicores = 250, DiskMb = 512 }
             }
         },
         new()
@@ -153,7 +153,7 @@ public static class ImageOperationalMetadata
             Name = "Pro Tier",
             ImageSpecs = new()
             {
-                ["FederationServer"] = new() { MemoryMb = 1024, CpuMillicores = 1000, DiskMb = 5120 }
+                ["FederationServer"] = new() { MemoryMb = 512, CpuMillicores = 350, DiskMb = 2048 }
             }
         },
         new()
@@ -162,23 +162,10 @@ public static class ImageOperationalMetadata
             Name = "Enterprise Tier",
             ImageSpecs = new()
             {
-                ["FederationServer"] = new() { MemoryMb = 2048, CpuMillicores = 2000, DiskMb = 25600 }
+                ["FederationServer"] = new() { MemoryMb = 1024, CpuMillicores = 750, DiskMb = 8192 }
             }
         }
     ];
-
-    /// <summary>
-    /// Calculates the total shared infrastructure overhead (in MB) for a compute pool host.
-    /// This is the sum of SharedOverheadMb for shared image kinds (PG, Redis, MinIO) plus Caddy.
-    /// </summary>
-    public static int CalculateSharedOverheadMb()
-    {
-        var overhead = Images[ImageKind.PostgreSQL].SharedOverheadMb
-            + Images[ImageKind.Redis].SharedOverheadMb
-            + Images[ImageKind.MinIO].SharedOverheadMb
-            + Caddy.MinRamMb;
-        return overhead;
-    }
 
     /// <summary>
     /// Calculates shared infrastructure overhead for a compute pool host
@@ -198,21 +185,6 @@ public static class ImageOperationalMetadata
         // Always include Caddy overhead for compute pools
         overhead += Caddy.MinRamMb;
         return overhead;
-    }
-
-    /// <summary>
-    /// Calculates how many tenants of a given tier can fit on a compute host with the given total memory.
-    /// </summary>
-    public static int CalculateTenantsPerHost(int hostMemoryMb, TierProfile tierProfile)
-    {
-        var sharedOverhead = CalculateSharedOverheadMb();
-        var available = hostMemoryMb - sharedOverhead;
-        if (available <= 0) return 0;
-
-        var fedSpec = tierProfile.ImageSpecs.GetValueOrDefault("FederationServer");
-        if (fedSpec == null || fedSpec.MemoryMb <= 0) return 0;
-
-        return available / fedSpec.MemoryMb;
     }
 
     /// <summary>

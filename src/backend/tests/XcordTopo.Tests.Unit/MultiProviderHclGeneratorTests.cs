@@ -420,7 +420,7 @@ public class MultiProviderHclGeneratorTests
             },
             TierProfiles =
             [
-                new() { Id = "free", Name = "Free Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 256, CpuMillicores = 250, DiskMb = 512 } } },
+                new() { Id = "free", Name = "Free Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 192, CpuMillicores = 100, DiskMb = 256 } } },
             ],
             Registry = "docker.xcord.net"
         };

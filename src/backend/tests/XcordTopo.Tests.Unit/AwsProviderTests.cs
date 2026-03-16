@@ -676,10 +676,10 @@ public class AwsProviderTests
             },
             TierProfiles =
             [
-                new() { Id = "free", Name = "Free Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 256, CpuMillicores = 250, DiskMb = 512 } } },
-                new() { Id = "basic", Name = "Basic Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 512, CpuMillicores = 500, DiskMb = 2048 } } },
-                new() { Id = "pro", Name = "Pro Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 1024, CpuMillicores = 1000, DiskMb = 5120 } } },
-                new() { Id = "enterprise", Name = "Enterprise Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 2048, CpuMillicores = 2000, DiskMb = 25600 } } },
+                new() { Id = "free", Name = "Free Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 192, CpuMillicores = 100, DiskMb = 256 } } },
+                new() { Id = "basic", Name = "Basic Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 256, CpuMillicores = 250, DiskMb = 512 } } },
+                new() { Id = "pro", Name = "Pro Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 512, CpuMillicores = 350, DiskMb = 2048 } } },
+                new() { Id = "enterprise", Name = "Enterprise Tier", ImageSpecs = new() { ["FederationServer"] = new() { MemoryMb = 1024, CpuMillicores = 750, DiskMb = 8192 } } },
             ]
         };
     }

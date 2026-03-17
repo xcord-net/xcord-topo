@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace XcordTopo.Models;
@@ -40,7 +41,11 @@ public enum ContainerKind
     DataPool
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter))]
+/// <summary>
+/// Built-in image kinds. External plugins use Custom as the Kind value
+/// with their actual type in TypeId (e.g. "plugin:zombocom").
+/// </summary>
+[JsonConverter(typeof(ImageKindConverter))]
 public enum ImageKind
 {
     HubServer,
@@ -51,6 +56,33 @@ public enum ImageKind
     LiveKit,
     Registry,
     Custom
+}
+
+/// <summary>
+/// Deserializes known enum values normally; unknown strings (plugin types) map to Custom.
+/// On serialization, writes the TypeId if the Image is available, otherwise the enum name.
+/// </summary>
+public sealed class ImageKindConverter : JsonConverter<ImageKind>
+{
+    /// <summary>
+    /// When an unknown kind string is deserialized (e.g. "plugin:zombocom"),
+    /// the original value is stashed here so Image.OnDeserialized can backfill TypeId.
+    /// </summary>
+    [ThreadStatic]
+    internal static string? LastCustomKindValue;
+
+    public override ImageKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = reader.GetString();
+        LastCustomKindValue = null;
+        if (value is not null && Enum.TryParse<ImageKind>(value, ignoreCase: true, out var kind))
+            return kind;
+        LastCustomKindValue = value;
+        return ImageKind.Custom;
+    }
+
+    public override void Write(Utf8JsonWriter writer, ImageKind value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.ToString());
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -102,7 +134,7 @@ public sealed class Container
     public Dictionary<string, string> Config { get; set; } = new();
 }
 
-public sealed class Image
+public sealed class Image : IJsonOnDeserialized
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
@@ -116,6 +148,17 @@ public sealed class Image
     public string? DockerImage { get; set; }
     public Dictionary<string, string> Config { get; set; } = new();
     public ImageScaling Scaling { get; set; } = ImageScaling.Shared;
+
+    void IJsonOnDeserialized.OnDeserialized()
+    {
+        // If kind was an unknown string (plugin type), backfill TypeId so
+        // ResolveTypeId() returns the original plugin identifier.
+        if (Kind == ImageKind.Custom && TypeId == null && ImageKindConverter.LastCustomKindValue != null)
+        {
+            TypeId = ImageKindConverter.LastCustomKindValue;
+            ImageKindConverter.LastCustomKindValue = null;
+        }
+    }
 }
 
 public sealed class Port

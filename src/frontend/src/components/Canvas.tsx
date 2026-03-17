@@ -383,6 +383,7 @@ const Canvas: Component = () => {
                 id: crypto.randomUUID(),
                 name: def.label,
                 kind: def.kind as any,
+                typeId: def.kind,
                 x: parentAbs ? canvasPos.x - def.defaultWidth / 2 - parentAbs.x : 20,
                 y: parentAbs ? canvasPos.y - def.defaultHeight / 2 - (parentAbs.y + 32) : 20,
                 width: def.defaultWidth,

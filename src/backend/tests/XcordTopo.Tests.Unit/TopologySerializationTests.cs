@@ -16,7 +16,7 @@ public class TopologySerializationTests : IDisposable
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new ImageKindConverter(), new JsonStringEnumConverter() }
     };
 
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"xcord-topo-test-{Guid.NewGuid()}");
@@ -1188,5 +1188,236 @@ public class TopologySerializationTests : IDisposable
             if (found != null) return found;
         }
         return null;
+    }
+
+    // ── Plugin image serialization tests ─────────────────────────────
+
+    /// <summary>
+    /// Reproduces the exact failure: the frontend sends a topology with
+    /// "kind": "plugin:zombocom" on an image. The backend must deserialize
+    /// this without throwing. Before the ImageKindConverter fix, this threw
+    /// JsonException because JsonStringEnumConverter rejects unknown values.
+    /// </summary>
+    /// <summary>
+    /// Reproduces the real-world case: image was saved with kind="plugin:zombocom"
+    /// but NO typeId field (created before typeId was populated on the frontend).
+    /// After deserialization, Kind becomes Custom but TypeId is null, so
+    /// ResolveTypeId() returns "Custom" instead of "plugin:zombocom".
+    /// The converter must backfill TypeId from the original kind string.
+    /// </summary>
+    [Fact]
+    public void PluginImage_WithoutTypeId_BackfillsTypeIdFromKind()
+    {
+        var json = """
+        {
+          "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "name": "Legacy Plugin Test",
+          "provider": "linode",
+          "providerConfig": {},
+          "serviceKeys": {},
+          "containers": [
+            {
+              "id": "11111111-1111-1111-1111-111111111111",
+              "name": "Caddy",
+              "kind": "Caddy",
+              "x": 0, "y": 0, "width": 600, "height": 400,
+              "ports": [],
+              "images": [
+                {
+                  "id": "22222222-2222-2222-2222-222222222222",
+                  "name": "Zombocom",
+                  "kind": "plugin:zombocom",
+                  "x": 20, "y": 20, "width": 140, "height": 60,
+                  "ports": [
+                    { "id": "33333333-3333-3333-3333-333333333333", "name": "http", "type": "Network", "direction": "In", "side": "Left", "offset": 0.5 }
+                  ],
+                  "dockerImage": null,
+                  "config": {},
+                  "scaling": "Shared"
+                }
+              ],
+              "children": [],
+              "config": { "domain": "zombo.xcord.net" }
+            }
+          ],
+          "wires": [],
+          "tierProfiles": [],
+          "registry": "docker.xcord.net",
+          "schemaVersion": 1,
+          "createdAt": "2026-03-15T00:00:00Z",
+          "updatedAt": "2026-03-15T00:00:00Z",
+          "deployedResourceCount": 0
+        }
+        """;
+
+        var topology = JsonSerializer.Deserialize<Topology>(json, JsonOptions)!;
+        var image = topology.Containers[0].Images[0];
+
+        Assert.Equal(ImageKind.Custom, image.Kind);
+        // TypeId must be backfilled from the original kind string
+        Assert.Equal("plugin:zombocom", image.TypeId);
+        Assert.Equal("plugin:zombocom", image.ResolveTypeId());
+    }
+
+    [Fact]
+    public void PluginImage_DeserializesWithoutError()
+    {
+        var json = """
+        {
+          "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "name": "Plugin Test",
+          "provider": "linode",
+          "providerConfig": {},
+          "serviceKeys": {},
+          "containers": [
+            {
+              "id": "11111111-1111-1111-1111-111111111111",
+              "name": "Caddy",
+              "kind": "Caddy",
+              "x": 0, "y": 0, "width": 600, "height": 400,
+              "ports": [],
+              "images": [
+                {
+                  "id": "22222222-2222-2222-2222-222222222222",
+                  "name": "Zombocom",
+                  "kind": "plugin:zombocom",
+                  "typeId": "plugin:zombocom",
+                  "x": 20, "y": 20, "width": 140, "height": 60,
+                  "ports": [
+                    { "id": "33333333-3333-3333-3333-333333333333", "name": "http", "type": "Network", "direction": "In", "side": "Left", "offset": 0.5 }
+                  ],
+                  "dockerImage": null,
+                  "config": {},
+                  "scaling": "Shared"
+                }
+              ],
+              "children": [],
+              "config": { "domain": "zombo.xcord.net" }
+            }
+          ],
+          "wires": [],
+          "tierProfiles": [],
+          "registry": "docker.xcord.net",
+          "schemaVersion": 1,
+          "createdAt": "2026-03-15T00:00:00Z",
+          "updatedAt": "2026-03-15T00:00:00Z",
+          "deployedResourceCount": 0
+        }
+        """;
+
+        var topology = JsonSerializer.Deserialize<Topology>(json, JsonOptions)!;
+
+        Assert.Equal("Plugin Test", topology.Name);
+        var image = topology.Containers[0].Images[0];
+        Assert.Equal(ImageKind.Custom, image.Kind);
+        Assert.Equal("plugin:zombocom", image.TypeId);
+        Assert.Equal("plugin:zombocom", image.ResolveTypeId());
+    }
+
+    [Fact]
+    public void PluginImage_RoundTripsPreservingTypeId()
+    {
+        var topology = new Topology
+        {
+            Name = "Round Trip Test",
+            Provider = "linode",
+            Containers =
+            [
+                new Container
+                {
+                    Name = "Caddy",
+                    Kind = ContainerKind.Caddy,
+                    Config = new() { ["domain"] = "test.xcord.net" },
+                    Images =
+                    [
+                        new Image
+                        {
+                            Name = "Zombocom",
+                            Kind = ImageKind.Custom,
+                            TypeId = "plugin:zombocom",
+                            Ports = [new Port { Name = "http", Type = PortType.Network, Direction = PortDirection.In, Side = PortSide.Left, Offset = 0.5 }],
+                            Config = new(),
+                        }
+                    ]
+                }
+            ]
+        };
+
+        // Serialize and deserialize - simulates save + reload
+        var json = JsonSerializer.Serialize(topology, JsonOptions);
+        var roundTripped = JsonSerializer.Deserialize<Topology>(json, JsonOptions)!;
+
+        var image = roundTripped.Containers[0].Images[0];
+        Assert.Equal(ImageKind.Custom, image.Kind);
+        Assert.Equal("plugin:zombocom", image.TypeId);
+        Assert.Equal("plugin:zombocom", image.ResolveTypeId());
+    }
+
+    [Fact]
+    public async Task PluginImage_SaveViaHandler_PersistsAndReloads()
+    {
+        // This is the exact code path: PUT /api/v1/topologies/{id} body contains
+        // "kind": "plugin:zombocom" - the handler must deserialize, save, and reload it.
+        var json = """
+        {
+          "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "name": "Plugin Handler Test",
+          "provider": "linode",
+          "providerConfig": {},
+          "serviceKeys": {},
+          "containers": [
+            {
+              "id": "11111111-1111-1111-1111-111111111111",
+              "name": "Caddy",
+              "kind": "Caddy",
+              "x": 0, "y": 0, "width": 600, "height": 400,
+              "ports": [],
+              "images": [
+                {
+                  "id": "22222222-2222-2222-2222-222222222222",
+                  "name": "Zombocom",
+                  "kind": "plugin:zombocom",
+                  "typeId": "plugin:zombocom",
+                  "x": 20, "y": 20, "width": 140, "height": 60,
+                  "ports": [
+                    { "id": "33333333-3333-3333-3333-333333333333", "name": "http", "type": "Network", "direction": "In", "side": "Left", "offset": 0.5 }
+                  ],
+                  "dockerImage": null,
+                  "config": {},
+                  "scaling": "Shared"
+                }
+              ],
+              "children": [],
+              "config": { "domain": "zombo.xcord.net" }
+            }
+          ],
+          "wires": [],
+          "tierProfiles": [],
+          "registry": "docker.xcord.net",
+          "schemaVersion": 1,
+          "createdAt": "2026-03-15T00:00:00Z",
+          "updatedAt": "2026-03-15T00:00:00Z",
+          "deployedResourceCount": 0
+        }
+        """;
+
+        var topology = JsonSerializer.Deserialize<Topology>(json, JsonOptions)!;
+        var store = new FileTopologyStore(
+            Options.Create(new DataOptions { BasePath = _tempDir }),
+            NullLogger<FileTopologyStore>.Instance);
+        var handler = CreateHandler(store);
+
+        var result = await handler.Handle(new UpdateTopologyRequest(topology), CancellationToken.None);
+
+        var saved = result.Match(t => t, _ => null);
+        Assert.NotNull(saved);
+
+        // Reload from disk and verify plugin identity survived
+        var loaded = await store.GetAsync(topology.Id);
+        Assert.NotNull(loaded);
+        var image = loaded.Containers[0].Images[0];
+        Assert.Equal(ImageKind.Custom, image.Kind);
+        Assert.Equal("plugin:zombocom", image.TypeId);
+        Assert.Equal("plugin:zombocom", image.ResolveTypeId());
     }
 }

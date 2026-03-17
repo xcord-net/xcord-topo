@@ -113,6 +113,11 @@ export interface Topology {
   backupTarget?: BackupTarget;
 }
 
+/** Returns the effective type identifier: TypeId if set, otherwise Kind. */
+export function resolveTypeId(img: Image): string {
+  return img.typeId ?? img.kind;
+}
+
 export interface TopologySummary {
   id: string;
   name: string;

@@ -23,7 +23,7 @@ public sealed class FileMigrationStore : IMigrationStore
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
-            Converters = { new JsonStringEnumConverter() }
+            Converters = { new ImageKindConverter(), new JsonStringEnumConverter() }
         };
     }
 

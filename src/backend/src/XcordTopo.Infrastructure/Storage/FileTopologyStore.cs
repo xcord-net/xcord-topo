@@ -22,7 +22,7 @@ public sealed class FileTopologyStore : ITopologyStore
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
-            Converters = { new JsonStringEnumConverter() }
+            Converters = { new ImageKindConverter(), new JsonStringEnumConverter() }
         };
     }
 

@@ -10,6 +10,7 @@ using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Infrastructure.Validation;
+using XcordTopo.Models;
 using XcordTopo.PluginSdk;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +22,7 @@ builder.Services.Configure<DataOptions>(builder.Configuration.GetSection(DataOpt
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.SerializerOptions.Converters.Add(new ImageKindConverter());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 

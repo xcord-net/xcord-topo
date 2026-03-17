@@ -374,14 +374,14 @@ public sealed partial class TopologyValidator(ProviderRegistry registry, ImagePl
 
     // ─── Tier 2: Warning checks ─────────────────────────────────────
 
-    private static void RunWarningChecks(Topology topology, List<TopologyValidationError> items)
+    private void RunWarningChecks(Topology topology, List<TopologyValidationError> items)
     {
         CheckOrphanedImages(topology, items);
         CheckUnusedTierProfiles(topology, items);
         CheckBackupFrequency(topology, items);
     }
 
-    private static void CheckOrphanedImages(Topology topology, List<TopologyValidationError> items)
+    private void CheckOrphanedImages(Topology topology, List<TopologyValidationError> items)
     {
         var connectedNodes = new HashSet<Guid>();
         foreach (var wire in topology.Wires)
@@ -397,9 +397,15 @@ public sealed partial class TopologyValidator(ProviderRegistry registry, ImagePl
                 foreach (var img in c.Images)
                 {
                     if (img.Ports.Count > 0 && !connectedNodes.Contains(img.Id))
+                    {
+                        // Public endpoints are implicitly routed by Caddy - no user-drawn wire needed
+                        var desc = imagePluginRegistry.GetDescriptor(img);
+                        if (desc is { IsPublicEndpoint: true }) continue;
+
                         items.Add(new(ValidationSeverity.Warning,
                             $"Image '{img.Name}' in '{c.Name}' has ports but no wires connecting it.",
                             NodeId: img.Id.ToString()));
+                    }
                 }
 
                 Walk(c.Children);

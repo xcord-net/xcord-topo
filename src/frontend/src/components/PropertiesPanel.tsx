@@ -6,7 +6,7 @@ import { useHistory } from '../stores/history.store';
 import { useValidation } from '../stores/validation.store';
 import { containerDefinitions } from '../catalog/containers';
 import { imageDefinitions } from '../catalog/images';
-import type { Container, ContainerKind, Image, BackupTarget, BackupTargetKind } from '../types/topology';
+import { type Container, type ContainerKind, type Image, type BackupTarget, type BackupTargetKind, resolveTypeId } from '../types/topology';
 
 function findContainerDeep(containers: Container[], id: string): Container | null {
   for (const c of containers) {
@@ -112,7 +112,7 @@ const PropertiesPanel: Component = () => {
   const imageConfigFields = createMemo(() => {
     const imgData = selectedImage();
     if (!imgData) return [];
-    const def = imageDefinitions().find(d => d.kind === imgData.image.kind);
+    const def = imageDefinitions().find(d => d.kind === resolveTypeId(imgData.image));
     if (!def?.configFields) return [];
     const parentKind = findParentKind(topo.topology.containers, imgData.image.id);
     return def.configFields.filter(f =>

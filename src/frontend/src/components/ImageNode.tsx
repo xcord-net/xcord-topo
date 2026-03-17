@@ -1,7 +1,7 @@
 import { Component, For, Show } from 'solid-js';
 import { useInteraction } from '../stores/interaction.store';
 import { useValidation } from '../stores/validation.store';
-import type { Image } from '../types/topology';
+import { type Image, resolveTypeId } from '../types/topology';
 import { imageDefinitions } from '../catalog/images';
 import PortCircle from './PortCircle';
 
@@ -13,7 +13,7 @@ const ImageNode: Component<{
 }> = (props) => {
   const interaction = useInteraction();
   const validation = useValidation();
-  const def = () => imageDefinitions().find(d => d.kind === props.image.kind);
+  const def = () => imageDefinitions().find(d => d.kind === resolveTypeId(props.image));
 
   const absX = () => props.containerX + props.image.x;
   const absY = () => props.containerY + props.image.y;
@@ -103,7 +103,7 @@ const ImageNode: Component<{
         dominant-baseline="middle"
         style={{ 'pointer-events': 'none', 'user-select': 'none' }}
       >
-        {props.image.kind}
+        {resolveTypeId(props.image)}
       </text>
 
       {/* Image ports */}

@@ -416,18 +416,17 @@ public sealed class LinodeProvider : ProviderHclBase
             b.Attribute("description", "Docker registry URL for pulling xcord images");
         });
         vars.Line();
-        vars.Block("variable \"hub_version\"", b =>
+        // Dynamically generate version variables for all private-registry images in the topology
+        foreach (var versionVar in TopologyHelpers.CollectVersionVariables(topology, _imageRegistry))
         {
-            b.RawAttribute("type", "string");
-            b.Attribute("description", "Version tag for hub server image (e.g. v0.1.5)");
-        });
-        vars.Line();
-        vars.Block("variable \"fed_version\"", b =>
-        {
-            b.RawAttribute("type", "string");
-            b.Attribute("description", "Version tag for federation server image (e.g. v0.1.5)");
-        });
-        vars.Line();
+            vars.Block($"variable \"{versionVar}\"", b =>
+            {
+                b.RawAttribute("type", "string");
+                b.Attribute("default", "0.1");
+                b.Attribute("description", $"Version tag for {versionVar.Replace("_version", "")} image");
+            });
+            vars.Line();
+        }
         vars.Block("variable \"deploy_apps\"", b =>
         {
             b.RawAttribute("type", "bool");
@@ -488,6 +487,12 @@ public sealed class LinodeProvider : ProviderHclBase
                 b.RawAttribute("authorized_keys", "[chomp(tls_private_key.deploy.public_key_openssh)]");
                 b.Line();
                 b.ListAttribute("tags", ["xcord-topo", topology.Name, entry.Host.Kind.ToString().ToLowerInvariant()]);
+
+                b.Line();
+                b.Block("lifecycle", lb =>
+                {
+                    lb.RawAttribute("ignore_changes", "all");
+                });
             });
             instances.Line();
         }
@@ -509,6 +514,12 @@ public sealed class LinodeProvider : ProviderHclBase
                 b.RawAttribute("authorized_keys", "[chomp(tls_private_key.deploy.public_key_openssh)]");
                 b.Line();
                 b.ListAttribute("tags", ["xcord-topo", topology.Name, pool.TierProfile.Id]);
+
+                b.Line();
+                b.Block("lifecycle", lb =>
+                {
+                    lb.RawAttribute("ignore_changes", "all");
+                });
             });
             instances.Line();
         }
@@ -533,6 +544,12 @@ public sealed class LinodeProvider : ProviderHclBase
                 b.RawAttribute("authorized_keys", "[chomp(tls_private_key.deploy.public_key_openssh)]");
                 b.Line();
                 b.ListAttribute("tags", ["xcord-topo", topology.Name, "elastic"]);
+
+                b.Line();
+                b.Block("lifecycle", lb =>
+                {
+                    lb.RawAttribute("ignore_changes", "all");
+                });
             });
             instances.Line();
         }
@@ -552,6 +569,12 @@ public sealed class LinodeProvider : ProviderHclBase
                 b.RawAttribute("authorized_keys", "[chomp(tls_private_key.deploy.public_key_openssh)]");
                 b.Line();
                 b.ListAttribute("tags", ["xcord-topo", topology.Name, "caddy"]);
+
+                b.Line();
+                b.Block("lifecycle", lb =>
+                {
+                    lb.RawAttribute("ignore_changes", "all");
+                });
             });
             instances.Line();
         }

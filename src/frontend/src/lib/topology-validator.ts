@@ -1,4 +1,4 @@
-import type { Topology, Container, Image, Wire } from '../types/topology';
+import { type Topology, type Container, type Image, type Wire, resolveTypeId } from '../types/topology';
 import type { ValidationItem } from '../types/deploy';
 import { imageDefinitions } from '../catalog/images';
 
@@ -233,7 +233,7 @@ function checkWireCompleteness(topology: Topology, items: ValidationItem[]): voi
   const catalog = imageDefinitions();
 
   walkImages(topology.containers, (img, parent) => {
-    const def = catalog.find(d => d.kind === img.kind);
+    const def = catalog.find(d => d.kind === resolveTypeId(img));
     if (!def?.wireRequirements) return;
 
     for (const req of def.wireRequirements) {
@@ -274,6 +274,10 @@ function checkOrphanedImages(topology: Topology, items: ValidationItem[]): void 
 
   walkImages(topology.containers, (img, parent) => {
     if (img.ports.length > 0 && !connectedNodes.has(img.id)) {
+      // Public endpoints with only inbound network ports are implicitly routed by Caddy
+      const allCaddyRouted = img.ports.every(p => p.direction === 'In' && p.type === 'Network');
+      if (allCaddyRouted) return;
+
       items.push({
         severity: 'Warning',
         message: `Image '${img.name}' in '${parent.name}' has ports but no wires connecting it.`,

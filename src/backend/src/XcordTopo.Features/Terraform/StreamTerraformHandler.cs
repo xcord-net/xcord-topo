@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using XcordTopo.Infrastructure.Terraform;
+using XcordTopo.Models;
 
 namespace XcordTopo.Features.Terraform;
 
@@ -12,7 +13,7 @@ public static class StreamTerraformHandler
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new ImageKindConverter(), new JsonStringEnumConverter() }
     };
 
     public static RouteHandlerBuilder Map(IEndpointRouteBuilder app)

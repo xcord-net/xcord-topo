@@ -28,6 +28,9 @@ COPY .build/wwwroot/ ./wwwroot/
 # Seed example topologies
 COPY docker/data/topologies/ /data/topologies/
 
+# Copy external plugin DLLs (if any exist)
+COPY docker/data/plugin[s]/ /data/plugins/
+
 # Set ownership
 RUN chown -R xcord-topo:xcord-topo /data /app /home/xcord-topo
 

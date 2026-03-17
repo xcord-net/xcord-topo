@@ -1,6 +1,6 @@
 import { createRoot } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
-import type { Topology, Container, Image, Wire, Port, DeployStatus, BackupTarget } from '../types/topology';
+import { type Topology, type Container, type Image, type Wire, type Port, type DeployStatus, type BackupTarget, resolveTypeId } from '../types/topology';
 import { imageDefinitions } from '../catalog/images';
 import { defaultTierProfiles } from '../catalog/tierProfiles';
 
@@ -86,7 +86,7 @@ function migrateTopology(topology: Topology): Topology {
   const migrateImages = (containers: Container[]) => {
     for (const c of containers) {
       for (const img of c.images) {
-        const def = imageDefinitions().find(d => d.kind === img.kind);
+        const def = imageDefinitions().find(d => d.kind === resolveTypeId(img));
         if (!def) continue;
         // Replace ports with catalog defaults, preserving IDs by position
         img.ports = def.defaultPorts.map((dp, i) => ({

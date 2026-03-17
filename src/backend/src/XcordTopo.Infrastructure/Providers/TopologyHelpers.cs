@@ -1301,6 +1301,33 @@ public static class TopologyHelpers
     public static bool RequiresPrivateRegistry(string typeId, ImagePluginRegistry pluginRegistry) =>
         pluginRegistry.Get(typeId)?.GetDockerBehavior().RequiresPrivateRegistry ?? false;
 
+    /// <summary>
+    /// Collects all distinct version variable names for private-registry images in the topology.
+    /// </summary>
+    public static HashSet<string> CollectVersionVariables(Topology topology, ImagePluginRegistry pluginRegistry)
+    {
+        var vars = new HashSet<string>();
+        void Walk(List<Container> containers)
+        {
+            foreach (var c in containers)
+            {
+                foreach (var img in c.Images)
+                {
+                    var typeId = img.ResolveTypeId();
+                    if (RequiresPrivateRegistry(typeId, pluginRegistry))
+                    {
+                        var plugin = pluginRegistry.Get(typeId);
+                        var versionVar = plugin?.GetDockerBehavior().VersionVariableName;
+                        if (versionVar != null) vars.Add(versionVar);
+                    }
+                }
+                Walk(c.Children);
+            }
+        }
+        Walk(topology.Containers);
+        return vars;
+    }
+
     public static string GetDockerImageForHcl(Image image, string resolvedRegistry) =>
         GetDockerImageForHcl(image, resolvedRegistry, DefaultPlugins.CreateRegistry());
 

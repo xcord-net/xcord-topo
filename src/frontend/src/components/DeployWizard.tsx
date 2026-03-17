@@ -6,7 +6,7 @@ import { saveTopology } from '../lib/serialization';
 import { validateField, validateAllFields } from '../lib/credential-validation';
 import type { DeployStep, DeployMode, CredentialStatus, CredentialField, DeployedTopology, ResourceSummary, TerraformOutputLine, HostingOptions, PoolSelection, InfraSelection, TopologyValidationResult, ValidationItem } from '../types/deploy';
 import type { MigrationDiffResult, MigrationDecision, MigrationPlan } from '../types/migration';
-import type { Topology, Container } from '../types/topology';
+import { type Topology, type Container, resolveTypeId } from '../types/topology';
 import { imageDefinitions } from '../catalog/images';
 
 interface ProviderInfo {
@@ -43,8 +43,8 @@ function collectAppImageKinds(topology: Topology): string[] {
   function walk(containers: Container[]) {
     for (const c of containers) {
       for (const img of c.images) {
-        const def = catalog.find(d => d.kind === img.kind);
-        if (def?.dockerBehavior?.requiresPrivateRegistry) kinds.add(img.kind);
+        const def = catalog.find(d => d.kind === resolveTypeId(img));
+        if (def?.dockerBehavior?.requiresPrivateRegistry) kinds.add(resolveTypeId(img));
       }
       if (c.children) walk(c.children);
     }
@@ -732,27 +732,32 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
   };
 
   // --- Generate HCL + resource summary helper ---
+  const detectDeployments = async () => {
+    try {
+      const deployments = await deployApi.getActiveDeployments();
+      setActiveDeployments(deployments);
+      const currentDeploy = deployments.find(d => d.topologyId === topo.topology.id);
+      const otherDeploy = deployments.find(d => d.topologyId !== topo.topology.id);
+      if (currentDeploy) {
+        setDeployMode('update');
+      } else if (otherDeploy) {
+        setDeployMode('migrate');
+        setMigrationSourceId(otherDeploy.topologyId);
+      } else {
+        setDeployMode('fresh');
+      }
+    } catch { /* deployment detection is best-effort */ }
+  };
+
   const generateAndEstimate = async (selections?: PoolSelection[], infraSels?: InfraSelection[]) => {
     const selArr = selections && selections.length > 0 ? selections : undefined;
     const infraArr = infraSels && infraSels.length > 0 ? infraSels : undefined;
-    const [hclResult, deployments] = await Promise.all([
+    const [hclResult] = await Promise.all([
       deployApi.generateHcl(topo.topology.id, selArr, infraArr),
-      deployApi.getActiveDeployments(),
+      detectDeployments(),
     ]);
     setHclFiles(hclResult.files);
     setResourceSummary(hclResult.summary);
-    setActiveDeployments(deployments);
-
-    const currentDeploy = deployments.find(d => d.topologyId === topo.topology.id);
-    const otherDeploy = deployments.find(d => d.topologyId !== topo.topology.id);
-    if (currentDeploy) {
-      setDeployMode('update');
-    } else if (otherDeploy) {
-      setDeployMode('migrate');
-      setMigrationSourceId(otherDeploy.topologyId);
-    } else {
-      setDeployMode('fresh');
-    }
 
     setStep('review');
   };
@@ -1089,18 +1094,17 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
         }
       }
 
+      // Always detect active deployments on restore
+      await detectDeployments();
+
       // For review step, reload HCL + cost
       if (restoredIdx >= stepOrder.indexOf('review')) {
         try {
           const selArr = Object.keys(saved.poolSelections).length > 0
             ? Object.values(saved.poolSelections) : undefined;
-          const [hclResult, deployments] = await Promise.all([
-            deployApi.generateHcl(topo.topology.id, selArr),
-            deployApi.getActiveDeployments(),
-          ]);
+          const hclResult = await deployApi.generateHcl(topo.topology.id, selArr);
           setHclFiles(hclResult.files);
           setResourceSummary(hclResult.summary);
-          setActiveDeployments(deployments);
         } catch { /* will show on review step */ }
       }
 

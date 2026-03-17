@@ -307,7 +307,7 @@ public static class ServiceKeySchema
                     "Must be at least 12 characters"
                 ]
             },
-            Validation = [new() { Type = "minLength", Value = "12", Message = "Password must be at least 12 characters" }]
+            Validation = [new() { Type = "minLength", Value = "8", Message = "Password must be at least 8 characters" }]
         },
         new()
         {

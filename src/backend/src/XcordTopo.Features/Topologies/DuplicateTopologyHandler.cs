@@ -16,7 +16,7 @@ public sealed class DuplicateTopologyHandler(ITopologyStore store)
     private static readonly JsonSerializerOptions CloneOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new ImageKindConverter(), new JsonStringEnumConverter() }
     };
 
     public async Task<Result<Topology>> Handle(DuplicateTopologyRequest request, CancellationToken ct)

@@ -260,7 +260,7 @@ export async function loadImageCatalog(): Promise<void> {
     const res = await fetch('/api/v1/catalog/images');
     if (res.ok) {
       const data = await res.json();
-      const mapped = mapApiCatalog(data);
+      const mapped = mapApiCatalog(data.images ?? data);
       if (mapped.length > 0) {
         setCatalog(mapped);
       }

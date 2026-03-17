@@ -232,4 +232,47 @@ public class SafeRedeployTests
 
         Assert.Contains("null_resource.provision_hub_server", deployBlock);
     }
+
+    [Fact]
+    public void GenerateContainerHealthCheck_ReturnsInspectCommand()
+    {
+        var check = TopologyHelpers.GenerateContainerHealthCheck("my_container");
+        Assert.Contains("docker inspect my_container", check);
+        Assert.Contains(".State.Running", check);
+        Assert.Contains("RestartCount", check);
+    }
+
+    [Fact]
+    public void GenerateRegistryRetryBlock_ContainsRetryLoopAndFinalCheck()
+    {
+        var block = TopologyHelpers.GenerateRegistryRetryBlock("registry", "registry:2.8", "-p 5000:5000");
+        Assert.Contains("for i in 1 2 3", block);
+        Assert.Contains("docker rm -f registry", block);
+        Assert.Contains("docker run -d --name registry", block);
+        // Must have final verification AFTER the loop
+        var afterDone = block.Substring(block.LastIndexOf("done"));
+        Assert.Contains("docker inspect registry", afterDone);
+    }
+
+    [Fact]
+    public void Aws_Provisioning_ContainsHealthChecksAfterDockerRun()
+    {
+        var topology = CreateMinimalTopology("aws");
+        var files = _awsProvider.GenerateHcl(topology);
+        var provisioning = files["provisioning.tf"];
+
+        Assert.Contains("docker inspect", provisioning);
+        Assert.Contains("State.Running", provisioning);
+    }
+
+    [Fact]
+    public void Linode_Provisioning_ContainsHealthChecksAfterDockerRun()
+    {
+        var topology = CreateMinimalTopology("linode");
+        var files = _linodeProvider.GenerateHcl(topology);
+        var provisioning = files["provisioning.tf"];
+
+        Assert.Contains("docker inspect", provisioning);
+        Assert.Contains("State.Running", provisioning);
+    }
 }

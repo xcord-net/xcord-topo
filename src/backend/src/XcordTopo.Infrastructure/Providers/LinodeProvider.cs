@@ -825,8 +825,18 @@ public sealed class LinodeProvider : ProviderHclBase
                             }
 
                             var flagStr = string.Join(" ", flags);
-                            b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
-                            b.Line($"  \"docker run {flagStr} {dockerImage}{cmd}\",");
+                            var extraFlags = string.Join(" ", flags.Skip(2)); // skip -d and --name
+
+                            if (image.ResolveTypeId() == "Registry")
+                            {
+                                b.Line($"  {TopologyHelpers.GenerateRegistryRetryBlock(containerName, $"{dockerImage}{cmd}", extraFlags, sudo: false)}");
+                            }
+                            else
+                            {
+                                b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
+                                b.Line($"  \"docker run {flagStr} {dockerImage}{cmd}\",");
+                                b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(containerName, sudo: false)}");
+                            }
                         }
                     }
 
@@ -849,6 +859,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         {
                             b.Line($"  \"docker rm -f {caddyName} 2>/dev/null || true\",");
                             b.Line($"  \"docker run -d --name {caddyName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                            b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(caddyName, sudo: false)}");
                         }
 
                         // Always-on rate limiting for Caddy hosts
@@ -877,6 +888,7 @@ public sealed class LinodeProvider : ProviderHclBase
                             b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{registryCaddyfile}\\nCADDYEOF\",");
                             b.Line($"  \"docker rm -f caddy_registry 2>/dev/null || true\",");
                             b.Line($"  \"docker run -d --name caddy_registry --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                            b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck("caddy_registry", sudo: false)}");
                         }
                     }
 
@@ -1085,8 +1097,18 @@ public sealed class LinodeProvider : ProviderHclBase
                             flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
                         var flagStr = string.Join(" ", flags);
-                        b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
-                        b.Line($"  \"docker run {flagStr} {dockerImage}{cmd}\",");
+                        var extraFlagsStandalone = string.Join(" ", flags.Skip(2)); // skip -d and --name
+
+                        if (image.ResolveTypeId() == "Registry")
+                        {
+                            b.Line($"  {TopologyHelpers.GenerateRegistryRetryBlock(containerName, $"{dockerImage}{cmd}", extraFlagsStandalone, sudo: false)}");
+                        }
+                        else
+                        {
+                            b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
+                            b.Line($"  \"docker run {flagStr} {dockerImage}{cmd}\",");
+                            b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(containerName, sudo: false)}");
+                        }
                     }
 
                     b.Line($"  \"mkdir -p /opt/caddy\",");
@@ -1095,6 +1117,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
                     b.Line($"  \"docker rm -f {resourceName} 2>/dev/null || true\",");
                     b.Line($"  \"docker run -d --name {resourceName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                    b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(resourceName, sudo: false)}");
 
                     // Always-on rate limiting for standalone Caddy
                     var rateLimitCmds = TopologyHelpers.GenerateRateLimitCommands(caddy);
@@ -1175,6 +1198,7 @@ public sealed class LinodeProvider : ProviderHclBase
                     var flagStr = string.Join(" ", flags);
                     b.Line($"  \"docker rm -f {resourceName} 2>/dev/null || true\",");
                     b.Line($"  \"docker run {flagStr} {dockerImage}\",");
+                    b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(resourceName, sudo: false)}");
 
                     pb.Line("]");
                 });
@@ -1279,6 +1303,7 @@ public sealed class LinodeProvider : ProviderHclBase
                             // Pull-then-swap: remove old container and start new one (image already cached)
                             b.Line($"  \"docker rm -f {containerName} 2>/dev/null || true\",");
                             b.Line($"  \"docker run {string.Join(" ", flags)} {dockerImage}{cmd}\",");
+                            b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(containerName, sudo: false)}");
                         }
                     }
 
@@ -1354,6 +1379,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         if (desc?.MountPath != null) flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
                         b.Line($"  \"docker run {string.Join(" ", flags)} {dockerImage}{cmd}\",");
+                        b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(containerName, sudo: false)}");
                     }
                     pb.Line("]");
                 });
@@ -1417,6 +1443,7 @@ public sealed class LinodeProvider : ProviderHclBase
                         foreach (var port in desc.Ports.Select(p => p.Port)) flags.Add($"-p {port}:{port}");
 
                     b.Line($"  \"docker run {string.Join(" ", flags)} {dockerImage}\",");
+                    b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(resourceName, sudo: false)}");
                     pb.Line("]");
                 });
             });

@@ -1047,8 +1047,18 @@ public sealed class AwsProvider : ProviderHclBase
                                 flags.Add("-p 5000:5000");
 
                             var flagStr = string.Join(" ", flags);
-                            b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
-                            b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
+                            var extraFlags = string.Join(" ", flags.Skip(2)); // skip -d and --name
+
+                            if (image.ResolveTypeId() == "Registry")
+                            {
+                                b.Line($"  {TopologyHelpers.GenerateRegistryRetryBlock(containerName, $"{dockerImage}{cmd}", extraFlags)}");
+                            }
+                            else
+                            {
+                                b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
+                                b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
+                                b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(containerName)}");
+                            }
                         }
                     }
 
@@ -1071,6 +1081,7 @@ public sealed class AwsProvider : ProviderHclBase
                         {
                             b.Line($"  \"sudo docker rm -f {caddyName} 2>/dev/null || true\",");
                             b.Line($"  \"sudo docker run -d --name {caddyName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                            b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(caddyName)}");
                         }
 
                         // Always-on rate limiting for Caddy hosts
@@ -1101,6 +1112,7 @@ public sealed class AwsProvider : ProviderHclBase
                             b.Line($"  \"sudo tee /opt/caddy/Caddyfile > /dev/null << 'CADDYEOF'\\n{registryCaddyfile}\\nCADDYEOF\",");
                             b.Line($"  \"sudo docker rm -f caddy_registry 2>/dev/null || true\",");
                             b.Line($"  \"sudo docker run -d --name caddy_registry --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                            b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck("caddy_registry")}");
                         }
                     }
 
@@ -1315,8 +1327,18 @@ public sealed class AwsProvider : ProviderHclBase
                             flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
                         var flagStr = string.Join(" ", flags);
-                        b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
-                        b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
+                        var extraFlagsStandalone = string.Join(" ", flags.Skip(2)); // skip -d and --name
+
+                        if (image.ResolveTypeId() == "Registry")
+                        {
+                            b.Line($"  {TopologyHelpers.GenerateRegistryRetryBlock(containerName, $"{dockerImage}{cmd}", extraFlagsStandalone)}");
+                        }
+                        else
+                        {
+                            b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
+                            b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
+                            b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(containerName)}");
+                        }
                     }
 
                     b.Line($"  \"sudo mkdir -p /opt/caddy\",");
@@ -1325,6 +1347,7 @@ public sealed class AwsProvider : ProviderHclBase
                     b.Line($"  \"sudo tee /opt/caddy/Caddyfile > /dev/null << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
                     b.Line($"  \"sudo docker rm -f {resourceName} 2>/dev/null || true\",");
                     b.Line($"  \"sudo docker run -d --name {resourceName} --network xcord-bridge --restart unless-stopped -p 80:80 -p 443:443 -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                    b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(resourceName)}");
 
                     // Always-on rate limiting for standalone Caddy
                     var rateLimitCmds = TopologyHelpers.GenerateRateLimitCommands(caddy);
@@ -1406,6 +1429,7 @@ public sealed class AwsProvider : ProviderHclBase
                     var flagStr = string.Join(" ", flags);
                     b.Line($"  \"sudo docker rm -f {resourceName} 2>/dev/null || true\",");
                     b.Line($"  \"sudo docker run {flagStr} {dockerImage}\",");
+                    b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(resourceName)}");
 
                     pb.Line("]");
                 });
@@ -1527,6 +1551,7 @@ public sealed class AwsProvider : ProviderHclBase
                             // Pull-then-swap: remove old container and start new one (image already cached)
                             b.Line($"  \"sudo docker rm -f {containerName} 2>/dev/null || true\",");
                             b.Line($"  \"sudo docker run {flagStr} {dockerImage}{cmd}\",");
+                            b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(containerName)}");
                         }
                     }
 
@@ -1601,6 +1626,7 @@ public sealed class AwsProvider : ProviderHclBase
                         if (desc?.MountPath != null) flags.Add($"-v {containerName}_data:{desc.MountPath}");
 
                         b.Line($"  \"sudo docker run {string.Join(" ", flags)} {dockerImage}{cmd}\",");
+                        b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(containerName)}");
                     }
                     pb.Line("]");
                 });
@@ -1665,6 +1691,7 @@ public sealed class AwsProvider : ProviderHclBase
                         foreach (var port in desc.Ports) flags.Add($"-p {port.Port}:{port.Port}");
 
                     b.Line($"  \"sudo docker run {string.Join(" ", flags)} {dockerImage}\",");
+                    b.Line($"  {TopologyHelpers.GenerateContainerHealthCheck(resourceName)}");
                     pb.Line("]");
                 });
             });

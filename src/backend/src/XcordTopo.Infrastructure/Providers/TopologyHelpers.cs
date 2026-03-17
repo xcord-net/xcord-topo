@@ -1409,4 +1409,33 @@ public static class TopologyHelpers
             CollectProviderKeysRecursive(container.Children, topology, keys);
         }
     }
+
+    /// <summary>
+    /// Generates a bash command that verifies a container started successfully.
+    /// Checks that the container is running and has zero restart count after a brief settle period.
+    /// Returns a quoted string with trailing comma suitable for Terraform provisioner inline arrays.
+    /// </summary>
+    public static string GenerateContainerHealthCheck(string containerName, bool sudo = true)
+    {
+        var s = sudo ? "sudo " : "";
+        // Sleep lets the container settle, then verify running state and zero restarts.
+        // Uses escaped double quotes for the --format argument to stay compatible with Terraform HCL
+        // (Terraform only supports \", \\, \n, \r, \t escape sequences in double-quoted strings).
+        // Escaping: C# {{{{ -> output {{ -> Terraform literal {{ -> shell {{ (Go template format).
+        return $"\"{s}bash -c 'sleep 5 && [ $({s}docker inspect {containerName} --format \\\"{{{{.State.Running}}}}\\\") = true ] && [ $({s}docker inspect {containerName} --format \\\"{{{{.RestartCount}}}}\\\") = 0 ]'\",";
+    }
+
+    /// <summary>
+    /// Generates a bash command with a retry loop for starting a container from a registry image.
+    /// Registry images can fail on first pull due to port races. Retries 3 times with a brief pause.
+    /// After the loop, a final inspect verifies the container is healthy (fails the provisioner if not).
+    /// Returns a quoted string with trailing comma suitable for Terraform provisioner inline arrays.
+    /// </summary>
+    public static string GenerateRegistryRetryBlock(string containerName, string dockerImage, string extraFlags, bool sudo = true)
+    {
+        var s = sudo ? "sudo " : "";
+        // for loop retries 3 times: rm old container, run new one, sleep, check, break on success.
+        // Final docker inspect after done ensures failure if all retries exhausted.
+        return $"\"{s}bash -c 'for i in 1 2 3; do {s}docker rm -f {containerName} 2>/dev/null || true; {s}docker run -d --name {containerName} {extraFlags} {dockerImage}; sleep 2; if [ $({s}docker inspect {containerName} --format \\\"{{{{.State.Running}}}}\\\") = true ]; then break; fi; done; {s}docker inspect {containerName} --format \\\"{{{{.State.Running}}}}\\\" | grep -q true'\",";
+    }
 }

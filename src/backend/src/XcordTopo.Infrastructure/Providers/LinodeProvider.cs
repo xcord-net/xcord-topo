@@ -1209,9 +1209,6 @@ public sealed class LinodeProvider : ProviderHclBase
             var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
             var useSwarm = TopologyHelpers.HostNeedsSwarmMode(entry.Host);
 
-            var allImages = TopologyHelpers.CollectImages(entry.Host);
-            var hasProvisionResource = allImages.Any(i => !TopologyHelpers.RequiresPrivateRegistry(i.Kind));
-
             provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}\"", b =>
             {
                 var countExpr = TopologyHelpers.GetHostCountExpression(entry);
@@ -1220,9 +1217,8 @@ public sealed class LinodeProvider : ProviderHclBase
                 else
                     b.RawAttribute("count", "var.deploy_apps ? 1 : 0");
 
-                b.RawAttribute("depends_on", hasProvisionResource
-                    ? $"[null_resource.provision_{resourceName}]"
-                    : $"[linode_instance.{resourceName}]");
+                // Every host with images gets a provision_* resource in phase 1
+                b.RawAttribute("depends_on", $"[null_resource.provision_{resourceName}]");
                 b.Line();
                 b.MapBlock("triggers", tb =>
                 {
@@ -1248,15 +1244,6 @@ public sealed class LinodeProvider : ProviderHclBase
                 b.Block("provisioner \"remote-exec\"", pb =>
                 {
                     pb.RawAttribute("inline", "[");
-
-                    // Install Docker if this host had no provision resource (idempotent)
-                    if (!hasProvisionResource)
-                    {
-                        b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
-                        b.Line("  \"systemctl enable docker\",");
-                        b.Line("  \"systemctl start docker\",");
-                        b.Line("  \"docker network create xcord-bridge 2>/dev/null || true\",");
-                    }
 
                     // Docker login for private registry
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: false)}\",");

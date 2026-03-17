@@ -1440,10 +1440,6 @@ public sealed class AwsProvider : ProviderHclBase
             var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
             var useSwarm = TopologyHelpers.HostNeedsSwarmMode(entry.Host);
 
-            // Check if this host has a provision resource (hosts with only private images don't)
-            var allImages = TopologyHelpers.CollectImages(entry.Host);
-            var hasProvisionResource = allImages.Any(i => !TopologyHelpers.RequiresPrivateRegistry(i.ResolveTypeId(), _imageRegistry));
-
             provisioning.Block($"resource \"null_resource\" \"deploy_{resourceName}\"", b =>
             {
                 var countExpr = TopologyHelpers.GetHostCountExpression(entry);
@@ -1452,10 +1448,8 @@ public sealed class AwsProvider : ProviderHclBase
                 else
                     b.RawAttribute("count", "var.deploy_apps ? 1 : 0");
 
-                // Depend on provision resource if it exists, otherwise on the instance itself
-                b.RawAttribute("depends_on", hasProvisionResource
-                    ? $"[null_resource.provision_{resourceName}]"
-                    : $"[aws_instance.{resourceName}]");
+                // Every host with images gets a provision_* resource in phase 1
+                b.RawAttribute("depends_on", $"[null_resource.provision_{resourceName}]");
                 b.Line();
 
                 // Force recreation when image version changes
@@ -1483,16 +1477,6 @@ public sealed class AwsProvider : ProviderHclBase
                 b.Block("provisioner \"remote-exec\"", pb =>
                 {
                     pb.RawAttribute("inline", "[");
-
-                    // Install Docker if this host had no provision resource (idempotent - skips if already installed)
-                    if (!hasProvisionResource)
-                    {
-                        b.Line("  \"curl -fsSL https://get.docker.com | sh\",");
-                        b.Line("  \"sudo usermod -aG docker ubuntu\",");
-                        b.Line("  \"sudo systemctl enable docker\",");
-                        b.Line("  \"sudo systemctl start docker\",");
-                        b.Line("  \"sudo docker network create xcord-bridge 2>/dev/null || true\",");
-                    }
 
                     // Docker login for private registry
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");

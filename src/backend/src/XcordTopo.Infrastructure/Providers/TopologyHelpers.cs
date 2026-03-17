@@ -977,8 +977,10 @@ public static class TopologyHelpers
             if (ports.Length == 0) continue;
 
             var desc = registry.GetDescriptor(image);
-            var needsPorts = (desc?.IsPublicEndpoint ?? false) ||
-                HasCrossHostConsumers(image, caddy, resolver);
+            // On a Caddy host, IsPublicEndpoint images are reverse-proxied via the Docker
+            // bridge network - they must NOT bind host ports (Caddy owns 80/443).
+            // Only assign host ports for cross-host consumers (e.g. database access).
+            var needsPorts = HasCrossHostConsumers(image, caddy, resolver);
             if (!needsPorts) continue;
 
             var imgPorts = new Dictionary<int, int>();
@@ -1348,7 +1350,7 @@ public static class TopologyHelpers
 
         var versionVar = behavior.VersionVariableName ?? throw new ArgumentException(
             $"Plugin '{image.ResolveTypeId()}' requires private registry but has no VersionVariableName");
-        var shortName = image.ResolveTypeId() switch
+        var shortName = behavior.RegistryName ?? image.ResolveTypeId() switch
         {
             "HubServer" => "hub",
             "FederationServer" => "fed",
@@ -1422,7 +1424,7 @@ public static class TopologyHelpers
         // Uses escaped double quotes for the --format argument to stay compatible with Terraform HCL
         // (Terraform only supports \", \\, \n, \r, \t escape sequences in double-quoted strings).
         // Escaping: C# {{{{ -> output {{ -> Terraform literal {{ -> shell {{ (Go template format).
-        return $"\"{s}bash -c 'sleep 5 && [ $({s}docker inspect {containerName} --format \\\"{{{{.State.Running}}}}\\\") = true ] && [ $({s}docker inspect {containerName} --format \\\"{{{{.RestartCount}}}}\\\") = 0 ]'\",";
+        return $"\"{s}bash -c 'sleep 5 && [ \\\"$({s}docker inspect {containerName} --format \\\"{{{{.State.Running}}}}\\\" 2>/dev/null)\\\" = \\\"true\\\" ] && [ \\\"$({s}docker inspect {containerName} --format \\\"{{{{.RestartCount}}}}\\\" 2>/dev/null)\\\" = \\\"0\\\" ]'\",";
     }
 
     /// <summary>
@@ -1436,6 +1438,6 @@ public static class TopologyHelpers
         var s = sudo ? "sudo " : "";
         // for loop retries 3 times: rm old container, run new one, sleep, check, break on success.
         // Final docker inspect after done ensures failure if all retries exhausted.
-        return $"\"{s}bash -c 'for i in 1 2 3; do {s}docker rm -f {containerName} 2>/dev/null || true; {s}docker run -d --name {containerName} {extraFlags} {dockerImage}; sleep 2; if [ $({s}docker inspect {containerName} --format \\\"{{{{.State.Running}}}}\\\") = true ]; then break; fi; done; {s}docker inspect {containerName} --format \\\"{{{{.State.Running}}}}\\\" | grep -q true'\",";
+        return $"\"{s}bash -c 'for i in 1 2 3; do {s}docker rm -f {containerName} 2>/dev/null || true; {s}docker run -d --name {containerName} {extraFlags} {dockerImage}; sleep 2; if [ \\\"$({s}docker inspect {containerName} --format \\\"{{{{.State.Running}}}}\\\" 2>/dev/null)\\\" = \\\"true\\\" ]; then break; fi; done; {s}docker inspect {containerName} --format \\\"{{{{.State.Running}}}}\\\" | grep -q true'\",";
     }
 }

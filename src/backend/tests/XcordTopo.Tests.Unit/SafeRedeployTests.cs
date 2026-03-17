@@ -277,6 +277,97 @@ public class SafeRedeployTests
         Assert.Contains("State.Running", provisioning);
     }
 
+    /// <summary>
+    /// When a public endpoint image (like Zombocom) is on the same host as Caddy,
+    /// its ports must NOT be published to the host (-p 80:80) because Caddy already
+    /// binds 80/443 and reverse-proxies to the image via the Docker bridge network.
+    /// </summary>
+    [Fact]
+    public void Aws_PublicEndpointImage_OnCaddyHost_DoesNotPublishPorts()
+    {
+        var plugin = new StubPrivateRegistryPlugin("plugin:zombocom", "Zombocom");
+        var builtIns = DefaultPlugins.CreateRegistry();
+        var registry = new ImagePluginRegistry(
+            builtIns.GetAll().Concat([plugin]).ToList());
+        var provider = new AwsProvider(registry);
+
+        // Topology: single host with a Caddy child container AND a Zombocom image
+        var topology = new Topology
+        {
+            Name = "Port Conflict Test",
+            Provider = "aws",
+            ProviderConfig = new() { ["aws_region"] = "us-east-1" },
+            Registry = "docker.xcord.net",
+            Containers =
+            [
+                new Container
+                {
+                    Name = "Caddy",
+                    Kind = ContainerKind.Caddy,
+                    Width = 600, Height = 400,
+                    Config = new() { ["domain"] = "test.xcord.net" },
+                    Images =
+                    [
+                        new Image
+                        {
+                            Name = "Zombocom",
+                            Kind = ImageKind.Custom,
+                            TypeId = "plugin:zombocom",
+                            Config = new() { ["subdomain"] = "zombocom" },
+                            Ports = [new Port { Name = "http", Type = PortType.Network, Direction = PortDirection.In, Side = PortSide.Left, Offset = 0.5 }],
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var files = provider.GenerateHcl(topology);
+        var provisioning = files["provisioning.tf"];
+
+        // Find the deploy_caddy_apps block (where Zombocom is deployed)
+        var deployStart = provisioning.IndexOf("deploy_caddy");
+        Assert.True(deployStart >= 0, "deploy_caddy block must exist");
+        var deployBlock = provisioning.Substring(deployStart);
+
+        // The Zombocom docker run must NOT have -p 80:80 (Caddy owns port 80)
+        var zombocomRunIdx = deployBlock.IndexOf("docker run");
+        if (zombocomRunIdx < 0)
+            zombocomRunIdx = deployBlock.IndexOf("docker service create");
+        Assert.True(zombocomRunIdx >= 0, "Zombocom docker run/service create must exist in deploy block");
+
+        // Extract just the zombocom docker run line
+        var lineEnd = deployBlock.IndexOf('\n', zombocomRunIdx);
+        var runLine = lineEnd >= 0
+            ? deployBlock.Substring(zombocomRunIdx, lineEnd - zombocomRunIdx)
+            : deployBlock.Substring(zombocomRunIdx);
+
+        Assert.DoesNotContain("-p 80:80", runLine);
+    }
+
+    [Fact]
+    public void GetDockerImageForHcl_PluginImage_UsesRegistryNameNotTypeId()
+    {
+        var plugin = new StubPrivateRegistryPlugin("plugin:zombocom", "Zombocom");
+        var builtIns = DefaultPlugins.CreateRegistry();
+        var registry = new ImagePluginRegistry(
+            builtIns.GetAll().Concat([plugin]).ToList());
+
+        var image = new Image
+        {
+            Name = "Zombocom",
+            Kind = ImageKind.Custom,
+            TypeId = "plugin:zombocom",
+            Config = new(),
+            Ports = [],
+        };
+
+        var result = TopologyHelpers.GetDockerImageForHcl(image, "docker.xcord.net", registry);
+
+        // Must use "zombocom" (RegistryName), NOT "plugin:zombocom" (TypeId)
+        Assert.Equal("${var.registry_url}/zombocom:${var.zombocom_version}", result);
+        Assert.DoesNotContain("plugin:", result);
+    }
+
     [Fact]
     public async Task RegistryClient_UnreachableRegistry_ReportsAllMissing()
     {

@@ -979,9 +979,12 @@ public sealed class AwsProvider : ProviderHclBase
                         var cmd = cmdOverride != null ? $" {cmdOverride}" : "";
 
                         // Publish ports if the image has cross-host consumers, needs direct external access,
-                        // or lives on a DataPool (DataPool images are always accessed from other hosts)
+                        // or lives on a DataPool (DataPool images are always accessed from other hosts).
+                        // Exception: IsPublicEndpoint images on a Caddy host do NOT publish ports -
+                        // Caddy already binds 80/443 and reverse-proxies via the Docker bridge network.
+                        var hasCaddy = caddies.Count > 0;
                         var publishPorts = desc?.Ports.Length > 0 &&
-                            ((desc?.IsPublicEndpoint ?? false) ||
+                            (((desc?.IsPublicEndpoint ?? false) && !hasCaddy) ||
                              entry.Host.Kind == ContainerKind.DataPool ||
                              TopologyHelpers.HasCrossHostConsumers(image, entry.Host, resolver));
 

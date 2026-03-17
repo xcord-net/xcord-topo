@@ -35,12 +35,6 @@ public sealed class ExecuteTerraformHandler(
         "init", "plan", "apply", "destroy"
     };
 
-    private static readonly Dictionary<string, string> ImageKindToVersionVar = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["HubServer"] = "hub_version",
-        ["FederationServer"] = "fed_version",
-    };
-
     public Error? Validate(ExecuteTerraformRequest request)
     {
         if (!ValidCommands.Contains(request.Command))
@@ -70,14 +64,16 @@ public sealed class ExecuteTerraformHandler(
         var command = Enum.Parse<TerraformCommand>(request.Command, ignoreCase: true);
         Dictionary<string, string>? extraVars = null;
 
-        // Always pass image versions when available - Terraform variables exist in all phases
+        // Map image versions to Terraform variable names dynamically via plugin registry
         if (request.ImageVersions != null)
         {
             extraVars = new();
             foreach (var (kind, version) in request.ImageVersions)
             {
-                if (ImageKindToVersionVar.TryGetValue(kind, out var varName))
-                    extraVars[varName] = version;
+                var plugin = pluginRegistry.Get(kind);
+                var versionVar = plugin?.GetDockerBehavior()?.VersionVariableName;
+                if (versionVar != null)
+                    extraVars[versionVar] = version;
             }
         }
 
@@ -86,24 +82,19 @@ public sealed class ExecuteTerraformHandler(
             extraVars ??= new();
             extraVars["deploy_apps"] = "true";
 
-            // Verify all private-registry images exist before deploying containers
-            if (request.ImageVersions is { Count: > 0 })
+            // Verify ALL private-registry images in the topology exist before deploying
+            if (topology != null)
             {
                 var buildSpecs = new List<ImageBuildSpec>();
-                foreach (var (kind, version) in request.ImageVersions)
-                {
-                    var plugin = pluginRegistry.Get(kind);
-                    var docker = plugin?.GetDockerBehavior();
-                    if (docker is { RequiresPrivateRegistry: true, RegistryName: not null })
-                        buildSpecs.Add(new ImageBuildSpec(docker.GitRepoUrl, version, docker.RegistryName));
-                }
+                CollectPrivateRegistrySpecs(topology.Containers, request.ImageVersions, buildSpecs);
+                var uniqueSpecs = buildSpecs.DistinctBy(s => s.RegistryName).ToList();
 
-                if (buildSpecs.Count > 0)
+                if (uniqueSpecs.Count > 0)
                 {
                     var variables = await credentialStore.GetRawVariablesAsync(request.TopologyId, "service-keys", ct);
                     if (variables.TryGetValue("registry_url", out var registryUrl) && !string.IsNullOrWhiteSpace(registryUrl))
                     {
-                        var missing = await registryClient.FindMissingImagesAsync(registryUrl, buildSpecs, ct);
+                        var missing = await registryClient.FindMissingImagesAsync(registryUrl, uniqueSpecs, ct);
                         if (missing.Count > 0)
                         {
                             var names = string.Join(", ", missing.Select(m => $"{m.RegistryName}:{m.GitRef}"));
@@ -130,5 +121,30 @@ public sealed class ExecuteTerraformHandler(
         })
         .WithName("ExecuteTerraform")
         .WithTags("Terraform");
+    }
+
+    /// <summary>
+    /// Walks all containers in the topology and collects ImageBuildSpec for each private-registry image.
+    /// Version is resolved from explicit ImageVersions or defaults to "0.1" (matching Terraform variable default).
+    /// </summary>
+    private void CollectPrivateRegistrySpecs(
+        List<Container> containers,
+        Dictionary<string, string>? imageVersions,
+        List<ImageBuildSpec> specs)
+    {
+        foreach (var c in containers)
+        {
+            foreach (var img in c.Images)
+            {
+                var typeId = img.ResolveTypeId();
+                var plugin = pluginRegistry.Get(typeId);
+                var docker = plugin?.GetDockerBehavior();
+                if (docker is not { RequiresPrivateRegistry: true, RegistryName: not null }) continue;
+
+                var version = imageVersions?.GetValueOrDefault(typeId) ?? "0.1";
+                specs.Add(new ImageBuildSpec(docker.GitRepoUrl, version, docker.RegistryName));
+            }
+            CollectPrivateRegistrySpecs(c.Children, imageVersions, specs);
+        }
     }
 }

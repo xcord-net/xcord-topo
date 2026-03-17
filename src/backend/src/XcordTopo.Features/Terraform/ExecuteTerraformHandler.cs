@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using XcordTopo.Infrastructure.Credentials;
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Providers;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Terraform;
@@ -21,7 +22,12 @@ public sealed record ExecuteTerraformBody(
     bool? DeployApps = null,
     Dictionary<string, string>? ImageVersions = null);
 
-public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopologyStore topologyStore, ICredentialStore credentialStore)
+public sealed class ExecuteTerraformHandler(
+    ITerraformExecutor executor,
+    ITopologyStore topologyStore,
+    ICredentialStore credentialStore,
+    RegistryClient registryClient,
+    ImagePluginRegistry pluginRegistry)
     : IRequestHandler<ExecuteTerraformRequest, Result<ExecuteTerraformResponse>>, IValidatable<ExecuteTerraformRequest>
 {
     private static readonly HashSet<string> ValidCommands = new(StringComparer.OrdinalIgnoreCase)
@@ -79,6 +85,34 @@ public sealed class ExecuteTerraformHandler(ITerraformExecutor executor, ITopolo
         {
             extraVars ??= new();
             extraVars["deploy_apps"] = "true";
+
+            // Verify all private-registry images exist before deploying containers
+            if (request.ImageVersions is { Count: > 0 })
+            {
+                var buildSpecs = new List<ImageBuildSpec>();
+                foreach (var (kind, version) in request.ImageVersions)
+                {
+                    var plugin = pluginRegistry.Get(kind);
+                    var docker = plugin?.GetDockerBehavior();
+                    if (docker is { RequiresPrivateRegistry: true, RegistryName: not null })
+                        buildSpecs.Add(new ImageBuildSpec(docker.GitRepoUrl, version, docker.RegistryName));
+                }
+
+                if (buildSpecs.Count > 0)
+                {
+                    var variables = await credentialStore.GetRawVariablesAsync(request.TopologyId, "service-keys", ct);
+                    if (variables.TryGetValue("registry_url", out var registryUrl) && !string.IsNullOrWhiteSpace(registryUrl))
+                    {
+                        var missing = await registryClient.FindMissingImagesAsync(registryUrl, buildSpecs, ct);
+                        if (missing.Count > 0)
+                        {
+                            var names = string.Join(", ", missing.Select(m => $"{m.RegistryName}:{m.GitRef}"));
+                            return Error.Validation("IMAGES_NOT_IN_REGISTRY",
+                                $"The following images are missing from the registry: {names}. Push images before deploying.");
+                        }
+                    }
+                }
+            }
         }
 
         await executor.ExecuteAsync(request.TopologyId, command, providerKeys, extraVars, ct);

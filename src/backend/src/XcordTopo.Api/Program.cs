@@ -36,6 +36,7 @@ builder.Services.AddSingleton<ITopologyValidator, TopologyValidator>();
 builder.Services.AddSingleton<IHclFileManager, HclFileManager>();
 builder.Services.AddSingleton<ITerraformExecutor, ProcessTerraformExecutor>();
 builder.Services.AddSingleton<IImagePushExecutor, ProcessImagePushExecutor>();
+builder.Services.AddSingleton<RegistryClient>();
 
 // Image plugins (built-in)
 builder.Services.AddSingleton<IImagePlugin, PostgreSqlImagePlugin>();

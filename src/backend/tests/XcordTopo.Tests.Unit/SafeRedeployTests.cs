@@ -1,5 +1,6 @@
 using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Providers;
+using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Models;
 
 namespace XcordTopo.Tests.Unit;
@@ -274,5 +275,21 @@ public class SafeRedeployTests
 
         Assert.Contains("docker inspect", provisioning);
         Assert.Contains("State.Running", provisioning);
+    }
+
+    [Fact]
+    public async Task RegistryClient_UnreachableRegistry_ReportsAllMissing()
+    {
+        var client = new RegistryClient();
+        var images = new List<ImageBuildSpec>
+        {
+            new(null, "v0.1", "xcord-hub"),
+            new(null, "v0.1", "xcord-fed"),
+        };
+
+        var missing = await client.FindMissingImagesAsync(
+            "https://127.0.0.1:1", images, CancellationToken.None);
+
+        Assert.Equal(2, missing.Count);
     }
 }

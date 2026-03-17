@@ -32,7 +32,7 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
             throw new InvalidOperationException($"Image build/push is already running for topology {topologyId}");
 
         var channel = Channel.CreateUnbounded<TerraformOutputLine>();
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(30));
         _runningProcesses[topologyId] = cts;
         _activeReaders[topologyId] = channel.Reader;
 

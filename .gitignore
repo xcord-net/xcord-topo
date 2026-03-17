@@ -42,5 +42,5 @@ docker/data/active-topology
 .claude/
 CLAUDE.md
 
-# Plugins (third-party, not tracked)
-plugins/
+# Plugin build output (copied to docker/data/plugins at build time)
+docker/data/plugins/

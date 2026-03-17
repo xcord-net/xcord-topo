@@ -21,7 +21,7 @@ public class ImageOperationalMetadataTests
     [InlineData(ImageKind.Redis, 256)]
     [InlineData(ImageKind.MinIO, 512)]
     [InlineData(ImageKind.HubServer, 512)]
-    [InlineData(ImageKind.FederationServer, 192)]
+    [InlineData(ImageKind.FederationServer, 512)]
     [InlineData(ImageKind.LiveKit, 1024)]
     [InlineData(ImageKind.Custom, 256)]
     public void MinRamMb_HasExpectedValues(ImageKind kind, int expectedRam)

@@ -54,15 +54,16 @@ function collectAppImageKinds(topology: Topology): string[] {
 }
 
 /** Derive the GitHub repo name for an image kind from the catalog. */
-function getRepoName(kind: string): string {
+function getRepoName(kind: string): string | null {
   const catalog = imageDefinitions();
   const def = catalog.find(d => d.kind === kind);
-  const varName = def?.dockerBehavior?.versionVariableName;
-  if (varName) {
-    const prefix = varName.replace('_version', '');
-    return `xcord-${prefix}`;
+  const gitUrl = def?.dockerBehavior?.gitRepoUrl;
+  if (gitUrl) {
+    // Extract repo name from URL: "https://github.com/xcord-net/xcord-hub.git" -> "xcord-hub"
+    const lastSegment = gitUrl.split('/').pop() ?? '';
+    return lastSegment.replace(/\.git$/, '');
   }
-  return kind.toLowerCase();
+  return null;
 }
 
 const STEPS: { key: DeployStep; label: string }[] = [
@@ -686,6 +687,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
           const tagResults: Record<string, deployApi.ImageTagInfo[]> = {};
           await Promise.all(appKinds.map(async (kind) => {
             const repoName = getRepoName(kind);
+            if (!repoName) { tagResults[kind] = []; return; }
             try {
               tagResults[kind] = await deployApi.getImageTags(repoName);
             } catch {
@@ -1064,6 +1066,7 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
             const tagResults: Record<string, deployApi.ImageTagInfo[]> = {};
             await Promise.all(appKinds.map(async (kind) => {
               const repoName = getRepoName(kind);
+              if (!repoName) { tagResults[kind] = []; return; }
               try {
                 tagResults[kind] = await deployApi.getImageTags(repoName);
               } catch {
@@ -1933,11 +1936,14 @@ const DeployWizard: Component<{ onClose: () => void }> = (props) => {
                     <For each={Object.entries(availableTags())}>
                       {([kind, tags]) => {
                         const repoName = getRepoName(kind);
+                        const catalog = imageDefinitions();
+                        const def = catalog.find(d => d.kind === kind);
+                        const displayName = repoName ?? def?.dockerBehavior?.registryName ?? kind;
                         const selectedVersion = () => imageVersions()[kind] ?? (tags.length > 0 ? tags[0].name : 'latest');
                         return (
                           <div class="flex items-center gap-3 px-3 py-2">
                             <div class="flex-1 min-w-0">
-                              <span class="text-xs text-topo-text-primary font-medium">{repoName}</span>
+                              <span class="text-xs text-topo-text-primary font-medium">{displayName}</span>
                               <span class="text-topo-text-muted ml-1.5 text-[10px]">{kind}</span>
                             </div>
                             <Show when={tags.length > 0} fallback={

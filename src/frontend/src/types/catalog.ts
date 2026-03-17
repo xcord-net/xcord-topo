@@ -10,6 +10,8 @@ export interface ImageDockerBehavior {
   requiresPrivateRegistry: boolean;
   versionVariableName?: string | null;
   dbNameWhenConsuming?: string | null;
+  registryName?: string | null;
+  gitRepoUrl?: string | null;
 }
 
 export interface ConfigField {

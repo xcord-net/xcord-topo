@@ -41,3 +41,6 @@ docker/data/active-topology
 # Claude Code (local-only)
 .claude/
 CLAUDE.md
+
+# Plugins (third-party, not tracked)
+plugins/

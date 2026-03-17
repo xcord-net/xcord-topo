@@ -66,19 +66,38 @@ public sealed class ProcessImagePushExecutor : IImagePushExecutor
                     if (cts.Token.IsCancellationRequested) break;
 
                     var fullTag = $"{registryUrl}/{image.RegistryName}:{image.GitRef}";
-                    var dotnetVersion = NormalizeVersion(image.GitRef);
 
-                    // Build from git URL via BuildKit - handles git cloning natively
-                    await WriteLineAsync(channel.Writer, $"--- docker build {image.RegistryName}:{image.GitRef} ---");
-
-                    var buildExitCode = await RunDockerCommandAsync(
-                        $"buildx build --build-arg VERSION={dotnetVersion} -t {fullTag} --load {image.RepoUrl}#{image.GitRef}",
-                        channel.Writer, cts.Token);
-
-                    if (buildExitCode != 0)
+                    if (image.RepoUrl is not null)
                     {
-                        await WriteLineAsync(channel.Writer, $"\n--- Build & push exited with code {buildExitCode} ---", isError: true);
-                        return;
+                        // Git-based build: clone from repo URL via BuildKit
+                        var dotnetVersion = NormalizeVersion(image.GitRef);
+                        await WriteLineAsync(channel.Writer, $"--- docker build {image.RegistryName}:{image.GitRef} ---");
+
+                        var buildExitCode = await RunDockerCommandAsync(
+                            $"buildx build --build-arg VERSION={dotnetVersion} -t {fullTag} --load {image.RepoUrl}#{image.GitRef}",
+                            channel.Writer, cts.Token);
+
+                        if (buildExitCode != 0)
+                        {
+                            await WriteLineAsync(channel.Writer, $"\n--- Build & push exited with code {buildExitCode} ---", isError: true);
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        // Pre-built local image: tag for remote registry
+                        var localTag = $"{image.RegistryName}:latest";
+                        await WriteLineAsync(channel.Writer, $"--- docker tag {localTag} -> {fullTag} ---");
+
+                        var tagExitCode = await RunDockerCommandAsync(
+                            $"tag {localTag} {fullTag}",
+                            channel.Writer, cts.Token);
+
+                        if (tagExitCode != 0)
+                        {
+                            await WriteLineAsync(channel.Writer, $"\n--- Build & push exited with code {tagExitCode} ---", isError: true);
+                            return;
+                        }
                     }
 
                     // Push to registry

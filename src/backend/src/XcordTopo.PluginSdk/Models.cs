@@ -103,4 +103,6 @@ public sealed record ManifestField(string Key, string ValueTemplate);
 public sealed record DockerBehavior(
     bool RequiresPrivateRegistry = false,
     string? VersionVariableName = null,
-    string? DbNameWhenConsuming = null);
+    string? DbNameWhenConsuming = null,
+    string? RegistryName = null,
+    string? GitRepoUrl = null);

@@ -83,7 +83,7 @@ const BUILTIN_CATALOG: ImageDefinition[] = [
       { portName: 'pg', targetTypeLabel: 'PostgreSQL', required: true },
       { portName: 'redis', targetTypeLabel: 'Redis', required: true },
     ],
-    dockerBehavior: { requiresPrivateRegistry: true, versionVariableName: 'hub_version', dbNameWhenConsuming: 'xcord_hub' },
+    dockerBehavior: { requiresPrivateRegistry: true, versionVariableName: 'hub_version', dbNameWhenConsuming: 'xcord_hub', registryName: 'hub', gitRepoUrl: 'https://github.com/xcord-net/xcord-hub.git' },
   },
   {
     kind: 'FederationServer',
@@ -113,7 +113,7 @@ const BUILTIN_CATALOG: ImageDefinition[] = [
       { portName: 'redis', targetTypeLabel: 'Redis', required: true },
       { portName: 'minio', targetTypeLabel: 'MinIO', required: true },
     ],
-    dockerBehavior: { requiresPrivateRegistry: true, versionVariableName: 'fed_version', dbNameWhenConsuming: 'xcord' },
+    dockerBehavior: { requiresPrivateRegistry: true, versionVariableName: 'fed_version', dbNameWhenConsuming: 'xcord', registryName: 'fed', gitRepoUrl: 'https://github.com/xcord-net/xcord-fed.git' },
   },
   {
     kind: 'Redis',

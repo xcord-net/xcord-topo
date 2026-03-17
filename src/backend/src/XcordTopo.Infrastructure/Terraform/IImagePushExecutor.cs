@@ -3,7 +3,7 @@ using XcordTopo.Models;
 
 namespace XcordTopo.Infrastructure.Terraform;
 
-public sealed record ImageBuildSpec(string RepoUrl, string GitRef, string RegistryName);
+public sealed record ImageBuildSpec(string? RepoUrl, string GitRef, string RegistryName);
 
 public interface IImagePushExecutor
 {

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using XcordTopo.Infrastructure.Credentials;
+using XcordTopo.Infrastructure.Plugins;
 using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Models;
 
@@ -15,15 +16,12 @@ public sealed record ExecuteImagePushResponse(string Status);
 
 public sealed record ExecuteImagePushBody(List<ImageVersionSpec> Images);
 
-public sealed class ExecuteImagePushHandler(IImagePushExecutor executor, ICredentialStore credentialStore)
+public sealed class ExecuteImagePushHandler(
+    IImagePushExecutor executor,
+    ICredentialStore credentialStore,
+    ImagePluginRegistry pluginRegistry)
     : IRequestHandler<ExecuteImagePushRequest, Result<ExecuteImagePushResponse>>
 {
-    private static readonly Dictionary<string, (string RepoUrl, string RegistryName)> ImageKindMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["HubServer"] = ("https://github.com/xcord-net/xcord-hub.git", "hub"),
-        ["FederationServer"] = ("https://github.com/xcord-net/xcord-fed.git", "fed"),
-    };
-
     public async Task<Result<ExecuteImagePushResponse>> Handle(ExecuteImagePushRequest request, CancellationToken ct)
     {
         if (executor.IsRunning(request.TopologyId))
@@ -32,17 +30,22 @@ public sealed class ExecuteImagePushHandler(IImagePushExecutor executor, ICreden
         if (request.Images.Count == 0)
             return Error.Validation("NO_IMAGES", "At least one image must be specified");
 
-        // Validate all image kinds are recognized
+        // Validate all image kinds via plugin registry
         var buildSpecs = new List<ImageBuildSpec>();
         foreach (var image in request.Images)
         {
-            if (!ImageKindMap.TryGetValue(image.Kind, out var mapping))
+            var plugin = pluginRegistry.Get(image.Kind);
+            if (plugin is null)
                 return Error.Validation("UNKNOWN_IMAGE_KIND", $"Unknown image kind: {image.Kind}");
+
+            var docker = plugin.GetDockerBehavior();
+            if (!docker.RequiresPrivateRegistry || string.IsNullOrEmpty(docker.RegistryName))
+                return Error.Validation("NOT_PUSHABLE", $"Image kind {image.Kind} does not support registry push");
 
             if (string.IsNullOrWhiteSpace(image.Version))
                 return Error.Validation("MISSING_VERSION", $"Version is required for {image.Kind}");
 
-            buildSpecs.Add(new ImageBuildSpec(mapping.RepoUrl, image.Version, mapping.RegistryName));
+            buildSpecs.Add(new ImageBuildSpec(docker.GitRepoUrl, image.Version, docker.RegistryName));
         }
 
         // Load registry credentials from the service-keys store server-side (sensitive values never sent from client)

@@ -88,7 +88,9 @@ public sealed class FederationServerImagePlugin : IImagePlugin
     public DockerBehavior GetDockerBehavior() => new(
         RequiresPrivateRegistry: true,
         VersionVariableName: "fed_version",
-        DbNameWhenConsuming: "xcord");
+        DbNameWhenConsuming: "xcord",
+        RegistryName: "fed",
+        GitRepoUrl: "https://github.com/xcord-net/xcord-fed.git");
 
     public CatalogEntry GetCatalogEntry() => new(
         TypeId: "FederationServer",
@@ -113,5 +115,5 @@ public sealed class FederationServerImagePlugin : IImagePlugin
         DefaultScaling: PluginImageScaling.PerTenant,
         Description: "xcord federation instance",
         WireRequirements: [new("pg", "PostgreSQL"), new("redis", "Redis"), new("minio", "MinIO")],
-        DockerBehavior: new(RequiresPrivateRegistry: true, VersionVariableName: "fed_version", DbNameWhenConsuming: "xcord"));
+        DockerBehavior: new(RequiresPrivateRegistry: true, VersionVariableName: "fed_version", DbNameWhenConsuming: "xcord", RegistryName: "fed", GitRepoUrl: "https://github.com/xcord-net/xcord-fed.git"));
 }

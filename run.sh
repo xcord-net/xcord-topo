@@ -37,6 +37,59 @@ build_backend() {
     --verbosity quiet
 }
 
+build_plugins() {
+  local plugin_src="$SCRIPT_DIR/plugins"
+  local plugin_dest="$SCRIPT_DIR/docker/data/plugins"
+  [[ -d "$plugin_src" ]] || return 0
+
+  local found=0
+  for csproj in "$plugin_src"/*//*.csproj; do
+    [[ -f "$csproj" ]] || continue
+    found=1
+    break
+  done
+  [[ $found -eq 1 ]] || return 0
+
+  log "Building plugins..."
+  mkdir -p "$plugin_dest"
+  for csproj in "$plugin_src"/*//*.csproj; do
+    [[ -f "$csproj" ]] || continue
+    local name
+    name=$(basename "${csproj%.csproj}")
+    dotnet build "$csproj" -c Release --verbosity quiet
+    local out_dir
+    out_dir="$(dirname "$csproj")/bin/Release/net9.0"
+    # Copy plugin DLL (not the SDK - already loaded by the host)
+    cp "$out_dir/$name.dll" "$plugin_dest/" 2>/dev/null || true
+  done
+  ok "Plugins copied to $plugin_dest"
+}
+
+build_plugin_images() {
+  local plugin_src="$SCRIPT_DIR/plugins"
+  [[ -d "$plugin_src" ]] || return 0
+
+  local found=0
+  for dockerfile in "$plugin_src"/*/Dockerfile; do
+    [[ -f "$dockerfile" ]] || continue
+    found=1
+    break
+  done
+  [[ $found -eq 1 ]] || return 0
+
+  log "Building plugin Docker images..."
+  for dockerfile in "$plugin_src"/*/Dockerfile; do
+    [[ -f "$dockerfile" ]] || continue
+    local dir
+    dir="$(dirname "$dockerfile")"
+    local name
+    name="$(basename "$dir")"
+    log "  Building $name..."
+    docker build -t "$name:latest" "$dir"
+  done
+  ok "Plugin images built"
+}
+
 build_image() {
   log "Building Docker image..."
   # Kill any container using our port (including leftover compose containers)
@@ -51,6 +104,8 @@ build() {
   mkdir -p "$BUILD_DIR"
   build_frontend
   build_backend
+  build_plugins
+  build_plugin_images
   build_image
   ok "Build complete"
 }
@@ -87,6 +142,8 @@ dev() {
   rm -rf "$BUILD_DIR"
   mkdir -p "$BUILD_DIR/wwwroot"
   build_backend
+  build_plugins
+  build_plugin_images
   build_image
 
   docker rm -f "$CONTAINER_NAME" 2>/dev/null || true

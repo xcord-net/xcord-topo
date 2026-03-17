@@ -13,6 +13,7 @@ public sealed class LiveKitImagePlugin : IImagePlugin
         MountPath: null,
         MinRamMb: 1024,
         SharedOverheadMb: 0,
+        DefaultDockerImage: "livekit/livekit-server:v1.8.3",
         IsPublicEndpoint: true);
 
     public IReadOnlyList<SecretDefinition> GetSecrets() =>

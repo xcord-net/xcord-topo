@@ -135,7 +135,9 @@ public sealed class HubServerImagePlugin : IImagePlugin
     public DockerBehavior GetDockerBehavior() => new(
         RequiresPrivateRegistry: true,
         VersionVariableName: "hub_version",
-        DbNameWhenConsuming: "xcord_hub");
+        DbNameWhenConsuming: "xcord_hub",
+        RegistryName: "hub",
+        GitRepoUrl: "https://github.com/xcord-net/xcord-hub.git");
 
     public CatalogEntry GetCatalogEntry() => new(
         TypeId: "HubServer",
@@ -158,5 +160,5 @@ public sealed class HubServerImagePlugin : IImagePlugin
         DefaultScaling: PluginImageScaling.Shared,
         Description: "xcord hub control plane",
         WireRequirements: [new("pg", "PostgreSQL"), new("redis", "Redis")],
-        DockerBehavior: new(RequiresPrivateRegistry: true, VersionVariableName: "hub_version", DbNameWhenConsuming: "xcord_hub"));
+        DockerBehavior: new(RequiresPrivateRegistry: true, VersionVariableName: "hub_version", DbNameWhenConsuming: "xcord_hub", RegistryName: "hub", GitRepoUrl: "https://github.com/xcord-net/xcord-hub.git"));
 }

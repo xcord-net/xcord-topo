@@ -1172,7 +1172,10 @@ public sealed class AwsProvider : ProviderHclBase
                     b.Line("  \"sudo systemctl enable docker\",");
                     b.Line("  \"sudo systemctl start docker\",");
                     b.Line("  \"sudo docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')\",");
-                    b.Line("  \"sudo docker network create --driver overlay --attachable xcord-pool 2>/dev/null || true\",");
+                    // Per-pool isolated overlay network - prevents lateral movement between pools.
+                    // Instance containers deployed into this pool join xcord-pool-{poolName}, not a
+                    // shared network, so instances on different pools cannot reach each other directly.
+                    b.Line($"  \"sudo docker network create --driver overlay --attachable xcord-pool-{poolName} 2>/dev/null || true\",");
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: true)}\",");
                     b.Line("  \"sudo docker swarm join-token -q worker | sudo tee /tmp/swarm-worker-token > /dev/null\",");
                     b.Line("  \"cd /tmp && nohup sudo python3 -m http.server 9999 &\",");
@@ -1196,7 +1199,8 @@ public sealed class AwsProvider : ProviderHclBase
                         var caddyfileLines = escapedCaddyfile.Split('\n');
                         b.Line($"  \"sudo tee /opt/caddy/Caddyfile > /dev/null << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
                         b.Line($"  \"sudo docker service rm {caddyName} 2>/dev/null || true\",");
-                        b.Line($"  \"sudo docker service create --name {caddyName} --mode global --network xcord-pool -p 80:80 -p 443:443 -p 2019:2019 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                        // Caddy joins the pool-specific network to proxy to instance containers on the same pool.
+                        b.Line($"  \"sudo docker service create --name {caddyName} --mode global --network xcord-pool-{poolName} -p 80:80 -p 443:443 -p 2019:2019 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
 
                         var rateLimitCmds = TopologyHelpers.GenerateRateLimitCommands(caddy);
                         foreach (var rlCmd in rateLimitCmds)
@@ -1207,7 +1211,8 @@ public sealed class AwsProvider : ProviderHclBase
                         b.Line($"  \"sudo mkdir -p /opt/caddy\",");
                         b.Line($"  \"sudo tee /opt/caddy/Caddyfile > /dev/null << 'CADDYEOF'\\n\\nCADDYEOF\",");
                         b.Line($"  \"sudo docker service rm caddy 2>/dev/null || true\",");
-                        b.Line($"  \"sudo docker service create --name caddy --mode global --network xcord-pool -p 80:80 -p 443:443 -p 2019:2019 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                        // Caddy joins the pool-specific network to proxy to instance containers on the same pool.
+                        b.Line($"  \"sudo docker service create --name caddy --mode global --network xcord-pool-{poolName} -p 80:80 -p 443:443 -p 2019:2019 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
                     }
 
                     pb.Line("]");

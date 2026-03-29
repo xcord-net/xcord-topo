@@ -454,12 +454,16 @@ public static class TopologyHelpers
 
         var imgName = SanitizeName(image.Name);
         var sudo = useSudo ? "sudo " : "";
+        // Each pool gets its own isolated overlay network named xcord-pool-{poolName}.
+        // Instances deployed into this pool join xcord-pool-{poolName}, not the shared network,
+        // so instances across different pools cannot reach each other directly.
+        var poolNetworkName = $"xcord-pool-{poolName}";
         var parts = new List<string>
         {
             $"{sudo}docker service create",
             $"--name shared-{imgName}",
             "--replicas 1",
-            "--network xcord-pool"
+            $"--network {poolNetworkName}"
         };
 
         if (desc.MountPath != null)

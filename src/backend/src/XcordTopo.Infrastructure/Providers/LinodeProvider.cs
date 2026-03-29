@@ -947,7 +947,10 @@ public sealed class LinodeProvider : ProviderHclBase
                     b.Line("  \"systemctl enable docker\",");
                     b.Line("  \"systemctl start docker\",");
                     b.Line("  \"docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')\",");
-                    b.Line("  \"docker network create --driver overlay --attachable xcord-pool 2>/dev/null || true\",");
+                    // Per-pool isolated overlay network - prevents lateral movement between pools.
+                    // Instance containers deployed into this pool join xcord-pool-{poolName}, not a
+                    // shared network, so instances on different pools cannot reach each other directly.
+                    b.Line($"  \"docker network create --driver overlay --attachable xcord-pool-{poolName} 2>/dev/null || true\",");
                     b.Line($"  \"{TopologyHelpers.GenerateDockerLoginCommand(useSudo: false)}\",");
                     b.Line("  \"docker swarm join-token -q worker > /var/swarm-worker-token\",");
                     b.Line("  \"cd /var && nohup python3 -m http.server 9999 &\",");
@@ -971,7 +974,8 @@ public sealed class LinodeProvider : ProviderHclBase
                         var caddyfileLines = escapedCaddyfile.Split('\n');
                         b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n{string.Join("\\n", caddyfileLines)}\\nCADDYEOF\",");
                         b.Line($"  \"docker service rm {caddyName} 2>/dev/null || true\",");
-                        b.Line($"  \"docker service create --name {caddyName} --mode global --network xcord-pool -p 80:80 -p 443:443 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                        // Caddy joins the pool-specific network to proxy to instance containers on the same pool.
+                        b.Line($"  \"docker service create --name {caddyName} --mode global --network xcord-pool-{poolName} -p 80:80 -p 443:443 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
 
                         var rateLimitCmds = TopologyHelpers.GenerateRateLimitCommands(caddy);
                         foreach (var rlCmd in rateLimitCmds)
@@ -982,7 +986,8 @@ public sealed class LinodeProvider : ProviderHclBase
                         b.Line($"  \"mkdir -p /opt/caddy\",");
                         b.Line($"  \"cat > /opt/caddy/Caddyfile << 'CADDYEOF'\\n\\nCADDYEOF\",");
                         b.Line($"  \"docker service rm caddy 2>/dev/null || true\",");
-                        b.Line($"  \"docker service create --name caddy --mode global --network xcord-pool -p 80:80 -p 443:443 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
+                        // Caddy joins the pool-specific network to proxy to instance containers on the same pool.
+                        b.Line($"  \"docker service create --name caddy --mode global --network xcord-pool-{poolName} -p 80:80 -p 443:443 --mount type=bind,source=/opt/caddy/Caddyfile,target=/etc/caddy/Caddyfile --mount type=volume,source=caddy_data,target=/data {ImageOperationalMetadata.Caddy.DockerImage}\",");
                     }
 
                     pb.Line("]");

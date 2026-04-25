@@ -1267,15 +1267,13 @@ public static class TopologyHelpers
             .Aggregate("", (current, c) => current + c);
 
     // Private-registry images (HubServer, FederationServer) are deployed via Terraform variable
-    // substitution (see GetDockerImageForHcl); HCL emission never falls through to this default.
-    // We intentionally do NOT return `:latest` here so that any non-HCL caller missing a version
-    // surfaces the issue immediately rather than silently pinning to a moving tag.
+    // substitution in GetDockerImageForHcl, which uses ${var.fed_version}/${var.hub_version} (default "0.1").
+    // The `:latest` defaults below are only reached by non-HCL callers (manifest generation, descriptive
+    // dispatch in DeploymentUnit) and are not the actual deployed image references.
     public static string GetDefaultDockerImage(ImageKind kind, string? registry = null) => kind switch
     {
-        ImageKind.HubServer => throw new InvalidOperationException(
-            "HubServer image must be assigned a versioned tag via DockerImage; no `:latest` fallback is allowed."),
-        ImageKind.FederationServer => throw new InvalidOperationException(
-            "FederationServer image must be assigned a versioned tag via DockerImage; no `:latest` fallback is allowed."),
+        ImageKind.HubServer => $"{registry ?? "docker.xcord.net"}/hub:latest",
+        ImageKind.FederationServer => $"{registry ?? "docker.xcord.net"}/fed:latest",
         ImageKind.Redis => "redis:7-alpine",
         ImageKind.PostgreSQL => "postgres:17-alpine",
         ImageKind.MinIO => "minio/minio:RELEASE.2025-02-28T09-55-16Z",
@@ -1294,11 +1292,14 @@ public static class TopologyHelpers
 
         if (behavior.RequiresPrivateRegistry)
         {
-            // Private-registry images must be deployed via Terraform variable substitution
-            // (see GetDockerImageForHcl). Any caller hitting this path without an explicit DockerImage
-            // is misconfigured; fail loud rather than emit a `:latest` tag.
-            throw new InvalidOperationException(
-                $"Private-registry image '{typeId}' must be assigned a versioned DockerImage; no `:latest` fallback is allowed.");
+            var reg = registry ?? "docker.xcord.net";
+            var shortName = typeId switch
+            {
+                "HubServer" => "hub",
+                "FederationServer" => "fed",
+                _ => typeId.ToLowerInvariant()
+            };
+            return $"{reg}/{shortName}:latest";
         }
 
         return desc.DefaultDockerImage ?? "alpine:3.21";

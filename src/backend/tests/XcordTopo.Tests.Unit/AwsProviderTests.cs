@@ -1127,9 +1127,7 @@ public class AwsProviderTests
         Assert.Contains("Database__ConnectionString", deployBlock);
         Assert.Contains("Redis__ConnectionString", deployBlock);
 
-        // JWT (auto-generated secrets)
-        Assert.Contains("Jwt__SecretKey", deployBlock);
-        Assert.Contains("Jwt__Issuer", deployBlock);
+        // JWT (Audience injected; hub uses RS256 with a DB-stored RSA key, no shared secret)
         Assert.Contains("Jwt__Audience", deployBlock);
 
         // Encryption (auto-generated secret)
@@ -1166,8 +1164,9 @@ public class AwsProviderTests
         var files = _provider.GenerateHcl(topology);
         var secrets = files["secrets.tf"];
 
-        // Hub needs auto-generated secrets for JWT and encryption (admin password is a service key)
-        Assert.Contains("hub_server_jwt_secret", secrets);
+        // Hub needs an auto-generated encryption key (the JWT RSA key is generated on first boot
+        // by the app itself, not provisioned externally). Admin password is a service key.
+        Assert.DoesNotContain("hub_server_jwt_secret", secrets);
         Assert.Contains("hub_server_encryption_key", secrets);
         Assert.DoesNotContain("hub_admin_password", secrets);
     }

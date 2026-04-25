@@ -17,7 +17,8 @@ public sealed class HubServerImagePlugin : IImagePlugin
 
     public IReadOnlyList<SecretDefinition> GetSecrets() =>
     [
-        new("jwt_secret", 64, "JWT signing key for hub server"),
+        // JWT signing now uses RS256 with an RSA key generated and persisted on first boot.
+        // No shared symmetric secret is needed.
         new("encryption_key", 32, "Encryption key for hub server")
     ];
 
@@ -57,8 +58,8 @@ public sealed class HubServerImagePlugin : IImagePlugin
             envVars.Add(new("Storage__UseSsl", "false"));
         }
 
-        // JWT (auto-generated secrets - use global names for hub)
-        envVars.Add(new("Jwt__SecretKey", context.SecretRef("jwt_secret")));
+        // JWT - hub uses RS256 with an RSA key pair generated and stored on first boot.
+        // No symmetric secret to inject; Issuer/Audience are configured here.
         envVars.Add(new("Jwt__Audience", "xcord-hub"));
 
         // Encryption

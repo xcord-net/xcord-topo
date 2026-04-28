@@ -1,0 +1,136 @@
+{
+  "version": "0.1.29",
+  "features": [
+    {
+      "summary": "decouple image push from SSE token and add registry verification",
+      "commit": "4af30f7"
+    },
+    {
+      "summary": "add container health checks to provisioning pipeline",
+      "commit": "b7fbd4a"
+    },
+    {
+      "summary": "add lifecycle ignore_changes to all instance resources",
+      "commit": "4bec7c4"
+    },
+    {
+      "summary": "add Zombocom example plugin with source and Dockerfile",
+      "commit": "b342238"
+    },
+    {
+      "summary": "plugin-driven image build/push pipeline and ImagePluginBase",
+      "commit": "5910737"
+    },
+    {
+      "summary": "add catalog-driven image definitions with API fetch and reactive signal",
+      "commit": "0ba670d"
+    },
+    {
+      "summary": "track deploy status and active topology after terraform apply",
+      "commit": "14bd0fe"
+    },
+    {
+      "summary": "build and deploy images from source with per-image versioning",
+      "commit": "111eb2c"
+    }
+  ],
+  "fixes": [
+    {
+      "summary": "bump npm transitive deps to clear Dependabot vulns",
+      "commit": "e306078"
+    },
+    {
+      "summary": "drop jwt_secret from hub provisioning template",
+      "commit": "45946ff"
+    },
+    {
+      "summary": "provider topology helper improvements",
+      "commit": "4da2947"
+    },
+    {
+      "summary": "resolve plugin deploy failures (image ref, port conflict, health checks)",
+      "commit": "3563d09"
+    },
+    {
+      "summary": "ensure all hosts get Docker installed in phase 1 provisioning",
+      "commit": "b0cfed5"
+    },
+    {
+      "summary": "right-size FederationServer tier specs and remove stale overhead",
+      "commit": "f586904"
+    },
+    {
+      "summary": "pass ITopologyStore to ProcessTerraformExecutor in integration tests",
+      "commit": "fbc693c"
+    },
+    {
+      "summary": "revert VerifyTerraform workaround in validate tests",
+      "commit": "5d28bbc"
+    },
+    {
+      "summary": "verify terraform binary works before running validate tests",
+      "commit": "80b20ef"
+    },
+    {
+      "summary": "use fake terraform scripts in executor tests for CI compatibility",
+      "commit": "7ce3b13"
+    },
+    {
+      "summary": "replace em-dashes in fixtures and clean up provider helpers",
+      "commit": "0be41f4"
+    },
+    {
+      "summary": "correct hub env var names and complete deploy configuration",
+      "commit": "77d23d0"
+    },
+    {
+      "summary": "use docker buildx build for git URL support without host git",
+      "commit": "69afca0"
+    }
+  ],
+  "other": [
+    {
+      "summary": "add release notes for 0.1.27",
+      "commit": "ab32861",
+      "type": "docs"
+    },
+    {
+      "summary": "drop unused IContainerPlugin.cs",
+      "commit": "e14ef5d",
+      "type": "chore"
+    },
+    {
+      "summary": "simplify TopologyHelpers traversal logic",
+      "commit": "2cb624b",
+      "type": "refactor"
+    },
+    {
+      "summary": "update dev topology state after deployment test",
+      "commit": "7aba8a2",
+      "type": "chore"
+    },
+    {
+      "summary": "Revert \\\"feat: add Zombocom example plugin with source and Dockerfile\\\"",
+      "commit": "367d7ea",
+      "type": "Revert \"feat: add Zombocom example plugin with source and Dockerfile\""
+    },
+    {
+      "summary": "remove dead code from backend and frontend",
+      "commit": "1b9d08f",
+      "type": "chore"
+    },
+    {
+      "summary": "add test Dockerfile with .NET SDK and terraform 1.9.8",
+      "commit": "1b27565",
+      "type": "ci"
+    },
+    {
+      "summary": "replace em-dashes with hyphens across codebase",
+      "commit": "ccd651c",
+      "type": "style"
+    }
+  ],
+  "breakingChanges": [],
+  "migrationNotes": "",
+  "knownIssues": ""
+}

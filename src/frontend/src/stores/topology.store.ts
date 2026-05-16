@@ -1,8 +1,9 @@
 import { createRoot } from 'solid-js';
-import { createStore, produce, reconcile } from 'solid-js/store';
+import { produce, reconcile } from 'solid-js/store';
 import { type Topology, type Container, type Image, type Wire, type Port, type DeployStatus, type BackupTarget, resolveTypeId } from '../types/topology';
 import { imageDefinitions } from '../catalog/images';
 import { defaultTierProfiles } from '../catalog/tierProfiles';
+import { createPersistentStore } from './createPersistentStore';
 
 const HEADER_HEIGHT = 32;
 
@@ -62,7 +63,6 @@ function absoluteContainerPos(containers: Container[], targetId: string, offX = 
 }
 
 const STORAGE_KEY = 'xcord-topo:topology';
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Apply schema migrations to a topology loaded from any source (localStorage, API, etc.) */
 function migrateTopology(topology: Topology): Topology {
@@ -105,35 +105,14 @@ function migrateTopology(topology: Topology): Topology {
   return topology;
 }
 
-function loadFromStorage(): Topology {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      return migrateTopology(JSON.parse(raw) as Topology);
-    }
-  } catch { /* ignore corrupt data */ }
-  return createEmptyTopology();
-}
-
-function saveToStorage(topology: Topology): void {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(topology));
-    } catch { /* quota exceeded, ignore */ }
-  }, 300);
-}
-
 const store = createRoot(() => {
-  const [topology, setTopology] = createStore<Topology>(loadFromStorage());
+  const [topology, setTopology] = createPersistentStore<Topology>({
+    key: STORAGE_KEY,
+    initial: createEmptyTopology,
+    migrate: migrateTopology,
+  });
 
-  /** Wrapper that persists after every mutation */
-  const update: typeof setTopology = ((...args: any[]) => {
-    (setTopology as any)(...args);
-    saveToStorage(JSON.parse(JSON.stringify(topology)));
-  }) as any;
-
-  return { topology, setTopology: update };
+  return { topology, setTopology };
 });
 
 export function useTopology() {

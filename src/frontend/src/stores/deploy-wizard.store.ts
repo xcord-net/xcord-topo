@@ -1,6 +1,7 @@
 import { createRoot } from 'solid-js';
-import { createStore, produce } from 'solid-js/store';
+import { produce } from 'solid-js/store';
 import type { DeployStep, DeployMode, PoolSelection, InfraSelection } from '../types/deploy';
+import { createPersistentStore } from './createPersistentStore';
 
 export interface DeployWizardState {
   /** Current wizard step */
@@ -24,7 +25,6 @@ export interface DeployWizardState {
 }
 
 const STORAGE_KEY = 'xcord-topo:deploy-wizard';
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function createEmptyState(): DeployWizardState {
   return {
@@ -40,41 +40,24 @@ function createEmptyState(): DeployWizardState {
   };
 }
 
-function loadFromStorage(): DeployWizardState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as DeployWizardState;
-      // Ensure all fields exist (backfill for older saved state)
-      if (!parsed.providerValues) parsed.providerValues = {};
-      if (!parsed.poolSelections) parsed.poolSelections = {};
-      if (!parsed.infraSelections) parsed.infraSelections = {};
-      if (!parsed.serviceKeyValues) parsed.serviceKeyValues = {};
-      if (!parsed.imageVersions) parsed.imageVersions = {};
-      return parsed;
-    }
-  } catch { /* ignore corrupt data */ }
-  return createEmptyState();
-}
-
-function saveToStorage(state: DeployWizardState): void {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch { /* quota exceeded, ignore */ }
-  }, 300);
+/** Backfill missing fields for state saved by older versions of the wizard. */
+function migrateState(loaded: DeployWizardState): DeployWizardState {
+  if (!loaded.providerValues) loaded.providerValues = {};
+  if (!loaded.poolSelections) loaded.poolSelections = {};
+  if (!loaded.infraSelections) loaded.infraSelections = {};
+  if (!loaded.serviceKeyValues) loaded.serviceKeyValues = {};
+  if (!loaded.imageVersions) loaded.imageVersions = {};
+  return loaded;
 }
 
 const store = createRoot(() => {
-  const [state, setState] = createStore<DeployWizardState>(loadFromStorage());
+  const [state, setState] = createPersistentStore<DeployWizardState>({
+    key: STORAGE_KEY,
+    initial: createEmptyState,
+    migrate: migrateState,
+  });
 
-  const update: typeof setState = ((...args: any[]) => {
-    (setState as any)(...args);
-    saveToStorage(JSON.parse(JSON.stringify(state)));
-  }) as any;
-
-  return { state, setState: update };
+  return { state, setState };
 });
 
 export function useDeployWizardStore() {

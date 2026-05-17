@@ -13,6 +13,7 @@ public sealed partial class LinodeProvider
             var resourceName = TopologyHelpers.SanitizeName(entry.Host.Name);
             var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host, _imageRegistry);
             var plan = SelectPlan(entry.Host.Name, ramRequired, infraSelections);
+            var isPersistent = TopologyHelpers.HasPersistentImage(entry.Host, _imageRegistry);
 
             instances.Block($"resource \"linode_instance\" \"{resourceName}\"", b =>
             {
@@ -34,6 +35,11 @@ public sealed partial class LinodeProvider
                 b.Block("lifecycle", lb =>
                 {
                     lb.RawAttribute("ignore_changes", "all");
+                    // Data-bearing hosts (PG, Redis, MinIO, Registry) cannot be destroyed
+                    // by a `terraform apply` that would remove them. Intentional teardown
+                    // requires removing this protection first.
+                    if (isPersistent)
+                        lb.RawAttribute("prevent_destroy", "true");
                 });
             });
             instances.Line();
@@ -75,6 +81,7 @@ public sealed partial class LinodeProvider
             var ramRequired = desc?.MinRamMb ?? 256;
             var plan = SelectPlan(image.Name, ramRequired, infraSelections);
             var varName = $"{resourceName}_replicas";
+            var isPersistent = desc?.MountPath != null;
 
             instances.Block($"resource \"linode_instance\" \"{resourceName}\"", b =>
             {
@@ -91,6 +98,9 @@ public sealed partial class LinodeProvider
                 b.Block("lifecycle", lb =>
                 {
                     lb.RawAttribute("ignore_changes", "all");
+                    // Elastic data-bearing images (broken-out PG/Redis/MinIO) refuse destroy.
+                    if (isPersistent)
+                        lb.RawAttribute("prevent_destroy", "true");
                 });
             });
             instances.Line();

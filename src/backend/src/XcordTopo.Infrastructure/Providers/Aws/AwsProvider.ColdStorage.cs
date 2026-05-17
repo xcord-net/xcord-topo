@@ -18,6 +18,16 @@ public sealed partial class AwsProvider
         hcl.Block("resource \"aws_s3_bucket\" \"backups\"", b =>
         {
             b.RawAttribute("bucket", "var.coldstore_bucket");
+            // Defaults to false; spelled out to make the protection explicit. AWS will refuse
+            // to delete the bucket if it contains any objects.
+            b.RawAttribute("force_destroy", "false");
+            b.Line();
+            // Backups are the last line of defence for stateful infrastructure. Refuse
+            // destroy via terraform; intentional teardown requires removing this block first.
+            b.Block("lifecycle", lb =>
+            {
+                lb.RawAttribute("prevent_destroy", "true");
+            });
         });
         hcl.Line();
 

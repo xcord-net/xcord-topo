@@ -90,6 +90,25 @@ public static partial class TopologyHelpers
     }
 
     /// <summary>
+    /// True if any image co-located on the host declares a MountPath (data volume).
+    /// Data-bearing hosts (PG, Redis, MinIO, Registry) get terraform lifecycle protection
+    /// (prevent_destroy + delete_on_termination=false on root_block_device) so that
+    /// re-running a topology apply cannot accidentally wipe stateful infrastructure.
+    /// Caddy data is excluded -- TLS certs can be re-issued, so caddy hosts remain
+    /// freely destroyable.
+    /// </summary>
+    public static bool HasPersistentImage(Container host, ImagePluginRegistry registry)
+    {
+        var images = CollectImages(host);
+        foreach (var image in images)
+        {
+            var desc = registry.GetDescriptor(image);
+            if (desc?.MountPath != null) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Calculate RAM for a standalone Caddy container, excluding elastic images that break
     /// out into their own instances. Includes Caddy overhead + non-elastic co-located images.
     /// </summary>

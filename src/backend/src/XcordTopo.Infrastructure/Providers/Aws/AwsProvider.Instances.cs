@@ -42,6 +42,7 @@ public sealed partial class AwsProvider
             var ramRequired = TopologyHelpers.CalculateHostRam(entry.Host, _imageRegistry);
             var instanceType = SelectPlan(entry.Host.Name, ramRequired, infraSelections);
             var isReplicated = TopologyHelpers.IsReplicatedHost(entry);
+            var isPersistent = TopologyHelpers.HasPersistentImage(entry.Host, _imageRegistry);
 
             instances.Block($"resource \"aws_instance\" \"{resourceName}\"", b =>
             {
@@ -62,6 +63,10 @@ public sealed partial class AwsProvider
                     rb.Attribute("volume_size", plan?.DiskGb ?? 20);
                     rb.Attribute("volume_type", "gp3");
                     rb.RawAttribute("encrypted", "true");
+                    // Belt-and-suspenders with the prevent_destroy lifecycle below:
+                    // even if the VM is forced-replaced, the data volume survives.
+                    if (isPersistent)
+                        rb.RawAttribute("delete_on_termination", "false");
                 });
 
                 b.Block("metadata_options", mb =>
@@ -84,6 +89,11 @@ public sealed partial class AwsProvider
                 b.Block("lifecycle", lb =>
                 {
                     lb.RawAttribute("ignore_changes", "all");
+                    // Data-bearing hosts (PG, Redis, MinIO, Registry) cannot be destroyed
+                    // by a `terraform apply` that would remove them. Intentional teardown
+                    // requires removing this protection first.
+                    if (isPersistent)
+                        lb.RawAttribute("prevent_destroy", "true");
                 });
             });
             instances.Line();
@@ -142,6 +152,7 @@ public sealed partial class AwsProvider
             var ramRequired = desc?.MinRamMb ?? 256;
             var instanceType = SelectPlan(image.Name, ramRequired, infraSelections);
             var varName = $"{resourceName}_replicas";
+            var isPersistent = desc?.MountPath != null;
 
             instances.Block($"resource \"aws_instance\" \"{resourceName}\"", b =>
             {
@@ -158,6 +169,8 @@ public sealed partial class AwsProvider
                     rb.Attribute("volume_size", plan?.DiskGb ?? 20);
                     rb.Attribute("volume_type", "gp3");
                     rb.RawAttribute("encrypted", "true");
+                    if (isPersistent)
+                        rb.RawAttribute("delete_on_termination", "false");
                 });
                 b.Block("metadata_options", mb =>
                 {
@@ -176,6 +189,10 @@ public sealed partial class AwsProvider
                 b.Block("lifecycle", lb =>
                 {
                     lb.RawAttribute("ignore_changes", "all");
+                    // Elastic data-bearing images (broken-out PG/Redis/MinIO) keep their
+                    // root volumes and refuse destroy via terraform.
+                    if (isPersistent)
+                        lb.RawAttribute("prevent_destroy", "true");
                 });
             });
             instances.Line();

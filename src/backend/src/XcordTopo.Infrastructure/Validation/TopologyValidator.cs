@@ -32,6 +32,10 @@ public sealed partial class TopologyValidator(ProviderRegistry registry, ImagePl
     {
         if (string.IsNullOrWhiteSpace(topology.Name))
             items.Add(new(ValidationSeverity.Error, "Topology name is required.", Field: "name"));
+        else if (HclUnsafeRegex.IsMatch(topology.Name))
+            items.Add(new(ValidationSeverity.Error,
+                $"Topology name '{topology.Name}' contains unsafe characters for Terraform generation (\" \\ ${{ %{{).",
+                Field: "name"));
 
         if (topology.Containers.Count == 0)
             items.Add(new(ValidationSeverity.Error, "Topology must have at least one container."));
@@ -80,11 +84,21 @@ public sealed partial class TopologyValidator(ProviderRegistry registry, ImagePl
             foreach (var port in container.Ports)
                 allPorts.Add(port.Id);
 
+            if (!string.IsNullOrWhiteSpace(container.Name) && HclUnsafeRegex.IsMatch(container.Name))
+                items.Add(new(ValidationSeverity.Error,
+                    $"Container name '{container.Name}' contains unsafe characters for Terraform generation (\" \\ ${{ %{{).",
+                    NodeId: container.Id.ToString(), Field: "name"));
+
             foreach (var image in container.Images)
             {
                 allNodeIds.Add(image.Id);
                 foreach (var port in image.Ports)
                     allPorts.Add(port.Id);
+
+                if (!string.IsNullOrWhiteSpace(image.Name) && HclUnsafeRegex.IsMatch(image.Name))
+                    items.Add(new(ValidationSeverity.Error,
+                        $"Image name '{image.Name}' contains unsafe characters for Terraform generation (\" \\ ${{ %{{).",
+                        NodeId: image.Id.ToString(), Field: "name"));
 
                 if (image.Config.TryGetValue("replicas", out var replicas) && !string.IsNullOrEmpty(replicas))
                 {
@@ -504,4 +518,12 @@ public sealed partial class TopologyValidator(ProviderRegistry registry, ImagePl
 
     [GeneratedRegex(@"[;|&$`""\\<>(){}\[\]*?!#]")]
     private static partial Regex DangerousCharsPattern();
+
+    // Characters that break out of (or interpolate inside) quoted HCL string
+    // literals. Names are also escaped at generation time by HclBuilder; this
+    // check surfaces the problem to the user instead of silently mangling names.
+    private static readonly Regex HclUnsafeRegex = HclUnsafePattern();
+
+    [GeneratedRegex(@"[""\\]|\$\{|%\{")]
+    private static partial Regex HclUnsafePattern();
 }

@@ -38,6 +38,45 @@ public class TopologyValidatorTests
         Assert.Contains(errors, e => e.Contains("at least one container"));
     }
 
+    [Theory]
+    [InlineData("evil\"name")]
+    [InlineData("evil\\name")]
+    [InlineData("evil${var.x}")]
+    [InlineData("evil%{if}")]
+    public void Validate_TopologyNameWithHclUnsafeChars_ReturnsError(string name)
+    {
+        var topology = new Topology { Name = name };
+        topology.Containers.Add(new Container { Name = "host1", Kind = ContainerKind.Host, Width = 300, Height = 200 });
+
+        var errors = _validator.Validate(topology);
+
+        Assert.Contains(errors, e => e.Contains("unsafe characters"));
+    }
+
+    [Fact]
+    public void Validate_ContainerNameWithHclUnsafeChars_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        topology.Containers.Add(new Container { Name = "host${var.x}", Kind = ContainerKind.Host, Width = 300, Height = 200 });
+
+        var errors = _validator.Validate(topology);
+
+        Assert.Contains(errors, e => e.Contains("unsafe characters"));
+    }
+
+    [Fact]
+    public void Validate_ImageNameWithHclUnsafeChars_ReturnsError()
+    {
+        var topology = new Topology { Name = "Test" };
+        var container = new Container { Name = "host1", Kind = ContainerKind.Host, Width = 300, Height = 200 };
+        container.Images.Add(new Image { Name = "img\"quote" });
+        topology.Containers.Add(container);
+
+        var errors = _validator.Validate(topology);
+
+        Assert.Contains(errors, e => e.Contains("unsafe characters"));
+    }
+
     [Fact]
     public void Validate_ValidTopology_ReturnsNoErrors()
     {

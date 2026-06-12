@@ -92,7 +92,7 @@ public class TopologySerializationTests : IDisposable
 
         var result = await handler.Handle(new UpdateTopologyRequest(topology), CancellationToken.None);
 
-        var saved = result.Match(t => t, _ => null);
+        var saved = result.Match(Topology? (t) => t, _ => null);
         Assert.NotNull(saved);
 
         // Verify it persisted and can be read back
@@ -1409,7 +1409,7 @@ public class TopologySerializationTests : IDisposable
 
         var result = await handler.Handle(new UpdateTopologyRequest(topology), CancellationToken.None);
 
-        var saved = result.Match(t => t, _ => null);
+        var saved = result.Match(Topology? (t) => t, _ => null);
         Assert.NotNull(saved);
 
         // Reload from disk and verify plugin identity survived

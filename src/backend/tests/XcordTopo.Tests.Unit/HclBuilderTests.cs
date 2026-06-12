@@ -63,4 +63,65 @@ public class HclBuilderTests
 
         Assert.Contains("token = var.my_token", result);
     }
+
+    [Fact]
+    public void Attribute_ValueWithQuotesAndBackslashes_EscapesThem()
+    {
+        var builder = new HclBuilder();
+        builder.Attribute("name", "foo\"bar\\baz");
+
+        var result = builder.ToString();
+
+        Assert.Contains("name = \"foo\\\"bar\\\\baz\"", result);
+    }
+
+    [Fact]
+    public void Attribute_ValueWithTemplateSequences_EscapesInterpolation()
+    {
+        var builder = new HclBuilder();
+        builder.Attribute("name", "a${var.x}b%{if}c");
+
+        var result = builder.ToString();
+
+        Assert.Contains("name = \"a$${var.x}b%%{if}c\"", result);
+    }
+
+    [Fact]
+    public void ListAttribute_ItemsWithUnsafeChars_EscapesEachItem()
+    {
+        var builder = new HclBuilder();
+        builder.ListAttribute("tags", ["safe", "evil\"quote", "tpl${var.x}"]);
+
+        var result = builder.ToString();
+
+        Assert.Contains("tags = [\"safe\", \"evil\\\"quote\", \"tpl$${var.x}\"]", result);
+    }
+
+    [Fact]
+    public void Quoted_ProducesEscapedQuotedLiteralForRawAttributes()
+    {
+        var quoted = HclBuilder.Quoted("name\"with${bad}");
+
+        Assert.Equal("\"name\\\"with$${bad}\"", quoted);
+    }
+
+    [Fact]
+    public void HeredocAttribute_ContentContainingDelimiterLine_DoesNotTerminateEarly()
+    {
+        var builder = new HclBuilder();
+        builder.HeredocAttribute("user_data", "line1\nEOF\nline2");
+
+        var result = builder.ToString();
+        var lines = result.Split('\n');
+        var headerLine = lines.First(l => l.Contains("user_data = <<-"));
+        var delimiter = headerLine[(headerLine.IndexOf("<<-", StringComparison.Ordinal) + 3)..].Trim();
+
+        // A content line equal to the delimiter would terminate the heredoc
+        // early, silently truncating everything after it.
+        Assert.NotEqual("EOF", delimiter);
+        Assert.Contains("line2", result);
+        var terminatorIndex = Array.FindLastIndex(lines, l => l.Trim() == delimiter);
+        var line2Index = Array.FindIndex(lines, l => l.Trim() == "line2");
+        Assert.True(line2Index < terminatorIndex, "content after the colliding line must stay inside the heredoc");
+    }
 }

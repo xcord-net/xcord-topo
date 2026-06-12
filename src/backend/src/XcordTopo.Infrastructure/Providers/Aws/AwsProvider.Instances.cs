@@ -79,8 +79,8 @@ public sealed partial class AwsProvider
                 b.MapBlock("tags", tb =>
                 {
                     tb.RawAttribute("Name", isReplicated
-                        ? $"\"{topology.Name}-{entry.Host.Name}-${{count.index}}\""
-                        : $"\"{topology.Name}-{entry.Host.Name}\"");
+                        ? $"\"{HclBuilder.EscapeHcl(topology.Name)}-{HclBuilder.EscapeHcl(entry.Host.Name)}-${{count.index}}\""
+                        : HclBuilder.Quoted($"{topology.Name}-{entry.Host.Name}"));
                     tb.Attribute("Project", "xcord-topo");
                     tb.Attribute("Topology", topology.Name);
                 });
@@ -129,7 +129,7 @@ public sealed partial class AwsProvider
                 b.Line();
                 b.MapBlock("tags", tb =>
                 {
-                    tb.RawAttribute("Name", $"\"{topology.Name}-{pool.TierProfile.Name}-${{count.index}}\"");
+                    tb.RawAttribute("Name", $"\"{HclBuilder.EscapeHcl(topology.Name)}-{HclBuilder.EscapeHcl(pool.TierProfile.Name)}-${{count.index}}\"");
                     tb.Attribute("Project", "xcord-topo");
                     tb.Attribute("Topology", topology.Name);
                 });
@@ -180,7 +180,7 @@ public sealed partial class AwsProvider
                 b.Line();
                 b.MapBlock("tags", tb =>
                 {
-                    tb.RawAttribute("Name", $"\"{topology.Name}-{image.Name}-${{count.index}}\"");
+                    tb.RawAttribute("Name", $"\"{HclBuilder.EscapeHcl(topology.Name)}-{HclBuilder.EscapeHcl(image.Name)}-${{count.index}}\"");
                     tb.Attribute("Project", "xcord-topo");
                     tb.Attribute("Topology", topology.Name);
                 });

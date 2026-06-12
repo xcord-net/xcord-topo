@@ -26,9 +26,28 @@ public sealed class HclBuilder
         return this;
     }
 
+    /// <summary>
+    /// Escapes a value for use inside a quoted HCL string literal: backslashes,
+    /// double quotes, and the template sequences ${ / %{ (which Terraform would
+    /// otherwise evaluate as interpolation/directives).
+    /// </summary>
+    public static string EscapeHcl(string value) =>
+        value
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("${", "$${")
+            .Replace("%{", "%%{");
+
+    /// <summary>
+    /// Returns an escaped, double-quoted HCL string literal. Use this when
+    /// composing <see cref="RawAttribute"/> expressions that mix user-supplied
+    /// text with intentional Terraform interpolation.
+    /// </summary>
+    public static string Quoted(string value) => $"\"{EscapeHcl(value)}\"";
+
     public HclBuilder Attribute(string name, string value)
     {
-        Line($"{name} = \"{value}\"");
+        Line($"{name} = {Quoted(value)}");
         return this;
     }
 
@@ -62,17 +81,25 @@ public sealed class HclBuilder
 
     public HclBuilder ListAttribute(string name, IEnumerable<string> values)
     {
-        var items = string.Join(", ", values.Select(v => $"\"{v}\""));
+        var items = string.Join(", ", values.Select(Quoted));
         Line($"{name} = [{items}]");
         return this;
     }
 
     public HclBuilder HeredocAttribute(string name, string content)
     {
-        Line($"{name} = <<-EOF");
-        foreach (var line in content.Split('\n'))
+        var lines = content.Split('\n');
+
+        // A content line equal to the delimiter would terminate the heredoc
+        // early and silently truncate the rest; pick one that never collides.
+        var delimiter = "EOF";
+        while (lines.Any(l => l.Trim() == delimiter))
+            delimiter = "XCORD_" + delimiter;
+
+        Line($"{name} = <<-{delimiter}");
+        foreach (var line in lines)
             _sb.AppendLine($"{new string(' ', (_indent + 1) * 2)}{line}");
-        Line("EOF");
+        Line(delimiter);
         return this;
     }
 

@@ -1,11 +1,23 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Xunit;
 using XcordTopo.Infrastructure.Storage;
 using XcordTopo.Infrastructure.Terraform;
 using XcordTopo.Models;
 
 namespace XcordTopo.Tests.Integration.Terraform;
 
+/// <summary>
+/// Serializes execution of <see cref="ProcessTerraformExecutorTests"/>. xUnit
+/// runs collections in parallel by default, but this test class mutates the
+/// process-global PATH environment variable (try/finally restore) per test, so
+/// concurrent runs would corrupt each other's PATH. Grouping the class into a
+/// single-member collection forces xUnit to run its tests sequentially.
+/// </summary>
+[CollectionDefinition("ProcessTerraformExecutor")]
+public sealed class ProcessTerraformExecutorCollection { }
+
+[Collection("ProcessTerraformExecutor")]
 public sealed class ProcessTerraformExecutorTests : IDisposable
 {
     private readonly string _tempDir;
@@ -43,8 +55,8 @@ public sealed class ProcessTerraformExecutorTests : IDisposable
             var reader = await _executor.ExecuteAsync(
                 topologyId, TerraformCommand.Init, new List<string>(), ct: CancellationToken.None);
 
-            // Wait briefly for the background task to complete the channel
-            await Task.Delay(500);
+            // Wait for the background task to complete the channel
+            await _executor.Completion(topologyId);
 
             // The key assertion: GetOutputStream still returns the reader even after
             // the process has exited (the race condition fix)
@@ -93,7 +105,7 @@ public sealed class ProcessTerraformExecutorTests : IDisposable
                 topologyId, TerraformCommand.Init, new List<string>(), ct: CancellationToken.None);
 
             // Wait for background task to complete
-            await Task.Delay(500);
+            await _executor.Completion(topologyId);
 
             Assert.False(_executor.IsRunning(topologyId));
             _executor.ReleaseOutputStream(topologyId);
@@ -168,7 +180,7 @@ public sealed class ProcessTerraformExecutorTests : IDisposable
             await _executor.ExecuteAsync(
                 topologyId, TerraformCommand.Init, new List<string>(), ct: CancellationToken.None);
 
-            await Task.Delay(500);
+            await _executor.Completion(topologyId);
 
             _executor.ReleaseOutputStream(topologyId);
             _executor.ReleaseOutputStream(topologyId); // Should not throw

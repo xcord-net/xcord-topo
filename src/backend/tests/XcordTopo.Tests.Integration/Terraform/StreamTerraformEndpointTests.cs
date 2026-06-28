@@ -82,8 +82,16 @@ public sealed class StreamTerraformEndpointTests : IClassFixture<TopoWebApplicat
         // Should get 200 with "started" status
         Assert.Equal(HttpStatusCode.OK, execResponse.StatusCode);
 
-        // Give the background task time to fail
-        await Task.Delay(500);
+        // No delay needed here: ExecuteAsync registers the channel reader
+        // synchronously before returning, so by the time the POST responds the
+        // reader is already in _activeReaders and will remain there until
+        // ReleaseOutputStream is called (the background task intentionally
+        // does NOT remove it on completion). The subsequent stream GET will
+        // find the reader regardless of whether the background terraform
+        // process has exited yet, and ReadAsStringAsync below blocks until
+        // the server finishes streaming (which happens only after the
+        // background task completes the channel writer). That stream read is
+        // the real sync point.
 
         // Now connect to the SSE stream - the reader should still be available
         // even though the process already exited (race condition fix)

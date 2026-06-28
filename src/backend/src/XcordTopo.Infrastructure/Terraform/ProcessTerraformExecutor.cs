@@ -16,6 +16,7 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
     private readonly ILogger<ProcessTerraformExecutor> _logger;
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _runningProcesses = new();
     private readonly ConcurrentDictionary<Guid, ChannelReader<TerraformOutputLine>> _activeReaders = new();
+    private readonly ConcurrentDictionary<Guid, Task> _executingTasks = new();
 
     public ProcessTerraformExecutor(
         IHclFileManager hclFileManager,
@@ -72,7 +73,7 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
             }
         }
 
-        _ = Task.Run(async () =>
+        var execTask = Task.Run(async () =>
         {
             try
             {
@@ -141,13 +142,24 @@ public sealed class ProcessTerraformExecutor : ITerraformExecutor
             {
                 channel.Writer.Complete();
                 _runningProcesses.TryRemove(topologyId, out _);
+                _executingTasks.TryRemove(topologyId, out _);
                 // Don't remove reader here - the SSE stream handler needs to read buffered output
                 // even after the process exits. The reader is cleaned up by ConsumeOutputStream().
             }
         }, CancellationToken.None);
 
+        _executingTasks[topologyId] = execTask;
+
         return Task.FromResult<ChannelReader<TerraformOutputLine>>(channel.Reader);
     }
+
+    /// <summary>
+    /// Returns a Task that completes when the background execution for the given
+    /// topology finishes (or CompletedTask if none is/has been running). Lets
+    /// tests await real completion instead of sleeping.
+    /// </summary>
+    public Task Completion(Guid topologyId) =>
+        _executingTasks.TryGetValue(topologyId, out var t) ? t : Task.CompletedTask;
 
     public ChannelReader<TerraformOutputLine>? GetOutputStream(Guid topologyId) =>
         _activeReaders.GetValueOrDefault(topologyId);

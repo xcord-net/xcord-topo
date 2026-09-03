@@ -75,25 +75,70 @@ public sealed class TerraformValidateTests : IDisposable
             $"terraform validate failed for {fixtureName}:\n{validateOutput}");
     }
 
+    /// <summary>
+    /// Shared provider cache for `terraform init`.
+    ///
+    /// Every case here inits a brand new temp directory, so without a cache
+    /// each one re-downloads the full provider schema over the network. That
+    /// was the single most expensive thing in the whole test suite: three
+    /// cases, ~116s, essentially all of it download. Terraform reuses anything
+    /// already in TF_PLUGIN_CACHE_DIR, so the first init pays once and every
+    /// later init - in this run and in subsequent runs - links against it.
+    /// </summary>
+    private static readonly string PluginCacheDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".terraform.d", "plugin-cache");
+
+    /// <summary>
+    /// Terraform's plugin cache is explicitly not safe for concurrent use: two
+    /// inits populating it at once can leave a provider half-written and fail
+    /// the later one. The cases above are independent and xunit runs them in
+    /// parallel, so inits queue here. Only init touches the cache - validate
+    /// runs unguarded, so the serialisation costs a download, not a test run.
+    /// </summary>
+    private static readonly SemaphoreSlim InitGate = new(1, 1);
+
     private static async Task<(int ExitCode, string Output)> RunTerraform(string workDir, string args)
     {
-        var psi = new ProcessStartInfo
+        Directory.CreateDirectory(PluginCacheDir);
+
+        var isInit = args.StartsWith("init", StringComparison.Ordinal);
+        if (isInit)
         {
-            FileName = TerraformPath!,
-            Arguments = args,
-            WorkingDirectory = workDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+            await InitGate.WaitAsync();
+        }
 
-        using var process = Process.Start(psi)!;
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = TerraformPath!,
+                Arguments = args,
+                WorkingDirectory = workDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            psi.Environment["TF_PLUGIN_CACHE_DIR"] = PluginCacheDir;
+            // A cached provider is not recorded in the lock file the way a fresh
+            // download is; without this, init refuses to use the cache at all.
+            psi.Environment["TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE"] = "true";
 
-        return (process.ExitCode, $"{stdout}\n{stderr}".Trim());
+            using var process = Process.Start(psi)!;
+            var stdout = await process.StandardOutput.ReadToEndAsync();
+            var stderr = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            return (process.ExitCode, $"{stdout}\n{stderr}".Trim());
+        }
+        finally
+        {
+            if (isInit)
+            {
+                InitGate.Release();
+            }
+        }
     }
 
     private static Topology DeserializeFixture(string name)
